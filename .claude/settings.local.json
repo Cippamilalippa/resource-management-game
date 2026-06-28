@@ -13,7 +13,8 @@
       "Bash(grep -iA4 warning)",
       "Bash(pnpm format:check)",
       "Bash(pnpm format *)",
-      "Bash(pnpm bench *)"
+      "Bash(pnpm bench *)",
+      "Bash(pnpm typecheck *)"
     ]
   }
 }

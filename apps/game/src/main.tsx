@@ -48,12 +48,22 @@ async function boot(): Promise<void> {
   })
 
   // Fixed-tick sim driven by real frame time; render interpolates with `alpha`.
+  // Render is capped to 60fps; the sim stays decoupled via the scheduler.
+  const minFrameMs = 1000 / 60
   let last = performance.now()
+  let lastFrameAt = last
   let lastStatsAt = 0
   let frames = 0
   let fps = 0
 
   const frame = (now: number): void => {
+    // Skip this rAF callback if we're ahead of the 60fps budget (high-refresh displays).
+    if (now - lastFrameAt < minFrameMs) {
+      requestAnimationFrame(frame)
+      return
+    }
+    lastFrameAt = now
+
     const deltaMs = now - last
     last = now
     frames += 1
