@@ -1,0 +1,8 @@
+{
+  "id": "base",
+  "version": "0.1.0",
+  "name": "Factory — Base Game",
+  "dependencies": {},
+  "prototypes": ["prototypes/items.json", "prototypes/buildings.json"],
+  "scripts": ["scripts/main.ts"]
+}

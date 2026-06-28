@@ -1,0 +1,25 @@
+{
+  "name": "@factory/game",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "build:electron": "node scripts/build-electron.mjs",
+    "dev": "pnpm build:electron && concurrently -k -n vite,electron -c blue,magenta \"vite\" \"wait-on tcp:127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "build": "vite build && pnpm build:electron",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json"
+  },
+  "dependencies": {
+    "@factory/engine": "workspace:*",
+    "@factory/shared": "workspace:*",
+    "pixi.js": "8.19.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "electron": "42.5.0",
+    "electron-builder": "26.15.3"
+  }
+}

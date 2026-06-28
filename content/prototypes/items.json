@@ -1,0 +1,14 @@
+[
+  {
+    "id": "item.placeholder_a",
+    "type": "item",
+    "name": "Placeholder Item A",
+    "stackSize": 100
+  },
+  {
+    "id": "item.placeholder_b",
+    "type": "item",
+    "name": "Placeholder Item B",
+    "stackSize": 50
+  }
+]

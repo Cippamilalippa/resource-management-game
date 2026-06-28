@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --version)",
+      "Bash(npm view *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm -r typecheck)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm headless *)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm build:electron)",
+      "Bash(pnpm exec *)",
+      "Bash(grep -iA4 warning)",
+      "Bash(pnpm format:check)",
+      "Bash(pnpm format *)"
+    ]
+  }
+}

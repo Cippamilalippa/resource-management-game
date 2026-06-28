@@ -1,0 +1,24 @@
+{
+  "name": "@factory/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./core": "./core/index.ts",
+    "./data": "./data/index.ts",
+    "./scripting": "./scripting/index.ts",
+    "./render": "./render/index.ts",
+    "./persistence": "./persistence/index.ts",
+    "./modloader": "./modloader/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@factory/shared": "workspace:*",
+    "bitecs": "0.4.0",
+    "pixi.js": "8.19.0",
+    "zod": "4.4.3"
+  }
+}

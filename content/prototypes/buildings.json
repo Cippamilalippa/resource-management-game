@@ -1,0 +1,16 @@
+[
+  {
+    "id": "building.placeholder_node",
+    "type": "building",
+    "name": "Placeholder Node",
+    "size": { "w": 1, "h": 1 },
+    "color": 65416
+  },
+  {
+    "id": "building.placeholder_hub",
+    "type": "building",
+    "name": "Placeholder Hub",
+    "size": { "w": 2, "h": 2 },
+    "color": 16755200
+  }
+]
