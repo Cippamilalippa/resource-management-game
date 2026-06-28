@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createGameWorld, spawnEntity, Scheduler, counterSystem } from './index.ts'
+import { createGameWorld, spawnEntity, Scheduler, counterSystem } from '../core/index.ts'
 import { hashState } from '../persistence/index.ts'
 
 /** Build a world and populate it deterministically from its seeded RNG. */

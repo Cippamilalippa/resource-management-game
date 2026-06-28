@@ -13,6 +13,7 @@
     "headless": "pnpm --filter @factory/headless start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench": "vitest bench --run",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",

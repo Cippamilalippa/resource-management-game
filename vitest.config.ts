@@ -2,7 +2,8 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
-    include: ['packages/**/*.test.ts', 'apps/**/*.test.ts', 'content/**/*.test.ts'],
+    // Tests live in a `tests/` folder within each package/app, never beside source.
+    include: ['packages/**/tests/**/*.test.ts', 'apps/**/tests/**/*.test.ts'],
     environment: 'node',
   },
 })

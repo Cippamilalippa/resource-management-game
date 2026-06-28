@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { entityCount } from '@factory/engine/core'
 import { hashState } from '@factory/engine/persistence'
-import { bootstrapSim } from './bootstrap.ts'
+import { bootstrapSim } from '../bootstrap.ts'
 
 describe('headless reproducibility', () => {
   it('loads the base game (/content) through the mod loader path', async () => {

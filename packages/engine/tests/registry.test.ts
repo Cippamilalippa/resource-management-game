@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PrototypeRegistry, PrototypeError } from './index.ts'
+import { PrototypeRegistry, PrototypeError } from '../data/index.ts'
 
 describe('PrototypeRegistry', () => {
   it('accepts a valid prototype and looks it up', () => {

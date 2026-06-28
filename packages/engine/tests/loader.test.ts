@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PrototypeRegistry } from '../data/index.ts'
-import { resolveLoadOrder, loadMods, type DiscoveredMod } from './index.ts'
-import type { FileSource } from './index.ts'
+import { resolveLoadOrder, loadMods, type DiscoveredMod } from '../modloader/index.ts'
+import type { FileSource } from '../modloader/index.ts'
 
 /** An in-memory FileSource so loader tests need no disk. */
 function memSource(files: Record<string, string>): FileSource {
