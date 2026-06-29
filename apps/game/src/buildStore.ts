@@ -9,19 +9,23 @@
 export interface BuildItem {
   readonly id: string
   readonly name: string
-  readonly kind: 'building' | 'belt' | 'port' | 'splitter'
+  readonly kind: 'building' | 'belt' | 'port' | 'splitter' | 'producer'
   /** Which port a 'port' tool places; undefined for other kinds. */
   readonly port?: 'input' | 'output'
   readonly w: number
   readonly h: number
   /** Track/footprint color. */
   readonly color: number
-  /** Color of the item an output port extracts (output ports only; ignored otherwise). */
+  /** Color of the item an output port extracts / a producer makes (ignored otherwise). */
   readonly itemColor: number
   /** Ticks between extractions for an output port. */
   readonly spawnEvery: number
   /** Ticks between item advances for a belt. */
   readonly moveEvery: number
+  /** Ticks between items a production building makes (producers only). */
+  readonly produceEvery: number
+  /** Internal store size of a production building (producers only). */
+  readonly storage: number
 }
 
 export interface BuildState {

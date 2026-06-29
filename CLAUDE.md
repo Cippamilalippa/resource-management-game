@@ -79,10 +79,10 @@ not an afterthought.
 
 - **Engine knows nothing game-specific.** No "food"/"tools"/belts/cities in
   `packages/engine`. Game concepts arrive only as data/scripts via the prototype
-  registry + mod loader. The base game in `/content` is "mod zero" — loaded through
-  the same path a third-party mod uses; never special-case it.
+  registry + mod loader. The base game in `mods/base` is "mod zero" — discovered and
+  loaded by the same `/mods` directory scan a third-party mod uses; never special-case it.
 - **Determinism.** Sim code uses the seeded RNG only — no `Math.random`, no
-  `Date.now`/`Date` in `engine/core` or `content/scripts` (ESLint enforces this).
+  `Date.now`/`Date` in `engine/core` or `mods/**/scripts` (ESLint enforces this).
 - **Render/UI never mutate sim state.** One-way: sim → render.
 - **Fixed timestep, integer grid.** The sim advances in fixed steps decoupled from
   frame rate; render interpolates with the scheduler `alpha`. No float positions.

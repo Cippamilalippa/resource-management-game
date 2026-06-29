@@ -23,9 +23,11 @@ export function BuildBar(): React.JSX.Element | null {
         ? 'Click a belt tile to attach this port'
         : selected?.kind === 'splitter'
           ? 'Click a belt tile to place this splitter'
-          : selected
-            ? 'Click a tile to place'
-            : 'Pick a building to build'
+          : selected?.kind === 'producer'
+            ? 'Click a belt tile to place this building'
+            : selected
+              ? 'Click a tile to place'
+              : 'Pick a building to build'
 
   return (
     <div className="buildbar">

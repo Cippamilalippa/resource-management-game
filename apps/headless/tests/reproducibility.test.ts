@@ -4,7 +4,7 @@ import { hashState } from '@factory/engine/persistence'
 import { bootstrapSim } from '../bootstrap.ts'
 
 describe('headless reproducibility', () => {
-  it('loads the base game (/content) through the mod loader path', async () => {
+  it('discovers and loads the base game (mods/base) through the mod loader path', async () => {
     const { load, registry } = await bootstrapSim(1)
     expect(load.order.map((m) => m.id)).toContain('base')
     expect(load.prototypeCount).toBeGreaterThan(0)

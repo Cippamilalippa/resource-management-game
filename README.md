@@ -32,8 +32,9 @@ packages/
     render/      PixiJS renderer: reads sim state, interpolates, draws; never writes
     persistence/ deterministic (de)serialization + FNV-1a state hashing
     modloader/   mod manifest shape + dependency resolution + data merge
-content/       THE BASE GAME = "mod zero" — same shape as a mod (manifest + prototypes + scripts)
-mods/          third-party mods (same shape as /content) — empty for now
+mods/          ALL game content, discovered by scanning this dir (no privileged path)
+  base/        THE BASE GAME = "mod zero" — same shape as any mod (manifest + prototypes + scripts)
+  …/           third-party mods drop in here, loaded the exact same way
 apps/
   game/        Electron + Pixi + React shell wiring everything together
   headless/    sim-only runner for tests / balancing (no render)
@@ -43,8 +44,10 @@ apps/
 
 The engine has **no concept of "food", "tools", belts or cities**. All game content
 arrives as data + scripts through the prototype registry and mod loader. The base game
-in `/content` is loaded as **"mod zero"** through the _same_ pipeline a third-party mod
-uses — there is no special-cased path. Whatever the base game can do, a modder can too.
+lives in `mods/base` and is **discovered and loaded as "mod zero"** by the _same_
+directory scan + pipeline a third-party mod uses — there is no special-cased path. If
+mod discovery ever breaks, the base game won't boot, so the mod system is exercised at
+all times. Whatever the base game can do, a modder can too.
 
 Cross-module imports inside the engine go through each module's public `index.ts`
 barrel (e.g. `@factory/engine/core`) — never by reaching into internals.
@@ -58,7 +61,7 @@ barrel (e.g. `@factory/engine/core`) — never by reaching into internals.
 - **Integer tile grid.** All world coordinates are integers (`Int32Array`). No
   continuous/float positions in the sim.
 - **Determinism.** Sim logic uses only the seeded RNG — no `Math.random`, no `Date.now`
-  (enforced by ESLint in `engine/core` + `content/scripts`). This protects save/load and
+  (enforced by ESLint in `engine/core` + `mods/**/scripts`). This protects save/load and
   a possible future multiplayer.
 - **Headless-able.** The sim runs with no Pixi and no Electron (see `apps/headless`).
 - **Allocation-conscious hot path.** Components are Structure-of-Arrays typed arrays via
@@ -74,6 +77,7 @@ pnpm workspaces · ESLint + Prettier. See per-package `package.json` for pinned 
 The renderer is a normal Vite app (`apps/game/index.html` → `src/main.tsx`). The Electron
 main + preload are TypeScript, bundled to CommonJS in `dist-electron/` by esbuild
 (`scripts/build-electron.mjs`). `pnpm dev` builds those, starts Vite, waits for the dev
-server, then launches Electron pointed at it. The Electron **main** process loads
-`/content` through the real mod loader (it has filesystem access) and hands the merged
-prototypes to the sandboxed renderer over a `contextBridge` IPC bridge.
+server, then launches Electron pointed at it. The Electron **main** process scans `/mods`
+and loads every discovered mod (the base game included) through the real mod loader (it
+has filesystem access) and hands the merged prototypes to the sandboxed renderer over a
+`contextBridge` IPC bridge.

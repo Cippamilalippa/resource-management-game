@@ -35,7 +35,7 @@ export default tseslint.config(
   // The seeded-RNG / determinism rule: the engine sim must never touch wall-clock
   // time or the global PRNG. Render/UI code is exempt (it is allowed to read time).
   {
-    files: ['packages/engine/core/**/*.ts', 'content/scripts/**/*.ts'],
+    files: ['packages/engine/core/**/*.ts', 'mods/**/scripts/**/*.ts'],
     rules: {
       'no-restricted-properties': [
         'error',

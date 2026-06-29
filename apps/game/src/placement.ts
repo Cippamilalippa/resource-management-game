@@ -5,6 +5,7 @@ import {
   enqueuePlaceBuilding,
   enqueuePlaceBelt,
   enqueuePlacePort,
+  enqueuePlaceProducer,
   enqueuePlaceSplitter,
   projectBelt,
 } from './gameLogic.ts'
@@ -27,8 +28,13 @@ export function installPlacement(renderer: Renderer, world: GameWorld): void {
       renderer.setGhost(null)
       return
     }
-    // Buildings, ports and splitters all place on a single tile, so preview a footprint rect.
-    if (item.kind === 'building' || item.kind === 'port' || item.kind === 'splitter') {
+    // Buildings, ports, splitters and producers all place on a single tile — preview a footprint rect.
+    if (
+      item.kind === 'building' ||
+      item.kind === 'port' ||
+      item.kind === 'splitter' ||
+      item.kind === 'producer'
+    ) {
       renderer.setGhost({
         kind: 'rect',
         x: tile.x,
@@ -90,6 +96,18 @@ export function installPlacement(renderer: Renderer, world: GameWorld): void {
     // Splitter: also drops onto the belt tile under the cursor (ignored off-belt).
     if (item.kind === 'splitter') {
       enqueuePlaceSplitter(world, { x: tile.x, y: tile.y, color: item.color })
+      return
+    }
+    // Producer (farm/orchard): drops onto the belt tile under the cursor (ignored off-belt).
+    if (item.kind === 'producer') {
+      enqueuePlaceProducer(world, {
+        x: tile.x,
+        y: tile.y,
+        color: item.color,
+        itemColor: item.itemColor,
+        produceEvery: item.produceEvery,
+        storageCap: item.storage,
+      })
       return
     }
     // Belt: place the dragged segment, ignoring a zero-length (no-drag) gesture.

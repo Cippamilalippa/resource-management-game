@@ -36,6 +36,8 @@ const KIND_PLAIN = 0
 const KIND_OUTPUT = 1
 const KIND_INPUT = 2
 const KIND_SPLITTER = 3
+/** A production building (farm/orchard): produces items into an internal store the belt drains. */
+const KIND_PRODUCER = 4
 
 /** No item / no neighbour sentinel for the Int32 slot and neighbour arrays. */
 const NONE = -1
@@ -58,6 +60,7 @@ const SHAPE_CIRCLE = 1
 const SHAPE_BELT_ARROW = 2
 const SHAPE_PORT_ARROW = 3
 const SHAPE_SPLITTER = 4
+const SHAPE_PRODUCER = 5
 function sprite(shape: number, orient: number): number {
   return shape * 4 + orient
 }
@@ -84,12 +87,16 @@ export interface BeltGrid {
   slot: Int32Array
   /** Direction the current occupant entered with, or NONE for output-spawned items. */
   inDir: Int8Array
-  /** Output tiles: ticks since the port last extracted. */
+  /** Output/producer tiles: ticks since the port last extracted / the building last produced. */
   portTimer: Int32Array
-  /** Output tiles: extract a fresh item every N ticks. */
+  /** Output/producer tiles: extract / produce a fresh item every N ticks. */
   portEvery: Int32Array
-  /** Output tiles: colour of the extracted item. */
+  /** Output/producer tiles: colour of the extracted / produced item. */
   portColor: Int32Array
+  /** Producer tiles: items currently held in the internal store (0..storageCap). */
+  storage: Int32Array
+  /** Producer tiles: maximum items the internal store can hold. */
+  storageCap: Int32Array
   /** Splitter tiles: round-robin cursor (next direction to try). */
   rr: Int8Array
   /** Track entity id drawn under each tile (re-oriented when a tile's facing changes). */
@@ -137,6 +144,8 @@ export function createBeltGrid(moveEvery: number): BeltGrid {
     portTimer: new Int32Array(cap),
     portEvery: new Int32Array(cap),
     portColor: new Int32Array(cap),
+    storage: new Int32Array(cap),
+    storageCap: new Int32Array(cap),
     rr: new Int8Array(cap),
     trackEid: new Int32Array(cap).fill(NONE),
     nbr: new Int32Array(cap * 4).fill(NONE),
@@ -197,6 +206,8 @@ function ensureCapacity(g: BeltGrid, need: number): void {
   g.portTimer = grow(g.portTimer, next, 0)
   g.portEvery = grow(g.portEvery, next, 0)
   g.portColor = grow(g.portColor, next, 0)
+  g.storage = grow(g.storage, next, 0)
+  g.storageCap = grow(g.storageCap, next, 0)
   g.rr = grow8(g.rr, next, 0)
   g.trackEid = grow(g.trackEid, next, NONE)
   g.nbr = grow(g.nbr, next * 4, NONE)
@@ -496,7 +507,43 @@ function extractFromOutputs(gw: GameWorld, g: BeltGrid): void {
   }
 }
 
-/** Tick the whole grid: move items on the move-cycle, then let outputs feed in fresh ones. */
+/**
+ * Production buildings (farm, orchard) generate one item every `portEvery` ticks into an
+ * internal store capped at `storageCap`, then drain that store onto their own belt tile
+ * whenever it is free. The belt drains the store; if the store is empty a freshly produced
+ * item passes straight through (production runs before the drain in the same tick, so an
+ * empty store filled this tick is emitted at once); if the store is empty and nothing was
+ * produced this tick, nothing is emitted. A full store discards further production. Runs
+ * every tick, independent of the move cadence; allocation-free bar the occasional spawn.
+ */
+function updateProducers(gw: GameWorld, g: BeltGrid): void {
+  const { kind, slot, portTimer, portEvery, portColor, storage, storageCap } = g
+  const n = g.count
+  for (let t = 0; t < n; t++) {
+    if (kind[t] !== KIND_PRODUCER) continue
+    // 1. Produce into the internal store on the production cadence (overflow when full is dropped).
+    const timer = portTimer[t]! + 1
+    if (timer >= portEvery[t]!) {
+      portTimer[t] = 0
+      if (storage[t]! < storageCap[t]!) storage[t] = storage[t]! + 1
+    } else {
+      portTimer[t] = timer
+    }
+    // 2. Drain one item from the store onto our own tile when it is free.
+    if (slot[t] !== NONE || storage[t]! === 0) continue
+    storage[t] = storage[t]! - 1
+    slot[t] = spawnEntity(gw, {
+      pos: { x: g.tx[t]!, y: g.ty[t]! },
+      sprite: sprite(SHAPE_CIRCLE, 0),
+      color: portColor[t]!,
+      width: 1,
+      height: 1,
+    })
+    g.inDir[t] = NONE
+  }
+}
+
+/** Tick the whole grid: move items on the move-cycle, then let outputs and producers feed in fresh ones. */
 function updateBelts(gw: GameWorld, g: BeltGrid): void {
   if (++g.moveTimer >= g.moveEvery) {
     g.moveTimer = 0
@@ -504,6 +551,7 @@ function updateBelts(gw: GameWorld, g: BeltGrid): void {
     g.moveCount++
   }
   extractFromOutputs(gw, g)
+  updateProducers(gw, g)
 }
 
 // --- Game state -------------------------------------------------------------
@@ -581,7 +629,31 @@ interface PlaceSplitterCommand {
   readonly color: number
 }
 
-type GameCommand = PlaceBuildingCommand | PlaceBeltCommand | PlacePortCommand | PlaceSplitterCommand
+/**
+ * Place a production building (farm/orchard) on the belt tile at (x, y). The building
+ * produces one item of `itemColor` every `produceEvery` ticks into an internal store of
+ * `storageCap`, which the belt then drains. A producer off any belt is dropped.
+ */
+interface PlaceProducerCommand {
+  readonly type: 'place_producer'
+  readonly x: number
+  readonly y: number
+  /** Color of the production building's footprint. */
+  readonly color: number
+  /** Color of the produced item. */
+  readonly itemColor: number
+  /** Produce a fresh item every N ticks. */
+  readonly produceEvery: number
+  /** Maximum items the internal store can hold. */
+  readonly storageCap: number
+}
+
+type GameCommand =
+  | PlaceBuildingCommand
+  | PlaceBeltCommand
+  | PlacePortCommand
+  | PlaceSplitterCommand
+  | PlaceProducerCommand
 
 /** Queue a building placement (applied next tick). */
 export function enqueuePlaceBuilding(gw: GameWorld, cmd: Omit<PlaceBuildingCommand, 'type'>): void {
@@ -601,6 +673,11 @@ export function enqueuePlacePort(gw: GameWorld, cmd: Omit<PlacePortCommand, 'typ
 /** Queue a splitter placement onto a belt tile (applied next tick). */
 export function enqueuePlaceSplitter(gw: GameWorld, cmd: Omit<PlaceSplitterCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'place_splitter', ...cmd })
+}
+
+/** Queue a production building placement onto a belt tile (applied next tick). */
+export function enqueuePlaceProducer(gw: GameWorld, cmd: Omit<PlaceProducerCommand, 'type'>): void {
+  enqueueCommand(gw, { type: 'place_producer', ...cmd })
 }
 
 function applyCommand(gw: GameWorld, state: GameState, cmd: GameCommand): void {
@@ -655,6 +732,25 @@ function applyCommand(gw: GameWorld, state: GameState, cmd: GameCommand): void {
       spawnEntity(gw, {
         pos: { x: cmd.x, y: cmd.y },
         sprite: sprite(SHAPE_SPLITTER, g.face[t]!),
+        color: cmd.color,
+        width: 1,
+        height: 1,
+      })
+      return
+    }
+    case 'place_producer': {
+      const t = tileAt(g, cmd.x, cmd.y)
+      if (t === NONE) return // a producer must sit on a belt; off-belt placements are dropped.
+      g.kind[t] = KIND_PRODUCER
+      g.portEvery[t] = Math.max(1, cmd.produceEvery)
+      g.portColor[t] = cmd.itemColor
+      g.portTimer[t] = 0
+      g.storage[t] = 0
+      g.storageCap[t] = Math.max(0, cmd.storageCap)
+      rebuildTopology(g)
+      spawnEntity(gw, {
+        pos: { x: cmd.x, y: cmd.y },
+        sprite: sprite(SHAPE_PRODUCER, g.face[t]!),
         color: cmd.color,
         width: 1,
         height: 1,

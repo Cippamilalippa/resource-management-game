@@ -47,6 +47,26 @@
     "color": 14501444
   },
   {
+    "id": "building.farm",
+    "type": "producer",
+    "name": "Farm",
+    "size": { "w": 1, "h": 1 },
+    "color": 14140675,
+    "itemColor": 16182665,
+    "produceEvery": 30,
+    "storage": 100
+  },
+  {
+    "id": "building.orchard",
+    "type": "producer",
+    "name": "Orchard",
+    "size": { "w": 1, "h": 1 },
+    "color": 5025616,
+    "itemColor": 16746024,
+    "produceEvery": 30,
+    "storage": 100
+  },
+  {
     "id": "building.splitter",
     "type": "splitter",
     "name": "Splitter",

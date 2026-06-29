@@ -25,7 +25,12 @@
       "Bash(perl -0pi -e 's/  if \\\\\\(g\\\\.kind\\\\[s\\\\] === KIND_SPLITTER && hasForwardEdge\\\\\\(g, t, s\\\\\\)\\\\\\) return false\\\\n//' apps/headless/gameLogic.ts)",
       "Bash(perl -0pi -e 's/      if \\\\\\(nb !== NONE && !hasForwardEdge\\\\\\(g, nb, t\\\\\\)\\\\\\) c\\\\+\\\\+/      if \\(nb !== NONE\\) c++/' apps/headless/gameLogic.ts)",
       "Bash(cp /tmp/gl.bak apps/headless/gameLogic.ts)",
-      "Bash(pnpm format *)"
+      "Bash(pnpm format *)",
+      "Bash(echo \"===persistence serialize/hash===\"; sed -n '1,140p' packages/engine/persistence/*.ts 2>/dev/null | grep -n \"sprite\\\\|width\\\\|height\\\\|color\\\\|prevX\\\\|function serialize\\\\|function hashState\\\\|Position\\\\|Renderable\" | head -40)",
+      "Bash(git mv *)"
+    ],
+    "additionalDirectories": [
+      "/Users/carlomartini/Progetti/resource-management-game/packages/engine/persistence"
     ]
   }
 }

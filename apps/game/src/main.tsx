@@ -25,6 +25,8 @@ function toolKind(type: string): { kind: BuildItem['kind']; port?: 'input' | 'ou
       return { kind: 'belt' }
     case 'splitter':
       return { kind: 'splitter' }
+    case 'producer':
+      return { kind: 'producer' }
     case 'output':
       return { kind: 'port', port: 'output' }
     case 'input':
@@ -52,6 +54,8 @@ function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
       itemColor: num(p, 'itemColor', 0xffffff),
       spawnEvery: num(p, 'spawnEvery', 20),
       moveEvery: num(p, 'moveEvery', 1),
+      produceEvery: num(p, 'produceEvery', 30),
+      storage: num(p, 'storage', 100),
     })
   }
   return items
