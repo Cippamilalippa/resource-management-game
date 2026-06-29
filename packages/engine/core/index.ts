@@ -18,7 +18,9 @@ export {
   despawnEntity,
   renderableEntities,
   entityCount,
+  enqueueCommand,
   type GameWorld,
+  type Command,
 } from './world.ts'
 export { Scheduler } from './scheduler.ts'
 export { counterSystem, type System } from './systems.ts'

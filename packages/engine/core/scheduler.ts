@@ -1,6 +1,5 @@
 import { DEFAULT_TICK_RATE } from './constants.ts'
 import type { GameWorld } from './world.ts'
-import { renderableEntities } from './world.ts'
 import type { System } from './systems.ts'
 
 /**
@@ -30,12 +29,17 @@ export class Scheduler {
   }
 
   /**
-   * Advance one logical tick: snapshot positions for interpolation, run every
-   * system in order, then bump the tick counter. Call this directly from headless
-   * / tests where there is no real clock.
+   * Advance one logical tick: run every system in order, then bump the tick counter.
+   * Call this directly from headless / tests where there is no real clock.
+   *
+   * Note on render interpolation: the engine deliberately does NOT auto-snapshot
+   * `Position.prevX/prevY` here. A per-tick snapshot only smooths motion that changes
+   * a little *every* tick; the base game's belts instead step a whole tile every
+   * `moveEvery` ticks, so a system that moves an entity owns its `prev*` fields — it
+   * sets them to the pre-move tile and the renderer interpolates across the move with a
+   * matching alpha (see `beltMoveAlpha`). `prev*` are render-only (never hashed).
    */
   tick(gw: GameWorld): void {
-    snapshotPositions(gw)
     for (const system of this.#systems) {
       system(gw)
     }
@@ -67,16 +71,5 @@ export class Scheduler {
       this.#accumulatorMs = this.#accumulatorMs % this.fixedDtMs
     }
     return this.#accumulatorMs / this.fixedDtMs
-  }
-}
-
-/** Copy current tile positions into the prev* arrays so render can interpolate. */
-function snapshotPositions(gw: GameWorld): void {
-  const { Position } = gw.components
-  const ents = renderableEntities(gw)
-  for (let i = 0; i < ents.length; i++) {
-    const eid = ents[i]!
-    Position.prevX[eid] = Position.x[eid]!
-    Position.prevY[eid] = Position.y[eid]!
   }
 }

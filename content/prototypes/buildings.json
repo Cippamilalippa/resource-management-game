@@ -1,16 +1,40 @@
 [
   {
-    "id": "building.placeholder_node",
+    "id": "building.village",
     "type": "building",
-    "name": "Placeholder Node",
-    "size": { "w": 1, "h": 1 },
-    "color": 65416
+    "name": "Village",
+    "size": { "w": 2, "h": 2 },
+    "color": 11887901
   },
   {
-    "id": "building.placeholder_hub",
-    "type": "building",
-    "name": "Placeholder Hub",
-    "size": { "w": 2, "h": 2 },
-    "color": 16755200
+    "id": "building.belt",
+    "type": "belt",
+    "name": "Conveyor Belt",
+    "size": { "w": 1, "h": 1 },
+    "color": 4407359,
+    "moveEvery": 60
+  },
+  {
+    "id": "building.output",
+    "type": "output",
+    "name": "Output",
+    "size": { "w": 1, "h": 1 },
+    "color": 4513092,
+    "itemColor": 16746024,
+    "spawnEvery": 20
+  },
+  {
+    "id": "building.input",
+    "type": "input",
+    "name": "Input",
+    "size": { "w": 1, "h": 1 },
+    "color": 14501444
+  },
+  {
+    "id": "building.splitter",
+    "type": "splitter",
+    "name": "Splitter",
+    "size": { "w": 1, "h": 1 },
+    "color": 10185235
   }
 ]

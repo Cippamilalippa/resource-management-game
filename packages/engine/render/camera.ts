@@ -1,5 +1,5 @@
 import type { Container } from 'pixi.js'
-import { clamp } from '@factory/shared'
+import { clamp, type GridCoord } from '@factory/shared'
 
 /**
  * Pan/zoom camera that transforms a single "world" container. Purely a view
@@ -34,6 +34,16 @@ export class Camera {
     this.world.y = focalY - (focalY - this.world.y) * applied
     this.#zoom = next
     this.world.scale.set(this.#zoom)
+  }
+
+  /**
+   * Convert a canvas-space pixel (e.g. a pointer position relative to the canvas)
+   * into the integer tile under it. A pure view→world read; never mutates the sim.
+   */
+  screenToTile(screenX: number, screenY: number, tileSize: number): GridCoord {
+    const worldX = (screenX - this.world.x) / this.#zoom
+    const worldY = (screenY - this.world.y) / this.#zoom
+    return { x: Math.floor(worldX / tileSize), y: Math.floor(worldY / tileSize) }
   }
 
   /** Center the camera on a world-space pixel coordinate. */

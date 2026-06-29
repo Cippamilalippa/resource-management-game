@@ -3,6 +3,6 @@
   "version": "0.1.0",
   "name": "Factory — Base Game",
   "dependencies": {},
-  "prototypes": ["prototypes/items.json", "prototypes/buildings.json"],
+  "prototypes": ["prototypes/items.json", "prototypes/buildings.json", "prototypes/resources.json"],
   "scripts": ["scripts/main.ts"]
 }

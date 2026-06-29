@@ -1,14 +1,8 @@
 [
   {
-    "id": "item.placeholder_a",
+    "id": "item.apple",
     "type": "item",
-    "name": "Placeholder Item A",
+    "name": "Apple",
     "stackSize": 100
-  },
-  {
-    "id": "item.placeholder_b",
-    "type": "item",
-    "name": "Placeholder Item B",
-    "stackSize": 50
   }
 ]

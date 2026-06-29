@@ -14,7 +14,9 @@
       "Bash(pnpm format:check)",
       "Bash(pnpm format *)",
       "Bash(pnpm bench *)",
-      "Bash(pnpm typecheck *)"
+      "Bash(pnpm typecheck *)",
+      "Bash(python3 -c ' *)",
+      "Bash(perl -0pi -e 's/applyCommand\\\\\\(gw, state, cmds\\\\[i\\\\] as GameCommand\\\\\\)/applyCommand\\(gw, state, cmds[i] as unknown as GameCommand\\)/' '$f')"
     ]
   }
 }

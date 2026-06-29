@@ -77,3 +77,66 @@ body {
   color: #6b7180;
   font-size: 12px;
 }
+
+/* Bottom build toolbar. */
+.buildbar {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.buildbar-tools {
+  display: flex;
+  gap: 8px;
+  background: rgba(20, 23, 33, 0.85);
+  border: 1px solid #2a2e3a;
+  border-radius: 10px;
+  padding: 8px;
+  backdrop-filter: blur(6px);
+}
+
+.buildbar .tool {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(42, 46, 58, 0.6);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #e6e8ef;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.buildbar .tool:hover {
+  background: rgba(60, 66, 82, 0.7);
+}
+
+.buildbar .tool.selected {
+  border-color: #4fa8ff;
+  background: rgba(79, 168, 255, 0.18);
+}
+
+.buildbar .swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.buildbar-hint {
+  font-size: 12px;
+  color: #8a90a2;
+  background: rgba(20, 23, 33, 0.7);
+  padding: 3px 10px;
+  border-radius: 6px;
+}

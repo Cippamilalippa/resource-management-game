@@ -5,6 +5,19 @@ import { EventBus } from './eventBus.ts'
 import { SeededRng } from './rng.ts'
 
 /**
+ * A deferred player/UI intent, applied by a system at the next tick boundary
+ * rather than mutating sim state immediately. The engine treats commands as
+ * opaque (`type` + arbitrary payload); content/mods define and interpret them.
+ * This is what lets the UI request changes (e.g. "place a building") without
+ * ever touching the component arrays directly, keeping the sim the sole writer
+ * and the whole flow deterministic.
+ */
+export interface Command {
+  readonly type: string
+  readonly [key: string]: unknown
+}
+
+/**
  * A GameWorld bundles everything one simulation instance needs. It is fully
  * self-contained (its own component stores, RNG and event bus) so that creating
  * a second world — in a test, a headless balance run, etc. — never aliases the
@@ -23,6 +36,11 @@ export interface GameWorld {
   readonly seed: number
   /** Logical tick counter; advanced by the scheduler. */
   tick: number
+  /**
+   * Pending player/UI commands, drained by a system each tick. The engine never
+   * interprets these; a content-supplied system reads and applies them.
+   */
+  readonly commands: Command[]
   /** Lightweight stats, handy for tests and the debug overlay. */
   readonly stats: { systemRuns: number }
 }
@@ -36,8 +54,19 @@ export function createGameWorld(seed: number): GameWorld {
     events: new EventBus(),
     seed: seed >>> 0,
     tick: 0,
+    commands: [],
     stats: { systemRuns: 0 },
   }
+}
+
+/**
+ * Submit a deferred command. The sanctioned way for UI/scripts to request a sim
+ * change: it is queued, then applied by a system at the next tick (never mutating
+ * component state inline), which keeps the sim deterministic and the renderer a
+ * pure reader.
+ */
+export function enqueueCommand(gw: GameWorld, command: Command): void {
+  gw.commands.push(command)
 }
 
 /**

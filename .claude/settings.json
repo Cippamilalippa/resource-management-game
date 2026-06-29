@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm headless *)",
+      "Bash(pnpm typecheck *)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm format:check)",
+      "Bash(pnpm exec *)",
+      "Bash(npx vitest *)",
+      "Bash(node -e \"const b=require\\('/Users/carlomartini/Progetti/resource-management-game/node_modules/bitecs'\\); console.log\\(Object.keys\\(b\\).filter\\(k=>/uery|dd|emove|nter|xit|bserv/.test\\(k\\)\\).join\\(', '\\)\\)\")",
+      "Bash(node -e \"import\\('bitecs'\\).then\\(b=>console.log\\(Object.keys\\(b\\).sort\\(\\).join\\(', '\\)\\)\\)\")",
+      "Bash(node --input-type=module -e \"import * as b from 'bitecs'; console.log\\(Object.keys\\(b\\).sort\\(\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(rm -f \"/private/tmp/claude-501/-Users-carlomartini-Progetti-resource-management-game/e4b85755-0273-46e4-bf5b-b9929be93323/scratchpad/repro.log\")",
+      "Bash(awk '{print $2}' \"/private/tmp/claude-501/-Users-carlomartini-Progetti-resource-management-game/e4b85755-0273-46e4-bf5b-b9929be93323/scratchpad/repro.log\")",
+      "Bash(npx prettier *)",
+      "Bash(cp gameLogic.ts /tmp/gl.bak)",
+      "Bash(perl -0pi -e 's/  if \\\\\\(g\\\\.kind\\\\[s\\\\] === KIND_SPLITTER && hasForwardEdge\\\\\\(g, t, s\\\\\\)\\\\\\) return false\\\\n//' gameLogic.ts)",
+      "Bash(perl -0pi -e 's/      if \\\\\\(nb !== NONE && !hasForwardEdge\\\\\\(g, nb, t\\\\\\)\\\\\\) c\\\\+\\\\+/      if \\(nb !== NONE\\) c++/' gameLogic.ts)",
+      "Bash(cp /tmp/gl.bak gameLogic.ts)",
+      "Bash(rm /tmp/gl.bak)",
+      "Read(//Users/carlomartini/**)",
+      "Read(//tmp/**)",
+      "Bash(cp apps/headless/gameLogic.ts /tmp/gl.bak)",
+      "Bash(perl -0pi -e 's/  if \\\\\\(g\\\\.kind\\\\[s\\\\] === KIND_SPLITTER && hasForwardEdge\\\\\\(g, t, s\\\\\\)\\\\\\) return false\\\\n//' apps/headless/gameLogic.ts)",
+      "Bash(perl -0pi -e 's/      if \\\\\\(nb !== NONE && !hasForwardEdge\\\\\\(g, nb, t\\\\\\)\\\\\\) c\\\\+\\\\+/      if \\(nb !== NONE\\) c++/' apps/headless/gameLogic.ts)",
+      "Bash(cp /tmp/gl.bak apps/headless/gameLogic.ts)"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+[
+  {
+    "id": "resource.apple_tree",
+    "type": "resource",
+    "name": "Apple Tree",
+    "size": { "w": 1, "h": 1 },
+    "color": 5025616
+  }
+]

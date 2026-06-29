@@ -1,14 +1,10 @@
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import {
-  createGameWorld,
-  spawnEntity,
-  Scheduler,
-  counterSystem,
-  type GameWorld,
-} from '@factory/engine/core'
-import { PrototypeRegistry } from '@factory/engine/data'
+import { createGameWorld, Scheduler, counterSystem, type GameWorld } from '@factory/engine/core'
+import { PrototypeRegistry, type Prototype } from '@factory/engine/data'
 import { NodeFileSource, discoverAndLoad, type LoadResult } from '@factory/engine/modloader'
+import { createGameState, createGameSystems, type GameState } from './gameLogic.ts'
+import { spawnScene } from './scene.ts'
 
 /** Absolute path to the repo's /content directory ("mod zero"). */
 export function contentDir(): string {
@@ -21,12 +17,14 @@ export interface Sim {
   readonly registry: PrototypeRegistry
   readonly scheduler: Scheduler
   readonly load: LoadResult
+  /** Mutable base-game state (placed belts, …). */
+  readonly state: GameState
 }
 
 /**
  * Build a fully wired sim from a seed: load /content through the mod loader, create
- * a deterministic world, and spawn a small placeholder entity set derived from the
- * loaded building prototypes. Shared by the headless runner and the tests.
+ * a deterministic world, and spawn the starting scene (a central village plus an
+ * apple orchard). Shared by the headless runner and the tests.
  */
 export async function bootstrapSim(seed: number, tickRate = 60): Promise<Sim> {
   const registry = new PrototypeRegistry()
@@ -34,28 +32,9 @@ export async function bootstrapSim(seed: number, tickRate = 60): Promise<Sim> {
   const load = await discoverAndLoad([source], registry)
 
   const world = createGameWorld(seed)
+  spawnScene(world, (id): Prototype | undefined => registry.get(id))
 
-  // Spawn one placeholder entity per building prototype, laid out deterministically.
-  const buildings = registry.listByType('building')
-  buildings.forEach((proto, i) => {
-    const size = (proto.size as { w?: number; h?: number } | undefined) ?? {}
-    const color = typeof proto.color === 'number' ? proto.color : 0xffffff
-    spawnEntity(world, {
-      pos: { x: (i % 8) * 3, y: Math.floor(i / 8) * 3 },
-      color,
-      width: size.w ?? 1,
-      height: size.h ?? 1,
-    })
-  })
-
-  // A handful of seeded-random extra entities to exercise the RNG path.
-  for (let i = 0; i < 16; i++) {
-    spawnEntity(world, {
-      pos: { x: world.rng.nextInt(-20, 20), y: world.rng.nextInt(-20, 20) },
-      color: 0x4fa8ff,
-    })
-  }
-
-  const scheduler = new Scheduler([counterSystem], { tickRate })
-  return { world, registry, scheduler, load }
+  const state = createGameState()
+  const scheduler = new Scheduler([counterSystem, ...createGameSystems(state)], { tickRate })
+  return { world, registry, scheduler, load, state }
 }
