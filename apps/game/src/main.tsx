@@ -89,7 +89,7 @@ async function boot(): Promise<void> {
   )
 
   const { prototypes, mods } = await loadContent()
-  const { world, scheduler, state } = createSim(prototypes)
+  const { world, scheduler, state, registry } = createSim(prototypes)
   buildStore.setItems(toBuildItems(prototypes))
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement
@@ -101,7 +101,7 @@ async function boot(): Promise<void> {
   globalThis.addEventListener('resize', () => {
     renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
   })
-  installPlacement(renderer, world)
+  const inspect = installPlacement(renderer, world, state, registry)
 
   // Fixed-tick sim driven by real frame time; render interpolates with `alpha`.
   // Render is capped to 60fps; the sim stays decoupled via the scheduler.
@@ -134,6 +134,8 @@ async function boot(): Promise<void> {
       fps = Math.round((frames * 1000) / (now - lastStatsAt))
       frames = 0
       lastStatsAt = now
+      // Refresh the inspector so a pinned/hovered object's live numbers stay current.
+      inspect.refresh()
       statsStore.set({
         tick: world.tick,
         entities: entityCount(world),

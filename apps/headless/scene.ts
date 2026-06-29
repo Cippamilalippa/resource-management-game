@@ -34,30 +34,40 @@ function sizeDim(proto: SceneProto | undefined, key: 'w' | 'h', fallback: number
   return fallback
 }
 
-/** Spawn the clean starting world: a central village plus an apple orchard. */
-export function spawnScene(gw: GameWorld, getProto: (id: string) => SceneProto | undefined): void {
+/**
+ * Spawn the clean starting world: a central village plus an apple orchard. The optional
+ * `onSpawn(eid, protoId)` is a non-sim hook the app uses to record each spawned object's
+ * prototype for the read-only UI inspector; the headless runner omits it.
+ */
+export function spawnScene(
+  gw: GameWorld,
+  getProto: (id: string) => SceneProto | undefined,
+  onSpawn?: (eid: number, protoId: string) => void,
+): void {
   // Village: a 2x2 block centered on the origin (top-left at -1,-1).
   const village = getProto('building.village')
   const vw = sizeDim(village, 'w', 2)
   const vh = sizeDim(village, 'h', 2)
-  spawnEntity(gw, {
+  const villageEid = spawnEntity(gw, {
     pos: { x: -Math.floor(vw / 2), y: -Math.floor(vh / 2) },
     color: colorOf(village, 0xb5651d),
     width: vw,
     height: vh,
   })
+  onSpawn?.(villageEid, 'building.village')
 
   // Apple orchard: a 6x6 square of 1x1 trees with its corner at (+50, +50).
   const tree = getProto('resource.apple_tree')
   const treeColor = colorOf(tree, 0x4caf50)
   for (let dy = 0; dy < ORCHARD_SIZE; dy++) {
     for (let dx = 0; dx < ORCHARD_SIZE; dx++) {
-      spawnEntity(gw, {
+      const treeEid = spawnEntity(gw, {
         pos: { x: ORCHARD_X + dx, y: ORCHARD_Y + dy },
         color: treeColor,
         width: 1,
         height: 1,
       })
+      onSpawn?.(treeEid, 'resource.apple_tree')
     }
   }
 }

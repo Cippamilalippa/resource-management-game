@@ -140,3 +140,136 @@ body {
   padding: 3px 10px;
   border-radius: 6px;
 }
+
+/* Right-hand inspector sidebar. */
+.sidebar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  pointer-events: auto;
+  background: rgba(20, 23, 33, 0.9);
+  border: 1px solid #2a2e3a;
+  border-radius: 10px;
+  padding: 14px 16px;
+  font-size: 13px;
+  backdrop-filter: blur(6px);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sidebar-accent {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex: none;
+  margin-top: 2px;
+}
+
+.sidebar-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.sidebar-subtitle {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a90a2;
+  margin-top: 2px;
+}
+
+.sidebar-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(60, 66, 82, 0.6);
+  color: #e6e8ef;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sidebar-close:hover {
+  background: rgba(80, 88, 108, 0.8);
+}
+
+.sidebar-stats {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sidebar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.sidebar-label {
+  color: #8a90a2;
+}
+
+.sidebar-value {
+  color: #e6e8ef;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.sidebar-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  vertical-align: middle;
+}
+
+.sidebar-barwrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+
+.sidebar-bartext {
+  font-size: 11px;
+  color: #b6bccb;
+}
+
+.sidebar-bar {
+  flex: 1;
+  height: 6px;
+  background: rgba(60, 66, 82, 0.6);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.sidebar-barfill {
+  display: block;
+  height: 100%;
+  background: #4fa8ff;
+}
+
+.sidebar-foot {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #6b7180;
+}

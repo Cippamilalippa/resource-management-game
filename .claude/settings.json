@@ -27,7 +27,11 @@
       "Bash(cp /tmp/gl.bak apps/headless/gameLogic.ts)",
       "Bash(pnpm format *)",
       "Bash(echo \"===persistence serialize/hash===\"; sed -n '1,140p' packages/engine/persistence/*.ts 2>/dev/null | grep -n \"sprite\\\\|width\\\\|height\\\\|color\\\\|prevX\\\\|function serialize\\\\|function hashState\\\\|Position\\\\|Renderable\" | head -40)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(echo \"exit $?\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,1\\)\\)\")",
+      "Bash(node -e \"const p=require\\('./apps/game/package.json'\\);console.log\\(JSON.stringify\\(p.scripts,null,1\\)\\)\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./apps/headless/package.json'\\).scripts,null,1\\)\\)\")"
     ],
     "additionalDirectories": [
       "/Users/carlomartini/Progetti/resource-management-game/packages/engine/persistence"

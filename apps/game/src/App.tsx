@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { statsStore } from './statsStore.ts'
 import { BuildBar } from './BuildBar.tsx'
+import { InfoSidebar } from './InfoSidebar.tsx'
 
 /** DOM overlay panel: live tick + entity counts read from the sim each frame. */
 export function App(): React.JSX.Element {
@@ -31,8 +32,11 @@ export function App(): React.JSX.Element {
           <span className="value">{stats.mods}</span>
         </div>
       </div>
-      <div className="hint">WASD to pan · scroll to zoom · click to build · drag to lay belt</div>
+      <div className="hint">
+        WASD to pan · scroll to zoom · hover to inspect · click to select · pick a tool to build
+      </div>
       <BuildBar />
+      <InfoSidebar />
     </>
   )
 }

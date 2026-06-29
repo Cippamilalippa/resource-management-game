@@ -31,13 +31,16 @@ import {
 
 // --- Belt grid --------------------------------------------------------------
 
-/** Per-tile feature stored in {@link BeltGrid.kind}. */
-const KIND_PLAIN = 0
-const KIND_OUTPUT = 1
-const KIND_INPUT = 2
-const KIND_SPLITTER = 3
+/**
+ * Per-tile feature stored in {@link BeltGrid.kind}. Exported so the (read-only) UI
+ * inspector can interpret a hovered belt tile; the sim itself uses them internally.
+ */
+export const KIND_PLAIN = 0
+export const KIND_OUTPUT = 1
+export const KIND_INPUT = 2
+export const KIND_SPLITTER = 3
 /** A production building (farm/orchard): produces items into an internal store the belt drains. */
-const KIND_PRODUCER = 4
+export const KIND_PRODUCER = 4
 
 /** No item / no neighbour sentinel for the Int32 slot and neighbour arrays. */
 const NONE = -1
@@ -123,10 +126,13 @@ export interface BeltGrid {
   moveCount: number
 }
 
-/** Pack a tile coordinate into a single integer key. Range covers a huge map. */
+/**
+ * Pack a tile coordinate into a single integer key. Range covers a huge map. Exported so
+ * the read-only UI inspector can probe the belt grid's `index` at a hovered tile.
+ */
 const KEY_BIAS = 1 << 20
 const KEY_STRIDE = 1 << 21
-function tileKey(x: number, y: number): number {
+export function tileKey(x: number, y: number): number {
   return (x + KEY_BIAS) * KEY_STRIDE + (y + KEY_BIAS)
 }
 

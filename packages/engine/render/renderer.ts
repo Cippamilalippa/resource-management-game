@@ -37,6 +37,20 @@ export type Ghost =
     }
 
 /**
+ * A selection/hover outline drawn over an object's full footprint. Like {@link Ghost}
+ * the renderer only draws it; the app decides what (if anything) is under the cursor.
+ * `selected` distinguishes a transient hover (faint) from a pinned selection (bold).
+ */
+export interface Highlight {
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+  readonly color: number
+  readonly selected: boolean
+}
+
+/**
  * Read-only PixiJS renderer. It NEVER mutates sim state — every frame it reads the
  * Position/Renderable component arrays and draws colored-rectangle placeholders,
  * interpolating between the previous and current tick using `alpha`.
@@ -47,6 +61,7 @@ export class Renderer {
   #gridLayer = new Graphics()
   #entityLayer = new Container()
   #ghostLayer = new Graphics()
+  #highlightLayer = new Graphics()
   #camera: Camera
   #sprites = new Map<number, Graphics>()
   /** Last `sprite` value painted per entity, so a changed glyph triggers a repaint. */
@@ -80,6 +95,7 @@ export class Renderer {
     this.#world.addChild(this.#gridLayer)
     this.#world.addChild(this.#entityLayer)
     this.#world.addChild(this.#ghostLayer)
+    this.#world.addChild(this.#highlightLayer)
     this.#app.stage.addChild(this.#world)
     this.#camera = new Camera(this.#world)
     this.#drawGrid()
@@ -172,6 +188,38 @@ export class Renderer {
     g.rect(minX * TILE_SIZE, minY * TILE_SIZE, w * TILE_SIZE, h * TILE_SIZE)
     g.fill({ color: ghost.color, alpha: 0.45 })
     g.stroke({ width: 2, color: ghost.color, alpha: 0.9 })
+  }
+
+  /**
+   * Show (or clear, with `null`) the hover/selection outline over an object's footprint.
+   * A hover is a faint outline; a pinned selection is bold with corner ticks. Purely a
+   * visual read of sim state — it never mutates the world.
+   */
+  setHighlight(h: Highlight | null): void {
+    const g = this.#highlightLayer
+    g.clear()
+    if (!h) return
+    const px = h.x * TILE_SIZE
+    const py = h.y * TILE_SIZE
+    const pw = h.w * TILE_SIZE
+    const ph = h.h * TILE_SIZE
+    const width = h.selected ? 3 : 2
+    g.rect(px, py, pw, ph)
+    g.fill({ color: h.color, alpha: h.selected ? 0.14 : 0.07 })
+    g.stroke({ width, color: h.color, alpha: h.selected ? 1 : 0.75 })
+    if (!h.selected) return
+    // Selected: short corner ticks to read as a "locked" selection rather than a hover.
+    const len = Math.min(TILE_SIZE * 0.5, pw / 2, ph / 2)
+    for (const [cx, cy, sx, sy] of [
+      [px, py, 1, 1],
+      [px + pw, py, -1, 1],
+      [px, py + ph, 1, -1],
+      [px + pw, py + ph, -1, -1],
+    ] as const) {
+      g.moveTo(cx, cy).lineTo(cx + sx * len, cy)
+      g.moveTo(cx, cy).lineTo(cx, cy + sy * len)
+    }
+    g.stroke({ width: width + 1, color: h.color, alpha: 1 })
   }
 
   resize(width: number, height: number): void {
