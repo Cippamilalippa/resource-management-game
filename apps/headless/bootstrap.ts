@@ -33,9 +33,17 @@ export async function bootstrapSim(seed: number, tickRate = 60): Promise<Sim> {
   const load = await discoverAndLoad(sources, registry)
 
   const world = createGameWorld(seed)
-  spawnScene(world, (id): Prototype | undefined => registry.get(id))
-
+  // The game state owns the terrain grid; create it first so the scene can populate it
+  // (terrain gates where resource producers may be built).
   const state = createGameState()
+  spawnScene(
+    world,
+    (id): Prototype | undefined => registry.get(id),
+    undefined,
+    state.terrain,
+    state.buildings,
+  )
+
   const scheduler = new Scheduler([counterSystem, ...createGameSystems(state)], { tickRate })
   return { world, registry, scheduler, load, state }
 }

@@ -8,9 +8,13 @@ import {
   enqueuePlaceProducer,
   enqueuePlaceSplitter,
   projectBelt,
+  terrainTypeOf,
+  terrainTypeAt,
+  buildingAt,
+  tileKey,
   type GameState,
 } from './gameLogic.ts'
-import { buildStore } from './buildStore.ts'
+import { buildStore, type BuildItem } from './buildStore.ts'
 import { resolveInspect, type InspectInfo, type InspectRegistry } from './inspect.ts'
 import { inspectStore } from './inspectStore.ts'
 
@@ -40,6 +44,34 @@ export function installPlacement(
   registry: InspectRegistry,
 ): { refresh: () => void } {
   const grid = state.grid
+  // Ghost tint for a placement the sim would reject (off-belt or wrong terrain).
+  const INVALID_COLOR = 0xff5555
+
+  /**
+   * Whether a producer tool could legally drop on the tile (x, y): a producer is now an
+   * off-belt building, so it just needs matching terrain (if it declares `requiresTerrain`).
+   * Mirrors the sim's `place_producer` gate so the ghost preview agrees with placement.
+   */
+  const producerValid = (item: BuildItem, x: number, y: number): boolean => {
+    if (!item.requiresTerrain) return true
+    return terrainTypeAt(state.terrain, x, y) === terrainTypeOf(item.requiresTerrain)
+  }
+
+  /**
+   * Whether a port tool could legally drop on the tile (x, y): it must sit on a belt tile
+   * that borders a building (the one it would drain/feed). Mirrors the sim's `place_port`
+   * link step so the ghost previews red where the port would have nothing to link to.
+   */
+  const PORT_DX = [0, 1, 0, -1] as const
+  const PORT_DY = [-1, 0, 1, 0] as const
+  const portValid = (x: number, y: number): boolean => {
+    if (!grid.index.has(tileKey(x, y))) return false
+    for (let d = 0; d < 4; d++) {
+      if (buildingAt(state.buildings, x + PORT_DX[d]!, y + PORT_DY[d]!) >= 0) return true
+    }
+    return false
+  }
+
   // The belt's start tile while a drag is in progress (belts only); null otherwise.
   let beltStart: GridCoord | null = null
   // The tile the pointer was pressed on, to tell a click (press==release) from a drag.
@@ -51,7 +83,14 @@ export function installPlacement(
   /** Push the current inspect view (pinned wins over hover) to the store and highlight. */
   const applyView = (): void => {
     if (pinned) {
-      const info = resolveInspect(world, grid, registry, pinned.tile.x, pinned.tile.y)
+      const info = resolveInspect(
+        world,
+        grid,
+        state.buildings,
+        registry,
+        pinned.tile.x,
+        pinned.tile.y,
+      )
       if (info) {
         inspectStore.set({ info, pinned: true })
         renderer.setHighlight({ ...info.footprint, color: info.color, selected: true })
@@ -59,7 +98,9 @@ export function installPlacement(
       }
       pinned = null // the pinned object vanished — fall through to hover.
     }
-    const info = hoverTile ? resolveInspect(world, grid, registry, hoverTile.x, hoverTile.y) : null
+    const info = hoverTile
+      ? resolveInspect(world, grid, state.buildings, registry, hoverTile.x, hoverTile.y)
+      : null
     inspectStore.set({ info, pinned: false })
     renderer.setHighlight(info ? { ...info.footprint, color: info.color, selected: false } : null)
   }
@@ -74,7 +115,7 @@ export function installPlacement(
 
   /** A click in inspect mode: pin the object under the cursor, or unpin (toggle / empty). */
   const inspectClick = (tile: GridCoord): void => {
-    const info = resolveInspect(world, grid, registry, tile.x, tile.y)
+    const info = resolveInspect(world, grid, state.buildings, registry, tile.x, tile.y)
     if (!info) {
       pinned = null
     } else if (pinned && sameFootprint(pinned.footprint, info.footprint)) {
@@ -103,13 +144,18 @@ export function installPlacement(
       item.kind === 'splitter' ||
       item.kind === 'producer'
     ) {
+      // A producer is terrain-gated and a port needs an adjacent building: tint the ghost red
+      // where it could not actually place.
+      const invalid =
+        (item.kind === 'producer' && !producerValid(item, tile.x, tile.y)) ||
+        (item.kind === 'port' && !portValid(tile.x, tile.y))
       renderer.setGhost({
         kind: 'rect',
         x: tile.x,
         y: tile.y,
         w: item.w,
         h: item.h,
-        color: item.color,
+        color: invalid ? INVALID_COLOR : item.color,
       })
       return
     }
@@ -151,18 +197,25 @@ export function installPlacement(
     }
     pressTile = null
     if (item.kind === 'building') {
-      enqueuePlaceBuilding(world, { x: tile.x, y: tile.y, w: item.w, h: item.h, color: item.color })
+      enqueuePlaceBuilding(world, {
+        x: tile.x,
+        y: tile.y,
+        w: item.w,
+        h: item.h,
+        color: item.color,
+        accepts: item.accepts.map((color) => ({ color, cap: item.storage })),
+      })
       registry.record(tile.x, tile.y, { name: item.name, type: 'building' })
       return
     }
-    // Port: drops onto the belt tile under the cursor (ignored if there's no belt there).
+    // Port: drops onto the belt tile under the cursor (ignored if there's no belt there); it
+    // links to an adjacent building, draining/feeding it.
     if (item.kind === 'port' && item.port) {
       enqueuePlacePort(world, {
         x: tile.x,
         y: tile.y,
         port: item.port,
         color: item.color,
-        itemColor: item.itemColor,
         spawnEvery: item.spawnEvery,
       })
       registry.record(tile.x, tile.y, { name: item.name, type: item.port })
@@ -174,15 +227,21 @@ export function installPlacement(
       registry.record(tile.x, tile.y, { name: item.name, type: 'splitter' })
       return
     }
-    // Producer (farm/orchard): drops onto the belt tile under the cursor (ignored off-belt).
+    // Producer (farm/woodcutter/mine): an off-belt building, valid only where its required
+    // terrain allows it — the sim re-checks and drops a bad placement.
     if (item.kind === 'producer') {
       enqueuePlaceProducer(world, {
         x: tile.x,
         y: tile.y,
+        w: item.w,
+        h: item.h,
         color: item.color,
         itemColor: item.itemColor,
         produceEvery: item.produceEvery,
         storageCap: item.storage,
+        ...(item.requiresTerrain
+          ? { requiresTerrainType: terrainTypeOf(item.requiresTerrain) }
+          : {}),
       })
       registry.record(tile.x, tile.y, { name: item.name, type: 'producer' })
       return

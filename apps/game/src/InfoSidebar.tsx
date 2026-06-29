@@ -28,6 +28,7 @@ function StatRow({ stat }: { stat: InspectStat }): React.JSX.Element {
               className="sidebar-barfill"
               style={{
                 width: `${stat.max > 0 ? Math.min(100, (stat.value / stat.max) * 100) : 0}%`,
+                ...(stat.color !== undefined ? { background: cssColor(stat.color) } : {}),
               }}
             />
           </span>

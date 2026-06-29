@@ -3,6 +3,35 @@
     "id": "item.apple",
     "type": "item",
     "name": "Apple",
-    "stackSize": 100
+    "stackSize": 100,
+    "color": 14100029
+  },
+  {
+    "id": "item.grain",
+    "type": "item",
+    "name": "Grain",
+    "stackSize": 100,
+    "color": 15255899
+  },
+  {
+    "id": "item.wood",
+    "type": "item",
+    "name": "Wood",
+    "stackSize": 100,
+    "color": 11106379
+  },
+  {
+    "id": "item.iron_ore",
+    "type": "item",
+    "name": "Iron Ore",
+    "stackSize": 100,
+    "color": 12042444
+  },
+  {
+    "id": "item.copper_ore",
+    "type": "item",
+    "name": "Copper Ore",
+    "stackSize": 100,
+    "color": 13135931
   }
 ]

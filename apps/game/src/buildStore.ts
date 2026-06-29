@@ -12,20 +12,29 @@ export interface BuildItem {
   readonly kind: 'building' | 'belt' | 'port' | 'splitter' | 'producer'
   /** Which port a 'port' tool places; undefined for other kinds. */
   readonly port?: 'input' | 'output'
+  /** Lucide icon name (PascalCase) from the prototype; UI falls back per-kind when absent. */
+  readonly icon?: string
   readonly w: number
   readonly h: number
   /** Track/footprint color. */
   readonly color: number
-  /** Color of the item an output port extracts / a producer makes (ignored otherwise). */
+  /** Resource colour a producer makes (producers only; ignored otherwise). */
   readonly itemColor: number
-  /** Ticks between extractions for an output port. */
+  /** Resource colours a building stockpiles from input ports (buildings only). */
+  readonly accepts: readonly number[]
+  /** Ticks between drains for an output port. */
   readonly spawnEvery: number
   /** Ticks between item advances for a belt. */
   readonly moveEvery: number
   /** Ticks between items a production building makes (producers only). */
   readonly produceEvery: number
-  /** Internal store size of a production building (producers only). */
+  /** Per-resource stockpile cap of a building/producer. */
   readonly storage: number
+  /**
+   * Terrain prototype id this producer must be built on (producers only); absent for a
+   * producer that may sit on any belt tile. Drives the placement validity check.
+   */
+  readonly requiresTerrain?: string
 }
 
 export interface BuildState {

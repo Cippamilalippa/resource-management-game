@@ -3,87 +3,118 @@ import { entityCount } from '@factory/engine/core'
 import { hashState, serialize } from '@factory/engine/persistence'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
 import {
+  MAX_SLOTS,
+  buildingAt,
   enqueuePlaceBelt,
+  enqueuePlaceBuilding,
   enqueuePlacePort,
   enqueuePlaceProducer,
   enqueuePlaceSplitter,
 } from '../gameLogic.ts'
 
-/** village + 6x6 orchard, before anything is placed (see scene.test.ts). */
-const BASELINE = 37
+/** village + 4 terrain patches (82 tiles) + 6x6 orchard, before anything is placed (see scene.test.ts). */
+const BASELINE = 119
 /** Production cadence the base-game farm/orchard use: 1 item / 30 ticks = 2 items/sec at 60 tps. */
 const PRODUCE_EVERY = 30
-/** Internal store size the base-game farm/orchard use. */
+/** Per-resource stockpile cap the base-game producers use. */
 const STORAGE_CAP = 100
 /** Item glyph: sprite(SHAPE_CIRCLE=1, 0) = 1*4 + 0. */
 const ITEM_SPRITE = 4
+/** Resource colour the test producers make and the test sinks accept. */
+const SRC = 0xf6d600
 
 /** Count the loose items currently riding belts (circle-glyph entities). */
 function itemCount(sim: Sim): number {
   return serialize(sim.world).entities.filter((e) => e.sprite === ITEM_SPRITE).length
 }
 
-describe('production building', () => {
-  it('drops a producer placed where no belt exists', async () => {
-    const sim = await bootstrapSim(1)
-    enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 8, by: 0, color: 0x404040, moveEvery: 1 })
-    enqueuePlaceProducer(sim.world, {
-      x: 100,
-      y: 100,
-      color: 0xd7c4c3,
-      itemColor: 0xf6d600,
-      produceEvery: PRODUCE_EVERY,
-      storageCap: STORAGE_CAP,
-    })
-    sim.scheduler.runTicks(sim.world, 10)
-    // The off-belt producer spawns no footprint; only the 9 belt tracks exist.
-    expect(entityCount(sim.world)).toBe(BASELINE + 9)
-  })
+/** Current count held in the first stockpile slot of the building covering (x, y), or -1. */
+function stockAt(sim: Sim, x: number, y: number): number {
+  const b = buildingAt(sim.state.buildings, x, y)
+  return b < 0 ? -1 : sim.state.buildings.slotCount[b * MAX_SLOTS]!
+}
 
-  it('fills its internal store to the cap (and no further) when the belt cannot drain', async () => {
-    // A 1-tile belt: the producer's item has nowhere to advance, so its tile stays occupied
-    // and production backs up into the store. 30 ticks/item, cap 100 -> full well before 4000.
+describe('production building', () => {
+  it('fills its internal store to the cap (and no further) when nothing drains it', async () => {
+    // A lone producer with no adjacent output: every produced unit stays in the store, which
+    // saturates at the cap and discards the overflow. 30 ticks/item, cap 100 -> full long
+    // before 4000 ticks.
     const sim = await bootstrapSim(1)
-    enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 0, by: 0, color: 0x404040, moveEvery: 1 })
     enqueuePlaceProducer(sim.world, {
-      x: 0,
-      y: 0,
-      color: 0xd7c4c3,
-      itemColor: 0xf6d600,
+      x: 20,
+      y: 20,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: SRC,
       produceEvery: PRODUCE_EVERY,
       storageCap: STORAGE_CAP,
     })
     sim.scheduler.runTicks(sim.world, 4000)
 
-    // The store saturates at the cap and overflow is discarded.
-    expect(sim.state.grid.storage[0]).toBe(STORAGE_CAP)
-    // Exactly one item ever rides the single tile; the rest sit in the store, not the world.
-    expect(itemCount(sim)).toBe(1)
-    // 1 belt track + 1 producer footprint + 1 item on the tile.
-    expect(entityCount(sim.world)).toBe(BASELINE + 3)
+    expect(stockAt(sim, 20, 20)).toBe(STORAGE_CAP)
+    // Only the producer's footprint — nothing was ever emitted onto a belt.
+    expect(entityCount(sim.world)).toBe(BASELINE + 1)
   })
 
-  it('passes production straight through when the belt drains as fast as it produces', async () => {
-    // A fast belt (one move-cycle per tick) with an input clears the producer's tile every
-    // tick, so a freshly produced item leaves at once and the store never accumulates.
+  it('an adjacent output drains the store, but a belt that cannot drain backs it up to the cap', async () => {
+    // A single belt tile carries the output; the emitted item has nowhere to advance, so after
+    // the first emit the output tile stays occupied and the store backs up to the cap.
     const sim = await bootstrapSim(1)
-    enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 8, by: 0, color: 0x404040, moveEvery: 1 })
+    enqueuePlaceBelt(sim.world, { ax: 21, ay: 20, bx: 21, by: 20, color: 0x404040, moveEvery: 1 })
     enqueuePlaceProducer(sim.world, {
-      x: 0,
-      y: 0,
-      color: 0xd7c4c3,
-      itemColor: 0xf6d600,
+      x: 20,
+      y: 20,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: SRC,
       produceEvery: PRODUCE_EVERY,
       storageCap: STORAGE_CAP,
     })
-    enqueuePlacePort(sim.world, { x: 8, y: 0, port: 'input', color: 0xdd4444 })
+    enqueuePlacePort(sim.world, { x: 21, y: 20, port: 'output', color: 0x44dd44, spawnEvery: 1 })
+    sim.scheduler.runTicks(sim.world, 4000)
 
-    // Sample tick by tick: the store must stay empty the whole run (nothing ever backs up),
-    // and at some point an item is seen riding the belt (production really did pass through).
+    expect(stockAt(sim, 20, 20)).toBe(STORAGE_CAP)
+    // Exactly one item ever rides the single tile; the rest sit in the store, not the world.
+    expect(itemCount(sim)).toBe(1)
+    // 1 belt track + 1 producer footprint + 1 output footprint + 1 item on the tile.
+    expect(entityCount(sim.world)).toBe(BASELINE + 4)
+  })
+
+  it('passes production straight through when the belt drains as fast as it produces', async () => {
+    // A fast belt with an output draining the producer and an input feeding a sink at the far
+    // end clears the output tile every tick, so a freshly produced unit leaves at once and the
+    // store never accumulates (production runs before the drain in the same tick).
+    const sim = await bootstrapSim(1)
+    enqueuePlaceBelt(sim.world, { ax: 21, ay: 20, bx: 29, by: 20, color: 0x404040, moveEvery: 1 })
+    enqueuePlaceProducer(sim.world, {
+      x: 20,
+      y: 20,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: SRC,
+      produceEvery: PRODUCE_EVERY,
+      storageCap: STORAGE_CAP,
+    })
+    enqueuePlacePort(sim.world, { x: 21, y: 20, port: 'output', color: 0x44dd44, spawnEvery: 1 })
+    enqueuePlaceBuilding(sim.world, {
+      x: 30,
+      y: 20,
+      w: 1,
+      h: 1,
+      color: 0x334455,
+      accepts: [{ color: SRC, cap: 1_000_000 }],
+    })
+    enqueuePlacePort(sim.world, { x: 29, y: 20, port: 'input', color: 0xdd4444 })
+
+    // Sample tick by tick: the producer store must stay empty the whole run (each unit leaves
+    // the same tick it is made), and at some point an item is seen riding the belt.
     let maxItems = 0
     for (let tick = 0; tick < 1000; tick++) {
       sim.scheduler.runTicks(sim.world, 1)
-      expect(sim.state.grid.storage[0]).toBe(0)
+      expect(stockAt(sim, 20, 20)).toBe(0)
       maxItems = Math.max(maxItems, itemCount(sim))
     }
     expect(maxItems).toBeGreaterThan(0) // items flowed
@@ -93,90 +124,100 @@ describe('production building', () => {
   it('is deterministic: same seed + commands -> identical state hash', async () => {
     const boot = async (): Promise<Sim> => {
       const sim = await bootstrapSim(11)
-      enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 8, by: 0, color: 0x404040, moveEvery: 15 })
+      enqueuePlaceBelt(sim.world, {
+        ax: 21,
+        ay: 20,
+        bx: 29,
+        by: 20,
+        color: 0x404040,
+        moveEvery: 15,
+      })
       enqueuePlaceProducer(sim.world, {
-        x: 0,
-        y: 0,
-        color: 0xd7c4c3,
-        itemColor: 0xf6d600,
+        x: 20,
+        y: 20,
+        w: 1,
+        h: 1,
+        color: 0x223344,
+        itemColor: SRC,
         produceEvery: PRODUCE_EVERY,
         storageCap: STORAGE_CAP,
       })
+      enqueuePlacePort(sim.world, { x: 21, y: 20, port: 'output', color: 0x44dd44, spawnEvery: 4 })
       sim.scheduler.runTicks(sim.world, 600)
       return sim
     }
     const a = await boot()
     const b = await boot()
     expect(hashState(a.world)).toBe(hashState(b.world))
+    expect(stockAt(a, 20, 20)).toBe(stockAt(b, 20, 20))
   })
 })
 
 /**
- * One scenario that exercises (almost) the whole base game at once: two belt tiers, an
- * output port + input port pair, a farm and an orchard (production buildings), and a
- * splitter fanning a feed onto two branches. Running it touches command application,
- * topology rebuilds, the move cadence, extraction, production-into-store + drain, splitting
- * and consumption. Used to assert determinism and basic liveness of the combined systems.
- *
- * Layout (all laid before the first tick, so every belt is live when its ports attach):
- *   y=0  farm -> mk3 belt (0..6) -> input              (production, fast belt, drain)
- *   y=2  output -> mk1 belt (0..6) -> input            (extraction, slow belt, drain)
- *   y=4  orchard -> mk1 belt (0..6), no input          (production backs up / store fills)
- *   y=6  output -> mk1 belt (0..3) -> splitter at (3,6)
- *          -> north branch (3,5..3,3) and south branch (3,7..3,9), no inputs (round-robin)
+ * One scenario that exercises (almost) the whole base game at once: a fast belt draining a
+ * producer into a fed sink, a slow belt draining a producer with no drain (store backs up),
+ * and an output feeding a splitter that fans onto two branches. Running it touches command
+ * application, topology rebuilds, the move cadence, production-into-store, output drain, input
+ * deposit, splitting and consumption. Kept clear of the origin village. Used to assert
+ * determinism and basic liveness of the combined systems.
  */
 async function bootKitchenSink(seed: number, ticks: number): Promise<Sim> {
   const sim = await bootstrapSim(seed)
   const w = sim.world
 
-  // Row 0 — farm onto a fast (mk3) belt that drains into an input.
-  enqueuePlaceBelt(w, { ax: 0, ay: 0, bx: 6, by: 0, color: 0x404040, moveEvery: 15 })
+  // Row 20 — producer -> output -> fast (mk3) belt -> input -> sink.
   enqueuePlaceProducer(w, {
-    x: 0,
-    y: 0,
-    color: 0xd7c4c3,
-    itemColor: 0xf6d600,
+    x: 20,
+    y: 20,
+    w: 1,
+    h: 1,
+    color: 0x223344,
+    itemColor: SRC,
     produceEvery: PRODUCE_EVERY,
     storageCap: STORAGE_CAP,
   })
-  enqueuePlacePort(w, { x: 6, y: 0, port: 'input', color: 0xdd4444 })
-
-  // Row 2 — classic output -> mk1 belt -> input flow.
-  enqueuePlaceBelt(w, { ax: 0, ay: 2, bx: 6, by: 2, color: 0x404040, moveEvery: 60 })
-  enqueuePlacePort(w, {
-    x: 0,
-    y: 2,
-    port: 'output',
-    color: 0x44dd44,
-    itemColor: 0xffaa00,
-    spawnEvery: 8,
+  enqueuePlaceBelt(w, { ax: 21, ay: 20, bx: 27, by: 20, color: 0x404040, moveEvery: 15 })
+  enqueuePlacePort(w, { x: 21, y: 20, port: 'output', color: 0x44dd44, spawnEvery: 8 })
+  enqueuePlaceBuilding(w, {
+    x: 28,
+    y: 20,
+    w: 1,
+    h: 1,
+    color: 0x334455,
+    accepts: [{ color: SRC, cap: 1_000_000 }],
   })
-  enqueuePlacePort(w, { x: 6, y: 2, port: 'input', color: 0xdd4444 })
+  enqueuePlacePort(w, { x: 27, y: 20, port: 'input', color: 0xdd4444 })
 
-  // Row 4 — orchard onto a slow belt with NO input: it backs up and the store fills.
-  enqueuePlaceBelt(w, { ax: 0, ay: 4, bx: 6, by: 4, color: 0x404040, moveEvery: 60 })
+  // Row 22 — producer -> output -> slow belt with NO input: it backs up and the store fills.
   enqueuePlaceProducer(w, {
-    x: 0,
-    y: 4,
+    x: 20,
+    y: 22,
+    w: 1,
+    h: 1,
     color: 0x4caf50,
     itemColor: 0xff8800,
     produceEvery: PRODUCE_EVERY,
     storageCap: STORAGE_CAP,
   })
+  enqueuePlaceBelt(w, { ax: 21, ay: 22, bx: 27, by: 22, color: 0x404040, moveEvery: 60 })
+  enqueuePlacePort(w, { x: 21, y: 22, port: 'output', color: 0x44dd44, spawnEvery: 8 })
 
-  // Row 6 — output feeding a splitter that fans onto a north and a south branch.
-  enqueuePlaceBelt(w, { ax: 0, ay: 6, bx: 3, by: 6, color: 0x404040, moveEvery: 30 })
-  enqueuePlaceBelt(w, { ax: 3, ay: 5, bx: 3, by: 3, color: 0x404040, moveEvery: 30 })
-  enqueuePlaceBelt(w, { ax: 3, ay: 7, bx: 3, by: 9, color: 0x404040, moveEvery: 30 })
-  enqueuePlacePort(w, {
-    x: 0,
-    y: 6,
-    port: 'output',
-    color: 0x44dd44,
+  // Row 24 — producer -> output feeding a splitter that fans onto a north and a south branch.
+  enqueuePlaceProducer(w, {
+    x: 20,
+    y: 24,
+    w: 1,
+    h: 1,
+    color: 0x4caf50,
     itemColor: 0xffaa00,
-    spawnEvery: 8,
+    produceEvery: PRODUCE_EVERY,
+    storageCap: STORAGE_CAP,
   })
-  enqueuePlaceSplitter(w, { x: 3, y: 6, color: 0x9b59b6 })
+  enqueuePlaceBelt(w, { ax: 21, ay: 24, bx: 24, by: 24, color: 0x404040, moveEvery: 30 })
+  enqueuePlaceBelt(w, { ax: 24, ay: 23, bx: 24, by: 21, color: 0x404040, moveEvery: 30 })
+  enqueuePlaceBelt(w, { ax: 24, ay: 25, bx: 24, by: 27, color: 0x404040, moveEvery: 30 })
+  enqueuePlacePort(w, { x: 21, y: 24, port: 'output', color: 0x44dd44, spawnEvery: 8 })
+  enqueuePlaceSplitter(w, { x: 24, y: 24, color: 0x9b59b6 })
 
   sim.scheduler.runTicks(w, ticks)
   return sim
@@ -190,27 +231,25 @@ describe('full base-game scenario', () => {
     expect(hashState(a.world)).toBe(hashState(b.world))
   })
 
-  it('comes alive: ports, producers and the splitter all put items on the belts', async () => {
+  it('comes alive: producers, ports and the splitter all put items on the belts', async () => {
     const sim = await bootKitchenSink(42, 1200)
     // Items are flowing somewhere in the network.
     expect(itemCount(sim)).toBeGreaterThan(0)
-    // The orchard row has no drain, so its internal store backs up (bounded by the cap).
-    const g = sim.state.grid
-    for (let t = 0; t < g.count; t++) {
-      expect(g.storage[t]!).toBeGreaterThanOrEqual(0)
-      expect(g.storage[t]!).toBeLessThanOrEqual(STORAGE_CAP)
+    // Every building stockpile slot stays within its bounds.
+    const s = sim.state.buildings
+    for (let b = 0; b < s.count; b++) {
+      const n = s.slotN[b]!
+      for (let k = 0; k < n; k++) {
+        const i = b * MAX_SLOTS + k
+        expect(s.slotCount[i]!).toBeGreaterThanOrEqual(0)
+        expect(s.slotCount[i]!).toBeLessThanOrEqual(s.slotCap[i]!)
+      }
     }
   })
 
-  it('keeps every producer store within [0, cap] throughout a long run', async () => {
+  it('the un-drained producer saturates its store at the cap over a long run', async () => {
     const sim = await bootKitchenSink(3, 5000)
-    const g = sim.state.grid
-    // The orchard (slow belt, no input) must have saturated its store at the cap.
-    let sawFullStore = false
-    for (let t = 0; t < g.count; t++) {
-      expect(g.storage[t]!).toBeLessThanOrEqual(STORAGE_CAP)
-      if (g.storage[t] === STORAGE_CAP) sawFullStore = true
-    }
-    expect(sawFullStore).toBe(true)
+    // Row 22's producer has a slow belt and no input, so its store must reach the cap.
+    expect(stockAt(sim, 20, 22)).toBe(STORAGE_CAP)
   })
 })

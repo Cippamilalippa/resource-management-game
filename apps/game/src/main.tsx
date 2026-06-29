@@ -38,24 +38,36 @@ function toolKind(type: string): { kind: BuildItem['kind']; port?: 'input' | 'ou
 
 /** Map the placeable prototypes (buildings, belts, input/output ports) to build-bar tools. */
 function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
+  // Resource identity is the item's colour; build an id->colour lookup so a building's
+  // `produces`/`accepts` (lists of item ids) resolve to the colours the sim works in.
+  const itemColors = new Map<string, number>()
+  for (const p of prototypes) if (p.type === 'item') itemColors.set(p.id, num(p, 'color', 0xffffff))
+  const colorOfItem = (id: unknown): number =>
+    typeof id === 'string' ? (itemColors.get(id) ?? 0xffffff) : 0xffffff
+
   const items: BuildItem[] = []
   for (const p of prototypes) {
     const tool = toolKind(p.type)
     if (!tool) continue
     const size = (p.size ?? {}) as { w?: number; h?: number }
+    const accepts = Array.isArray(p.accepts) ? p.accepts.map(colorOfItem) : []
     items.push({
       id: p.id,
       name: typeof p.name === 'string' ? p.name : p.id,
       kind: tool.kind,
       ...(tool.port ? { port: tool.port } : {}),
+      ...(typeof p.icon === 'string' ? { icon: p.icon } : {}),
       w: typeof size.w === 'number' ? size.w : 1,
       h: typeof size.h === 'number' ? size.h : 1,
       color: num(p, 'color', 0xffffff),
-      itemColor: num(p, 'itemColor', 0xffffff),
+      itemColor:
+        typeof p.produces === 'string' ? colorOfItem(p.produces) : num(p, 'itemColor', 0xffffff),
+      accepts,
       spawnEvery: num(p, 'spawnEvery', 20),
       moveEvery: num(p, 'moveEvery', 1),
       produceEvery: num(p, 'produceEvery', 30),
       storage: num(p, 'storage', 100),
+      ...(typeof p.requiresTerrain === 'string' ? { requiresTerrain: p.requiresTerrain } : {}),
     })
   }
   return items

@@ -277,6 +277,14 @@ export class Renderer {
         }
         return
       }
+      case 6: {
+        // Flat ground fill: the whole tile, edge to edge, at a soft alpha so it reads as a
+        // background layer that belts and buildings sit on top of (content uses it for terrain).
+        g.rect(0, 0, wTiles * TILE_SIZE, hTiles * TILE_SIZE)
+        g.fill({ color, alpha: 0.55 })
+        g.stroke({ width: 1, color: 0x000000, alpha: 0.08 })
+        return
+      }
       default: {
         // Rect — buildings, scenery (the default placeholder).
         g.rect(pad, pad, wTiles * TILE_SIZE - pad * 2, hTiles * TILE_SIZE - pad * 2)

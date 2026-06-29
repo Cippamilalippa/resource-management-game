@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { lerp } from '@factory/shared'
 import { hashState } from '@factory/engine/persistence'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
-import { beltMoveAlpha, enqueuePlaceBelt, enqueuePlacePort } from '../gameLogic.ts'
+import {
+  beltMoveAlpha,
+  enqueuePlaceBelt,
+  enqueuePlacePort,
+  enqueuePlaceProducer,
+} from '../gameLogic.ts'
 
 /**
  * Belt items step a whole tile once every `moveEvery` ticks. The renderer must glide them
@@ -12,18 +17,25 @@ import { beltMoveAlpha, enqueuePlaceBelt, enqueuePlacePort } from '../gameLogic.
  * render-interpolation maths the game's frame loop uses, with no GPU/DOM needed.
  */
 
-/** Lay a 9-tile horizontal belt with an output at the head; items ride it to the right. */
+/**
+ * Lay a 9-tile horizontal belt (from x=2, clear of the origin village) with a producer-fed
+ * output at the head; items ride it to the right. The producer just west of the output keeps
+ * it supplied so items keep entering.
+ */
 async function bootBelt(moveEvery: number, tickRate = 60): Promise<Sim> {
   const sim = await bootstrapSim(1, tickRate)
-  enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 8, by: 0, color: 0x404040, moveEvery })
-  enqueuePlacePort(sim.world, {
-    x: 0,
+  enqueuePlaceBelt(sim.world, { ax: 2, ay: 0, bx: 10, by: 0, color: 0x404040, moveEvery })
+  enqueuePlaceProducer(sim.world, {
+    x: 1,
     y: 0,
-    port: 'output',
-    color: 0x44dd44,
+    w: 1,
+    h: 1,
+    color: 0x223344,
     itemColor: 0xffaa00,
-    spawnEvery: 20,
+    produceEvery: 1,
+    storageCap: 1_000_000,
   })
+  enqueuePlacePort(sim.world, { x: 2, y: 0, port: 'output', color: 0x44dd44, spawnEvery: 20 })
   sim.scheduler.runTicks(sim.world, 1) // drain the queued placements so the grid is live
   return sim
 }
@@ -134,7 +146,7 @@ describe('belt render interpolation', () => {
     const lastTile = g.count - 1
     const stuck = g.slot[lastTile]!
     expect(stuck).not.toBe(-1)
-    expect(Position.x[stuck]!).toBe(8)
+    expect(Position.x[stuck]!).toBe(10)
     // Its render anchor coincides with its tile: lerp(prev, x, alpha) is constant.
     expect(Position.prevX[stuck]!).toBe(Position.x[stuck]!)
     expect(Position.prevY[stuck]!).toBe(Position.y[stuck]!)

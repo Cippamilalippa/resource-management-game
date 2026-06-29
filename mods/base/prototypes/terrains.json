@@ -1,0 +1,34 @@
+[
+  {
+    "id": "terrain.fertile_soil",
+    "type": "terrain",
+    "name": "Fertile Soil",
+    "size": { "w": 1, "h": 1 },
+    "color": 13166240,
+    "info": "Plant grain here — build a Farm on top."
+  },
+  {
+    "id": "terrain.forest",
+    "type": "terrain",
+    "name": "Forest",
+    "size": { "w": 1, "h": 1 },
+    "color": 10864778,
+    "info": "Stands of trees — build a Woodcutter on top."
+  },
+  {
+    "id": "terrain.iron_deposit",
+    "type": "terrain",
+    "name": "Iron Deposit",
+    "size": { "w": 1, "h": 1 },
+    "color": 13357786,
+    "info": "Iron-rich ground — build an Iron Mine on top."
+  },
+  {
+    "id": "terrain.copper_deposit",
+    "type": "terrain",
+    "name": "Copper Deposit",
+    "size": { "w": 1, "h": 1 },
+    "color": 14857356,
+    "info": "Copper-rich ground — build a Copper Mine on top."
+  }
+]

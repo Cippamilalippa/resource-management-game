@@ -3,13 +3,17 @@
     "id": "building.village",
     "type": "building",
     "name": "Village",
+    "icon": "Home",
     "size": { "w": 2, "h": 2 },
-    "color": 11887901
+    "color": 11887901,
+    "accepts": ["item.grain", "item.wood", "item.iron_ore", "item.copper_ore", "item.apple"],
+    "storage": 500
   },
   {
     "id": "building.belt",
     "type": "belt",
     "name": "Conveyor Belt Mk1",
+    "icon": "Road",
     "size": { "w": 1, "h": 1 },
     "color": 4407359,
     "moveEvery": 60
@@ -18,6 +22,7 @@
     "id": "building.belt_mk2",
     "type": "belt",
     "name": "Conveyor Belt Mk2",
+    "icon": "Road",
     "size": { "w": 1, "h": 1 },
     "color": 3526848,
     "moveEvery": 30
@@ -26,6 +31,7 @@
     "id": "building.belt_mk3",
     "type": "belt",
     "name": "Conveyor Belt Mk3",
+    "icon": "Road",
     "size": { "w": 1, "h": 1 },
     "color": 15769648,
     "moveEvery": 15
@@ -34,15 +40,16 @@
     "id": "building.output",
     "type": "output",
     "name": "Output",
+    "icon": "ArrowUpFromLine",
     "size": { "w": 1, "h": 1 },
     "color": 4513092,
-    "itemColor": 16746024,
     "spawnEvery": 20
   },
   {
     "id": "building.input",
     "type": "input",
     "name": "Input",
+    "icon": "ArrowDownToLine",
     "size": { "w": 1, "h": 1 },
     "color": 14501444
   },
@@ -50,26 +57,55 @@
     "id": "building.farm",
     "type": "producer",
     "name": "Farm",
+    "icon": "Wheat",
     "size": { "w": 1, "h": 1 },
-    "color": 14140675,
-    "itemColor": 16182665,
+    "color": 8101979,
+    "produces": "item.grain",
     "produceEvery": 30,
-    "storage": 100
+    "storage": 100,
+    "requiresTerrain": "terrain.fertile_soil"
   },
   {
-    "id": "building.orchard",
+    "id": "building.woodcutter",
     "type": "producer",
-    "name": "Orchard",
+    "name": "Woodcutter",
+    "icon": "TreePine",
     "size": { "w": 1, "h": 1 },
-    "color": 5025616,
-    "itemColor": 16746024,
-    "produceEvery": 30,
-    "storage": 100
+    "color": 7232060,
+    "produces": "item.wood",
+    "produceEvery": 45,
+    "storage": 100,
+    "requiresTerrain": "terrain.forest"
+  },
+  {
+    "id": "building.iron_mine",
+    "type": "producer",
+    "name": "Iron Mine",
+    "icon": "Pickaxe",
+    "size": { "w": 1, "h": 1 },
+    "color": 9081502,
+    "produces": "item.iron_ore",
+    "produceEvery": 40,
+    "storage": 100,
+    "requiresTerrain": "terrain.iron_deposit"
+  },
+  {
+    "id": "building.copper_mine",
+    "type": "producer",
+    "name": "Copper Mine",
+    "icon": "Gem",
+    "size": { "w": 1, "h": 1 },
+    "color": 11565642,
+    "produces": "item.copper_ore",
+    "produceEvery": 40,
+    "storage": 100,
+    "requiresTerrain": "terrain.copper_deposit"
   },
   {
     "id": "building.splitter",
     "type": "splitter",
     "name": "Splitter",
+    "icon": "Split",
     "size": { "w": 1, "h": 1 },
     "color": 10185235
   }

@@ -4,6 +4,7 @@ import {
   createGameState,
   createGameSystems,
   enqueuePlaceBelt,
+  enqueuePlaceBuilding,
   enqueuePlacePort,
   enqueuePlaceProducer,
   type GameState,
@@ -28,7 +29,9 @@ describe('resolveInspect', () => {
   it('returns null over empty ground', () => {
     const world = createGameWorld(1)
     const state = createGameState()
-    expect(resolveInspect(world, state.grid, new InspectRegistry(), 99, 99)).toBeNull()
+    expect(
+      resolveInspect(world, state.grid, state.buildings, new InspectRegistry(), 99, 99),
+    ).toBeNull()
   })
 
   it('describes a plain belt tile with name, facing and speed', () => {
@@ -39,7 +42,7 @@ describe('resolveInspect', () => {
     flush(world, state)
     reg.record(0, 0, { name: 'Conveyor Belt Mk1', type: 'belt' })
 
-    const info = resolveInspect(world, state.grid, reg, 0, 0)
+    const info = resolveInspect(world, state.grid, state.buildings, reg, 0, 0)
     expect(info?.title).toBe('Conveyor Belt Mk1')
     expect(info?.subtitle).toBe('Conveyor belt · facing East')
     expect(info?.footprint).toEqual({ x: 0, y: 0, w: 1, h: 1 })
@@ -53,50 +56,104 @@ describe('resolveInspect', () => {
     const state = createGameState()
     enqueuePlaceBelt(world, { ax: 0, ay: 0, bx: 2, by: 0, color: 0x404040, moveEvery: 60 })
     flush(world, state)
-    expect(resolveInspect(world, state.grid, new InspectRegistry(), 1, 0)?.title).toBe(
-      'Conveyor belt',
-    )
+    expect(
+      resolveInspect(world, state.grid, state.buildings, new InspectRegistry(), 1, 0)?.title,
+    ).toBe('Conveyor belt')
   })
 
-  it('describes an output port with its rate and item colour', () => {
+  it('describes an output port by the rate and building it drains', () => {
     const world = createGameWorld(1)
     const state = createGameState()
-    enqueuePlaceBelt(world, { ax: 0, ay: 0, bx: 4, by: 0, color: 0x404040, moveEvery: 60 })
-    enqueuePlacePort(world, {
-      x: 0,
-      y: 0,
-      port: 'output',
-      color: 0x445500,
+    const reg = new InspectRegistry()
+    // A farm at (5,5), a belt beside it, and an output on the belt draining the farm.
+    enqueuePlaceProducer(world, {
+      x: 5,
+      y: 5,
+      w: 1,
+      h: 1,
+      color: 0x778800,
       itemColor: 0xabcdef,
-      spawnEvery: 20,
+      produceEvery: 20,
+      storageCap: 100,
     })
+    reg.record(5, 5, { name: 'Farm', type: 'producer' })
+    enqueuePlaceBelt(world, { ax: 6, ay: 5, bx: 9, by: 5, color: 0x404040, moveEvery: 60 })
+    enqueuePlacePort(world, { x: 6, y: 5, port: 'output', color: 0x445500, spawnEvery: 20 })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, new InspectRegistry(), 0, 0)
+    const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 5)
     expect(info?.subtitle).toBe('Output port · facing East')
     // 20 ticks/item at 60 tps = 3 items/s.
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Output rate', value: '3 /s' })
-    expect(info?.stats).toContainEqual({ kind: 'color', label: 'Item', color: 0xabcdef })
+    expect(info?.stats).toContainEqual({ kind: 'text', label: 'Drains', value: 'Farm' })
   })
 
-  it('describes a producer with a storage bar', () => {
+  it('describes an input port by the building it feeds', () => {
     const world = createGameWorld(1)
     const state = createGameState()
-    enqueuePlaceBelt(world, { ax: 0, ay: 0, bx: 4, by: 0, color: 0x404040, moveEvery: 60 })
+    const reg = new InspectRegistry()
+    enqueuePlaceBuilding(world, {
+      x: 5,
+      y: 5,
+      w: 1,
+      h: 1,
+      color: 0xb5651d,
+      accepts: [{ color: 0x112233, cap: 50 }],
+    })
+    reg.record(5, 5, { name: 'Village', type: 'building' })
+    enqueuePlaceBelt(world, { ax: 6, ay: 5, bx: 9, by: 5, color: 0x404040, moveEvery: 60 })
+    enqueuePlacePort(world, { x: 6, y: 5, port: 'input', color: 0xdd4444 })
+    flush(world, state)
+
+    const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 5)
+    expect(info?.subtitle).toBe('Input port · facing East')
+    expect(info?.stats).toContainEqual({ kind: 'text', label: 'Feeds', value: 'Village' })
+  })
+
+  it('describes a producer building with a production rate and a stock bar', () => {
+    const world = createGameWorld(1)
+    const state = createGameState()
+    const reg = new InspectRegistry()
     enqueuePlaceProducer(world, {
-      x: 0,
-      y: 0,
+      x: 5,
+      y: 5,
+      w: 1,
+      h: 1,
       color: 0x778800,
       itemColor: 0x112233,
       produceEvery: 30,
       storageCap: 100,
     })
+    reg.record(5, 5, { name: 'Farm', type: 'producer' })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, new InspectRegistry(), 0, 0)
-    expect(info?.subtitle).toBe('Producer · facing East')
-    const storage = info?.stats.find((s) => s.label === 'Storage')
-    expect(storage).toMatchObject({ kind: 'bar', max: 100 })
+    const info = resolveInspect(world, state.grid, state.buildings, reg, 5, 5)
+    expect(info?.subtitle).toBe('Producer')
+    expect(info?.stats).toContainEqual({ kind: 'text', label: 'Produces', value: '2 /s' })
+    const stock = info?.stats.find((s) => s.label === 'Stock')
+    expect(stock).toMatchObject({ kind: 'bar', max: 100, color: 0x112233 })
+  })
+
+  it('shows a stock bar per resource on a resource-holding building', () => {
+    const world = createGameWorld(1)
+    const state = createGameState()
+    const reg = new InspectRegistry()
+    enqueuePlaceBuilding(world, {
+      x: 5,
+      y: 5,
+      w: 2,
+      h: 2,
+      color: 0xb5651d,
+      accepts: [{ color: 0x112233, cap: 50 }],
+    })
+    reg.record(5, 5, { name: 'Village', type: 'building' })
+    flush(world, state)
+
+    // Resolving any footprint tile finds the building and its stock bar.
+    const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 6)
+    expect(info?.title).toBe('Village')
+    const stock = info?.stats.find((s) => s.label === 'Stock')
+    expect(stock).toMatchObject({ kind: 'bar', max: 50, color: 0x112233 })
   })
 
   it('describes a multi-tile building across its whole footprint', () => {
@@ -113,12 +170,12 @@ describe('resolveInspect', () => {
       [-1, 0],
       [0, 0],
     ] as const) {
-      const info = resolveInspect(world, state.grid, reg, x, y)
+      const info = resolveInspect(world, state.grid, state.buildings, reg, x, y)
       expect(info?.title).toBe('Village')
       expect(info?.subtitle).toBe('Building')
       expect(info?.footprint).toEqual({ x: -1, y: -1, w: 2, h: 2 })
     }
-    expect(info_size(resolveInspect(world, state.grid, reg, 0, 0))).toBe('2×2')
+    expect(info_size(resolveInspect(world, state.grid, state.buildings, reg, 0, 0))).toBe('2×2')
   })
 })
 

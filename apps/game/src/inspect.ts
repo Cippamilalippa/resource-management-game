@@ -15,9 +15,11 @@ import {
   KIND_OUTPUT,
   KIND_INPUT,
   KIND_SPLITTER,
-  KIND_PRODUCER,
+  MAX_SLOTS,
+  buildingAt,
   tileKey,
   type BeltGrid,
+  type BuildingStore,
 } from './gameLogic.ts'
 
 /** Compass names for a direction index 0..3 (N, E, S, W). */
@@ -27,7 +29,14 @@ const DIR_NAMES = ['North', 'East', 'South', 'West'] as const
 export type InspectStat =
   | { readonly kind: 'text'; readonly label: string; readonly value: string }
   | { readonly kind: 'color'; readonly label: string; readonly color: number }
-  | { readonly kind: 'bar'; readonly label: string; readonly value: number; readonly max: number }
+  | {
+      readonly kind: 'bar'
+      readonly label: string
+      readonly value: number
+      readonly max: number
+      /** Optional fill colour — used to tint a stockpile bar by its resource. */
+      readonly color?: number
+    }
 
 /** The resolved description of whatever sits under the cursor. */
 export interface InspectInfo {
@@ -51,8 +60,10 @@ export interface InspectInfo {
 /** Name + prototype type remembered for the object placed at a tile. */
 export interface InspectMeta {
   readonly name: string
-  /** Prototype `type` ('building' | 'belt' | 'output' | …); drives the fallback subtitle. */
+  /** Prototype `type` ('building' | 'belt' | 'output' | 'terrain' | …); drives the subtitle. */
   readonly type: string
+  /** Optional human blurb (e.g. a terrain's `info`), shown as an extra inspector row. */
+  readonly detail?: string
 }
 
 /**
@@ -88,8 +99,6 @@ function beltKindName(kind: number): string {
       return 'Input port'
     case KIND_SPLITTER:
       return 'Splitter'
-    case KIND_PRODUCER:
-      return 'Producer'
     default:
       return 'Conveyor belt'
   }
@@ -101,10 +110,23 @@ function carryingStat(world: GameWorld, slot: number): InspectStat {
   return { kind: 'color', label: 'Carrying', color: world.components.Renderable.color[slot]! }
 }
 
+/** Human name of the building a port is linked to, read back from the inspect registry. */
+function linkedName(
+  grid: BeltGrid,
+  buildings: BuildingStore,
+  registry: InspectRegistry,
+  t: number,
+): string {
+  const b = grid.portBuilding[t]!
+  if (b < 0) return 'Not linked'
+  return registry.get(buildings.bx[b]!, buildings.by[b]!)?.name ?? 'building'
+}
+
 /** Build the description for the belt-grid tile `t` at (x, y). */
 function describeBeltTile(
   world: GameWorld,
   grid: BeltGrid,
+  buildings: BuildingStore,
   registry: InspectRegistry,
   t: number,
   x: number,
@@ -122,7 +144,7 @@ function describeBeltTile(
     case KIND_OUTPUT:
       stats.push(
         { kind: 'text', label: 'Output rate', value: perSec(grid.portEvery[t]!) },
-        { kind: 'color', label: 'Item', color: grid.portColor[t]! },
+        { kind: 'text', label: 'Drains', value: linkedName(grid, buildings, registry, t) },
         { kind: 'text', label: 'Facing', value: DIR_NAMES[face] ?? '—' },
         carryingStat(world, grid.slot[t]!),
       )
@@ -135,7 +157,7 @@ function describeBeltTile(
       }
     case KIND_INPUT:
       stats.push(
-        { kind: 'text', label: 'Consumes', value: 'items that arrive' },
+        { kind: 'text', label: 'Feeds', value: linkedName(grid, buildings, registry, t) },
         { kind: 'text', label: 'Facing', value: DIR_NAMES[face] ?? '—' },
         carryingStat(world, grid.slot[t]!),
       )
@@ -154,20 +176,6 @@ function describeBeltTile(
       return {
         title,
         subtitle: `Splitter · ${facing}`,
-        color,
-        footprint: { x, y, w: 1, h: 1 },
-        stats,
-      }
-    case KIND_PRODUCER:
-      stats.push(
-        { kind: 'text', label: 'Produces', value: perSec(grid.portEvery[t]!) },
-        { kind: 'color', label: 'Item', color: grid.portColor[t]! },
-        { kind: 'bar', label: 'Storage', value: grid.storage[t]!, max: grid.storageCap[t]! },
-        carryingStat(world, grid.slot[t]!),
-      )
-      return {
-        title,
-        subtitle: `Producer · ${facing}`,
         color,
         footprint: { x, y, w: 1, h: 1 },
         stats,
@@ -199,6 +207,8 @@ function buildingSubtitle(type: string | undefined): string {
       return 'Building'
     case 'resource':
       return 'Resource'
+    case 'terrain':
+      return 'Terrain'
     case undefined:
       return 'Object'
     default:
@@ -213,6 +223,7 @@ function buildingSubtitle(type: string | undefined): string {
  */
 function describeBuilding(
   world: GameWorld,
+  buildings: BuildingStore,
   registry: InspectRegistry,
   x: number,
   y: number,
@@ -227,16 +238,41 @@ function describeBuilding(
     const py = Position.y[eid]!
     if (x < px || x >= px + w || y < py || y >= py + h) continue
     const meta = registry.get(px, py)
+    const stats: InspectStat[] = []
+    // A terrain (or any object) blurb leads the rows, e.g. "build a Farm on top".
+    if (meta?.detail) stats.push({ kind: 'text', label: 'Use', value: meta.detail })
+    // A resource-holding building shows its production and a bar per stockpiled resource.
+    const b = buildingAt(buildings, px, py)
+    if (b >= 0) {
+      if (buildings.prodColor[b]! >= 0) {
+        stats.push(
+          { kind: 'text', label: 'Produces', value: perSec(buildings.prodEvery[b]!) },
+          { kind: 'color', label: 'Resource', color: buildings.prodColor[b]! },
+        )
+      }
+      const n = buildings.slotN[b]!
+      for (let k = 0; k < n; k++) {
+        const si = b * MAX_SLOTS + k
+        stats.push({
+          kind: 'bar',
+          label: 'Stock',
+          value: buildings.slotCount[si]!,
+          max: buildings.slotCap[si]!,
+          color: buildings.slotColor[si]!,
+        })
+      }
+    }
+    stats.push(
+      { kind: 'text', label: 'Size', value: `${w}×${h}` },
+      { kind: 'text', label: 'Tiles', value: String(w * h) },
+      { kind: 'text', label: 'Position', value: `${px}, ${py}` },
+    )
     return {
       title: meta?.name ?? 'Structure',
       subtitle: buildingSubtitle(meta?.type),
       color: Renderable.color[eid]!,
       footprint: { x: px, y: py, w, h },
-      stats: [
-        { kind: 'text', label: 'Size', value: `${w}×${h}` },
-        { kind: 'text', label: 'Tiles', value: String(w * h) },
-        { kind: 'text', label: 'Position', value: `${px}, ${py}` },
-      ],
+      stats,
     }
   }
   return null
@@ -250,11 +286,12 @@ function describeBuilding(
 export function resolveInspect(
   world: GameWorld,
   grid: BeltGrid,
+  buildings: BuildingStore,
   registry: InspectRegistry,
   x: number,
   y: number,
 ): InspectInfo | null {
   const t = grid.index.get(tileKey(x, y))
-  if (t !== undefined) return describeBeltTile(world, grid, registry, t, x, y)
-  return describeBuilding(world, registry, x, y)
+  if (t !== undefined) return describeBeltTile(world, grid, buildings, registry, t, x, y)
+  return describeBuilding(world, buildings, registry, x, y)
 }

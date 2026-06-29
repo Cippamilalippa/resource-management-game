@@ -101,11 +101,38 @@ body {
   backdrop-filter: blur(6px);
 }
 
+/* Icon wrapper (Icon.tsx): a square box holding a lucide glyph plus an optional corner badge. */
+.icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+/* Mk-tier Roman numeral, badged in the icon's top-right corner. */
+.icon-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  padding: 0 3px;
+  border-radius: 4px;
+  background: #4fa8ff;
+  color: #0b0e16;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+
 .buildbar .tool {
+  position: relative;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px;
   background: rgba(42, 46, 58, 0.6);
   border: 1px solid transparent;
   border-radius: 8px;
@@ -126,11 +153,100 @@ body {
   background: rgba(79, 168, 255, 0.18);
 }
 
+/* The category whose items are currently shown on the row above. */
+.buildbar .tool-group.open {
+  border-color: #4a5168;
+  background: rgba(74, 81, 104, 0.55);
+}
+
 .buildbar .swatch {
   width: 14px;
   height: 14px;
   border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* Hover detail panel, raised above the bar to describe the tool/category under the cursor. */
+.buildbar-detail {
+  min-width: 200px;
+  max-width: 320px;
+  background: rgba(20, 23, 33, 0.92);
+  border: 1px solid #2a2e3a;
+  border-radius: 10px;
+  padding: 10px 12px;
+  backdrop-filter: blur(6px);
+}
+
+.buildbar-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.buildbar-detail-titles {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.buildbar-detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6e8ef;
+}
+
+.buildbar-detail-sub {
+  font-size: 11px;
+  color: #8a90a2;
+}
+
+.buildbar-detail-rows {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.buildbar-detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.buildbar-detail-label {
+  color: #8a90a2;
+}
+
+.buildbar-detail-value {
+  color: #e6e8ef;
+}
+
+.buildbar-detail-swatches {
+  display: flex;
+  gap: 3px;
+}
+
+.buildbar-detail-list {
+  font-size: 12px;
+  color: #cfd3df;
+}
+
+/* The 1..9/0 keyboard shortcut, badged in the button's bottom-right corner. */
+.buildbar .tool-key {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  min-width: 11px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #cfd3df;
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+  pointer-events: none;
 }
 
 .buildbar-hint {

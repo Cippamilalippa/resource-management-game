@@ -29,8 +29,11 @@ export function createSim(prototypes: readonly ClientPrototype[], seed = 1): Cli
 
   const byId = new Map(prototypes.map((p) => [p.id, p]))
   const registry = new InspectRegistry()
+  // The game state owns the terrain grid; create it first so the scene can populate it.
+  const state = createGameState()
   // Record each scene object's prototype name/type at its top-left tile so the inspector
-  // can name the starting village and orchard (a read-only, non-sim side effect).
+  // can name the starting village, orchard and terrain patches (a read-only, non-sim side
+  // effect). Terrain patches additionally fill `state.terrain` so producer placement reads it.
   spawnScene(
     world,
     (id) => byId.get(id),
@@ -39,11 +42,16 @@ export function createSim(prototypes: readonly ClientPrototype[], seed = 1): Cli
       const name = typeof proto?.name === 'string' ? proto.name : protoId
       const type = typeof proto?.type === 'string' ? proto.type : 'building'
       const { Position } = world.components
-      registry.record(Position.x[eid]!, Position.y[eid]!, { name, type })
+      registry.record(Position.x[eid]!, Position.y[eid]!, {
+        name,
+        type,
+        ...(typeof proto?.info === 'string' ? { detail: proto.info } : {}),
+      })
     },
+    state.terrain,
+    state.buildings,
   )
 
-  const state = createGameState()
   const scheduler = new Scheduler([counterSystem, ...createGameSystems(state)])
   return { world, scheduler, state, registry }
 }

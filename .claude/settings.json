@@ -31,7 +31,17 @@
       "Bash(echo \"exit $?\")",
       "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,1\\)\\)\")",
       "Bash(node -e \"const p=require\\('./apps/game/package.json'\\);console.log\\(JSON.stringify\\(p.scripts,null,1\\)\\)\")",
-      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./apps/headless/package.json'\\).scripts,null,1\\)\\)\")"
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./apps/headless/package.json'\\).scripts,null,1\\)\\)\")",
+      "Bash(node -e ' *)",
+      "Bash(perl -0pi -e \"s/Kept identical to the headless copy\\\\n \\\\* \\\\\\(\\\\`apps\\\\/headless\\\\/scene\\\\.ts\\\\`\\\\\\) so the on-screen world and the headless run match\\\\./Kept identical to the renderer-side copy\\\\n * \\(\\\\`apps\\\\/game\\\\/src\\\\/scene.ts\\\\`\\) so the headless run and the on-screen world match./\" apps/headless/scene.ts)",
+      "Bash(node -e 'console.log\\(\"terrain tiles:\", 5*5 + 5*5 + 4*4 + 4*4\\); console.log\\(\"new baseline:\", 37 + 5*5 + 5*5 + 4*4 + 4*4\\)')",
+      "Bash(perl -0pi -e 's/resolveInspect\\\\\\(world, grid, registry,/resolveInspect\\(world, grid, state.buildings, registry,/g' apps/game/src/placement.ts)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([\\(p.get\\('id'\\), p.get\\('type'\\), p.get\\('name'\\)\\) for p in \\(d if isinstance\\(d,list\\) else d.get\\('prototypes',d\\)\\)]\\)\")",
+      "Bash(pnpm prettier *)",
+      "Bash(pnpm --filter @factory/game add --save-exact lucide-react)",
+      "Bash(node -e \"console.log\\('lucide-react', require\\('./apps/game/node_modules/lucide-react/package.json'\\).version\\)\")",
+      "Bash(grep -oE '\\(index as icons|LucideProps,|LucideIcon,|type \\\\{[^}]*\\\\}|export type\\)' node_modules/.pnpm/lucide-react@1.22.0_react@19.2.7/node_modules/lucide-react/dist/lucide-react.d.ts)",
+      "Bash(awk 'NR>=26225' node_modules/.pnpm/lucide-react@1.22.0_react@19.2.7/node_modules/lucide-react/dist/lucide-react.d.ts)"
     ],
     "additionalDirectories": [
       "/Users/carlomartini/Progetti/resource-management-game/packages/engine/persistence"
