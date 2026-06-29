@@ -24,7 +24,8 @@
       "Bash(cp apps/headless/gameLogic.ts /tmp/gl.bak)",
       "Bash(perl -0pi -e 's/  if \\\\\\(g\\\\.kind\\\\[s\\\\] === KIND_SPLITTER && hasForwardEdge\\\\\\(g, t, s\\\\\\)\\\\\\) return false\\\\n//' apps/headless/gameLogic.ts)",
       "Bash(perl -0pi -e 's/      if \\\\\\(nb !== NONE && !hasForwardEdge\\\\\\(g, nb, t\\\\\\)\\\\\\) c\\\\+\\\\+/      if \\(nb !== NONE\\) c++/' apps/headless/gameLogic.ts)",
-      "Bash(cp /tmp/gl.bak apps/headless/gameLogic.ts)"
+      "Bash(cp /tmp/gl.bak apps/headless/gameLogic.ts)",
+      "Bash(pnpm format *)"
     ]
   }
 }

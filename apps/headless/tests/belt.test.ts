@@ -138,6 +138,83 @@ describe('splitter', () => {
     const b = await bootSplitter(3, 300)
     expect(hashState(a.world)).toBe(hashState(b.world))
   })
+})
+
+describe('belt tiers (per-tile speed)', () => {
+  it('derives the base move-cycle as the GCD of tile periods, dueEvery = period / base', async () => {
+    const sim = await bootstrapSim(1)
+    // An mk1 run (period 60) on y=0 and an mk3 run (period 15) on y=2, laid separately.
+    enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 3, by: 0, color: 0x404040, moveEvery: 60 })
+    enqueuePlaceBelt(sim.world, { ax: 0, ay: 2, bx: 3, by: 2, color: 0x404040, moveEvery: 15 })
+    sim.scheduler.runTicks(sim.world, 1) // drain the queued placements so the grid is live
+    const g = sim.state.grid
+    expect(g.moveEvery).toBe(15) // gcd(60, 15)
+    // The slow run moves once every 4 base-cycles; the fast run every cycle.
+    for (let t = 0; t < g.count; t++) {
+      expect(g.dueEvery[t]!).toBe(g.ty[t] === 0 ? 4 : 1)
+    }
+  })
+
+  it('carries an item further on a faster belt than a slower one in the same time', async () => {
+    const sim = await bootstrapSim(1)
+    const w = sim.world
+    // Two long parallel belts fed by outputs: slow (mk1) on y=0, fast (mk3, 4x) on y=2.
+    enqueuePlaceBelt(w, { ax: 0, ay: 0, bx: 30, by: 0, color: 0x404040, moveEvery: 60 })
+    enqueuePlaceBelt(w, { ax: 0, ay: 2, bx: 30, by: 2, color: 0x404040, moveEvery: 15 })
+    enqueuePlacePort(w, {
+      x: 0,
+      y: 0,
+      port: 'output',
+      color: 0x44dd44,
+      itemColor: 0xffaa00,
+      spawnEvery: 1,
+    })
+    enqueuePlacePort(w, {
+      x: 0,
+      y: 2,
+      port: 'output',
+      color: 0x44dd44,
+      itemColor: 0xffaa00,
+      spawnEvery: 1,
+    })
+    sim.scheduler.runTicks(w, 240) // 4 mk1 move-cycles vs 16 mk3 move-cycles
+    const g = sim.state.grid
+    const { Position } = w.components
+    let slowMax = 0
+    let fastMax = 0
+    for (let t = 0; t < g.count; t++) {
+      const eid = g.slot[t]!
+      if (eid === -1) continue
+      if (g.ty[t] === 0) slowMax = Math.max(slowMax, Position.x[eid]!)
+      else fastMax = Math.max(fastMax, Position.x[eid]!)
+    }
+    // The fast belt's frontier is well ahead of the slow belt's (~4x).
+    expect(fastMax).toBeGreaterThan(slowMax)
+  })
+
+  it('is deterministic with mixed-speed belts: same seed + commands -> identical hash', async () => {
+    const boot = async (): Promise<Sim> => {
+      const sim = await bootstrapSim(5)
+      enqueuePlaceBelt(sim.world, { ax: 0, ay: 0, bx: 8, by: 0, color: 0x404040, moveEvery: 60 })
+      enqueuePlaceBelt(sim.world, { ax: 0, ay: 2, bx: 8, by: 2, color: 0x404040, moveEvery: 30 })
+      enqueuePlaceBelt(sim.world, { ax: 0, ay: 4, bx: 8, by: 4, color: 0x404040, moveEvery: 15 })
+      for (const y of [0, 2, 4]) {
+        enqueuePlacePort(sim.world, {
+          x: 0,
+          y,
+          port: 'output',
+          color: 0x44dd44,
+          itemColor: 0xffaa00,
+          spawnEvery: 4,
+        })
+      }
+      sim.scheduler.runTicks(sim.world, 300)
+      return sim
+    }
+    const a = await boot()
+    const b = await boot()
+    expect(hashState(a.world)).toBe(hashState(b.world))
+  })
 
   it('items ride the feed belt one tile per cycle into a splitter — they never teleport across it', async () => {
     // Reproduces the on-screen "items jump from the output straight to the splitter" bug:

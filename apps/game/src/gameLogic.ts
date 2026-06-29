@@ -98,9 +98,22 @@ export interface BeltGrid {
   nbr: Int32Array
   /** Processing order (downstream tiles first). Rebuilt on placement. */
   order: Int32Array
-  /** Advance items one tile every N ticks (single grid-wide speed). */
+  /** Per-tile move period in ticks — the belt tier's `moveEvery`. Set at placement. */
+  period: Int32Array
+  /** Per-tile cadence: advance this tile's item every `dueEvery` base-cycles (period / base). */
+  dueEvery: Int32Array
+  /**
+   * Base move-cycle in ticks: the GCD of every tile's `period`. The grid steps once per
+   * base-cycle and each tile moves its item every `dueEvery` of those cycles, so belt tiers
+   * with different periods coexist (a faster tier just has a smaller `dueEvery`). A
+   * single-tier grid has base === that tier's period and `dueEvery` === 1 everywhere,
+   * reproducing the old uniform-speed behaviour exactly.
+   */
   moveEvery: number
+  /** Ticks elapsed in the current base-cycle. */
   moveTimer: number
+  /** Base-cycles elapsed; a tile is due to move when `moveCount % dueEvery === 0`. */
+  moveCount: number
 }
 
 /** Pack a tile coordinate into a single integer key. Range covers a huge map. */
@@ -128,8 +141,11 @@ export function createBeltGrid(moveEvery: number): BeltGrid {
     trackEid: new Int32Array(cap).fill(NONE),
     nbr: new Int32Array(cap * 4).fill(NONE),
     order: new Int32Array(cap),
+    period: new Int32Array(cap).fill(Math.max(1, moveEvery)),
+    dueEvery: new Int32Array(cap).fill(1),
     moveEvery: Math.max(1, moveEvery),
     moveTimer: 0,
+    moveCount: 0,
   }
 }
 
@@ -185,6 +201,8 @@ function ensureCapacity(g: BeltGrid, need: number): void {
   g.trackEid = grow(g.trackEid, next, NONE)
   g.nbr = grow(g.nbr, next * 4, NONE)
   g.order = grow(g.order, next, 0)
+  g.period = grow(g.period, next, 1)
+  g.dueEvery = grow(g.dueEvery, next, 1)
 }
 
 function grow(src: Int32Array, len: number, fill: number): Int32Array {
@@ -223,10 +241,13 @@ function addOrAimTile(
   y: number,
   face: number,
   color: number,
+  period: number,
 ): number {
   const existing = tileAt(g, x, y)
   if (existing !== NONE) {
     g.face[existing] = face
+    // Redrawing a run over an existing tile also re-tiers it (e.g. upgrade a belt to a faster mk).
+    g.period[existing] = period
     if (g.kind[existing] === KIND_PLAIN) {
       gw.components.Renderable.sprite[g.trackEid[existing]!] = sprite(SHAPE_BELT_ARROW, face)
     }
@@ -241,6 +262,7 @@ function addOrAimTile(
   g.slot[t] = NONE
   g.inDir[t] = NONE
   g.rr[t] = 0
+  g.period[t] = period
   g.trackEid[t] = spawnEntity(gw, {
     pos: { x, y },
     sprite: sprite(SHAPE_BELT_ARROW, face),
@@ -293,6 +315,38 @@ function rebuildTopology(g: BeltGrid): void {
   }
 }
 
+/** Greatest common divisor (Euclid; positive integer inputs). */
+function gcd(a: number, b: number): number {
+  while (b !== 0) {
+    const r = a % b
+    a = b
+    b = r
+  }
+  return a
+}
+
+/**
+ * Recompute the grid's base move-cycle and every tile's cadence after a placement. The base is
+ * the GCD of all tile periods, so each `dueEvery = period / base` is a whole number: the fastest
+ * tier moves every base-cycle, slower tiers every Nth. A single-tier grid yields base === that
+ * tier's period and dueEvery === 1 for every tile (identical to the old uniform-speed model). When
+ * the base changes the cycle length changes, so the timer/counter reset keeps the phase clean.
+ * Off the hot path (placement only).
+ */
+function recomputeCadence(g: BeltGrid): void {
+  const n = g.count
+  if (n === 0) return
+  let base = g.period[0]!
+  for (let t = 1; t < n; t++) base = gcd(base, g.period[t]!)
+  if (base < 1) base = 1
+  for (let t = 0; t < n; t++) g.dueEvery[t] = (g.period[t]! / base) | 0 || 1
+  if (base !== g.moveEvery) {
+    g.moveEvery = base
+    g.moveTimer = 0
+    g.moveCount = 0
+  }
+}
+
 /**
  * Whether tile s has a *forward* edge to t, before the splitter-source exclusion: a
  * plain/output tile feeds the tile it faces; a splitter feeds every adjacent belt tile;
@@ -341,9 +395,10 @@ function successorCount(g: BeltGrid, t: number): number {
  * is visited, so a packed run shuffles forward one tile in a single pass.
  */
 function stepBelts(gw: GameWorld, g: BeltGrid): void {
-  const { order, slot, kind, nbr, face, inDir, rr, tx, ty } = g
+  const { order, slot, kind, nbr, face, inDir, rr, tx, ty, dueEvery } = g
   const { Position } = gw.components
   const n = g.count
+  const moveCount = g.moveCount
 
   // Park every riding item's render anchor on its own tile first: by default an item is
   // stationary this cycle. Movers overwrite their anchor below. Without this, a blocked or
@@ -364,6 +419,9 @@ function stepBelts(gw: GameWorld, g: BeltGrid): void {
     const t = order[i]!
     const eid = slot[t]!
     if (eid === NONE || kind[t] === KIND_INPUT) continue
+    // This tile's item only advances on the tile's own cadence; off-cadence it stays parked
+    // (the loop above already pinned its render anchor), letting slower tiers coexist with fast ones.
+    if (moveCount % dueEvery[t]! !== 0) continue
 
     let target = NONE
     let dir = NONE
@@ -443,6 +501,7 @@ function updateBelts(gw: GameWorld, g: BeltGrid): void {
   if (++g.moveTimer >= g.moveEvery) {
     g.moveTimer = 0
     stepBelts(gw, g)
+    g.moveCount++
   }
   extractFromOutputs(gw, g)
 }
@@ -558,11 +617,12 @@ function applyCommand(gw: GameWorld, state: GameState, cmd: GameCommand): void {
     case 'place_belt': {
       const { dx, dy, length } = projectBelt(cmd.ax, cmd.ay, cmd.bx, cmd.by)
       const face = dirOf(dx, dy)
-      g.moveEvery = Math.max(1, cmd.moveEvery)
+      const period = Math.max(1, cmd.moveEvery)
       for (let i = 0; i < length; i++) {
-        addOrAimTile(gw, g, cmd.ax + dx * i, cmd.ay + dy * i, face, cmd.color)
+        addOrAimTile(gw, g, cmd.ax + dx * i, cmd.ay + dy * i, face, cmd.color, period)
       }
       rebuildTopology(g)
+      recomputeCadence(g)
       return
     }
     case 'place_port': {

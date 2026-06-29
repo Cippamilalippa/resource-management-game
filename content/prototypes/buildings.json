@@ -9,10 +9,26 @@
   {
     "id": "building.belt",
     "type": "belt",
-    "name": "Conveyor Belt",
+    "name": "Conveyor Belt Mk1",
     "size": { "w": 1, "h": 1 },
     "color": 4407359,
     "moveEvery": 60
+  },
+  {
+    "id": "building.belt_mk2",
+    "type": "belt",
+    "name": "Conveyor Belt Mk2",
+    "size": { "w": 1, "h": 1 },
+    "color": 3526848,
+    "moveEvery": 30
+  },
+  {
+    "id": "building.belt_mk3",
+    "type": "belt",
+    "name": "Conveyor Belt Mk3",
+    "size": { "w": 1, "h": 1 },
+    "color": 15769648,
+    "moveEvery": 15
   },
   {
     "id": "building.output",
