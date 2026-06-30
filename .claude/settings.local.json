@@ -29,7 +29,8 @@
       "Bash(pnpm --filter @factory/game typecheck)",
       "Bash(npx vitest *)",
       "Bash(echo \"=== GATE EXIT: $? ===\")",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(grep -E '\\\\.\\(ts|tsx|js\\)$')"
     ]
   }
 }

@@ -3,6 +3,22 @@ import { lerp, type GridCoord } from '@factory/shared'
 import { TILE_SIZE, renderableEntities, type GameWorld } from '../core/index.ts'
 import { Camera } from './camera.ts'
 
+/**
+ * The belt flow-arrow sign as a path of `[forward, lateral]` points in tile-fraction units,
+ * authored pointing east (forward = +x) and centred on the tile. A chunky swallowtail: tip →
+ * top shoulder → top back corner → notched centre → bottom back corner → bottom shoulder. The
+ * SVG-equivalent path is `M .4 0 L 0 .4 L -.4 .4 L 0 0 L -.4 -.4 L 0 -.4 Z`. {@link Renderer.#beltArrow}
+ * scales it by `TILE_SIZE` and rotates it onto the travel axis. Half-extent 0.4 = near-full-tile.
+ */
+const BELT_ARROW: readonly (readonly [number, number])[] = [
+  [0.4, 0],
+  [0, 0.4],
+  [-0.4, 0.4],
+  [0, 0],
+  [-0.4, -0.4],
+  [0, -0.4],
+]
+
 export interface RendererOptions {
   /** Existing canvas to render into. */
   canvas: HTMLCanvasElement
@@ -324,10 +340,13 @@ export class Renderer {
         return
       }
       case 2: {
-        // Belt track: a faint tile with a direction chevron.
-        g.rect(pad, pad, TILE_SIZE - pad * 2, TILE_SIZE - pad * 2)
-        g.fill({ color, alpha: 0.3 })
-        this.#chevron(g, orient, TILE_SIZE / 2, TILE_SIZE / 2, TILE_SIZE * 0.3, 0xffffff, 0.55)
+        // Belt track: a soft tile backdrop with the big SVG flow-arrow sign on top.
+        const inner = TILE_SIZE - pad * 2
+        // Base tile, gently rounded and low-contrast so it reads as a backdrop, not a wall.
+        g.roundRect(pad, pad, inner, inner, 4)
+        g.fill({ color, alpha: 0.22 })
+        // A chunky, near-full-tile arrow pointing along travel.
+        this.#beltArrow(g, orient)
         return
       }
       case 3: {
@@ -395,6 +414,28 @@ export class Renderer {
       cy - uy * half - py * wid,
     ])
     g.fill({ color, alpha })
+  }
+
+  /**
+   * Draw the belt flow-arrow sign ({@link BELT_ARROW}) centred on the tile, scaled to the tile and
+   * rotated to point along travel for `orient` (0=N,1=E,2=S,3=W). Each authored `[forward, lateral]`
+   * point maps onto the travel axis `(ux,uy)` and its perpendicular `(px,py)`, in tile-local pixels
+   * — so the sign rides the entity's own graphics and lands on its tile. Filled white at half alpha.
+   */
+  #beltArrow(g: Graphics, orient: number): void {
+    const c = TILE_SIZE / 2
+    const ux = orient === 1 ? 1 : orient === 3 ? -1 : 0
+    const uy = orient === 0 ? -1 : orient === 2 ? 1 : 0
+    const px = -uy
+    const py = ux
+    const pts: number[] = []
+    for (let i = 0; i < BELT_ARROW.length; i++) {
+      const f = BELT_ARROW[i]![0] * TILE_SIZE
+      const l = BELT_ARROW[i]![1] * TILE_SIZE
+      pts.push(c + ux * f + px * l, c + uy * f + py * l)
+    }
+    g.poly(pts)
+    g.fill({ color: 0xffffff, alpha: 0.5 })
   }
 
   #drawGrid(): void {
