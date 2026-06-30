@@ -1,8 +1,10 @@
 # Factory Game
 
-A single-player 2D top-down factory / management game. This repository is currently
-a **foundation skeleton only** — a clean monorepo with a working "tick + render"
-loop. No gameplay (belts, recipes, cities, demand) is implemented yet.
+A single-player 2D top-down factory / management game. The engine is a generic,
+deterministic simulation kernel that knows nothing game-specific; the base game
+(conveyor belts, resource-holding buildings, producers, input/output ports, splitters
+and terrain gating) ships as **"mod zero"** in `mods/base`, contributing its systems and
+command handling through the same stable mod API a third-party mod would use.
 
 ## Quick start
 
@@ -28,12 +30,13 @@ packages/
   engine/      the generic engine — knows NOTHING game-specific
     core/        bitecs world, fixed-timestep scheduler, event bus, seeded RNG, components
     data/        prototype registry + zod schema validation
-    scripting/   the stable mod API surface (sandbox internals out of scope)
+    scripting/   the stable mod API surface (registerSystem/spawn/despawn/on/emit/…)
     render/      PixiJS renderer: reads sim state, interpolates, draws; never writes
     persistence/ deterministic (de)serialization + FNV-1a state hashing
-    modloader/   mod manifest shape + dependency resolution + data merge
-mods/          ALL game content, discovered by scanning this dir (no privileged path)
-  base/        THE BASE GAME = "mod zero" — same shape as any mod (manifest + prototypes + scripts)
+    modloader/   mod manifest shape + dependency resolution + data merge + script execution
+mods/          ALL game content (each a workspace package), discovered by scanning this dir
+  base/        THE BASE GAME = "mod zero" — manifest + prototypes + scripts; its scripts/main.ts
+               creates the game state, spawns the scene and registers the sim systems via ModApi
   …/           third-party mods drop in here, loaded the exact same way
 apps/
   game/        Electron + Pixi + React shell wiring everything together
@@ -48,6 +51,15 @@ lives in `mods/base` and is **discovered and loaded as "mod zero"** by the _same
 directory scan + pipeline a third-party mod uses — there is no special-cased path. If
 mod discovery ever breaks, the base game won't boot, so the mod system is exercised at
 all times. Whatever the base game can do, a modder can too.
+
+The base game reaches the engine **only** through the stable `ModApi`: its
+`scripts/main.ts` `init(api)` registers the per-tick systems (`api.registerSystem`),
+creates and spawns entities (`api.spawn`/`api.despawn`), and hands the host a read-only
+state handle for rendering/inspection via an `api.emit('base:ready', …)` event — never by
+importing engine internals. Both hosts run it through the one `runModScripts` seam: the
+headless runner dynamic-imports the script; the Electron renderer loads a Vite-bundled
+copy. Each mod is a small pnpm workspace package so its scripts resolve `@factory/engine`
+and are typechecked by `pnpm -r typecheck`.
 
 Cross-module imports inside the engine go through each module's public `index.ts`
 barrel (e.g. `@factory/engine/core`) — never by reaching into internals.
@@ -80,4 +92,7 @@ main + preload are TypeScript, bundled to CommonJS in `dist-electron/` by esbuil
 server, then launches Electron pointed at it. The Electron **main** process scans `/mods`
 and loads every discovered mod (the base game included) through the real mod loader (it
 has filesystem access) and hands the merged prototypes to the sandboxed renderer over a
-`contextBridge` IPC bridge.
+`contextBridge` IPC bridge. The **renderer** then runs each mod's scripts against the live
+world through the same `runModScripts` seam the headless runner uses (resolving the
+Vite-bundled script modules, since it has no filesystem) — so the base game's systems come
+from `mods/base` in both hosts, in identical order, keeping the two views deterministic.

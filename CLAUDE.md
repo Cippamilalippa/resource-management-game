@@ -81,6 +81,13 @@ not an afterthought.
   `packages/engine`. Game concepts arrive only as data/scripts via the prototype
   registry + mod loader. The base game in `mods/base` is "mod zero" — discovered and
   loaded by the same `/mods` directory scan a third-party mod uses; never special-case it.
+  Its `scripts/` reach the engine ONLY through `ModApi` (`registerSystem`, `spawn`,
+  `despawn`, `on`, `emit`, `getPrototype`) — no value imports from `@factory/engine/*` in
+  the sandboxed sim. The base sim lives in `mods/base/scripts/sim.ts`; `apps/*/src` and the
+  headless tests consume its read-only helpers via the thin `gameLogic.ts` re-export barrels
+  (a single source of truth — don't reintroduce app-side copies). Each mod is its own pnpm
+  workspace package (`mods/*`) so its scripts resolve `@factory/engine` and are covered by
+  `pnpm -r typecheck`.
 - **Determinism.** Sim code uses the seeded RNG only — no `Math.random`, no
   `Date.now`/`Date` in `engine/core` or `mods/**/scripts` (ESLint enforces this).
 - **Render/UI never mutate sim state.** One-way: sim → render.
