@@ -1,4 +1,4 @@
-import { Application, Container, Graphics } from 'pixi.js'
+import { Application, Container, Graphics, Sprite, type Texture } from 'pixi.js'
 import { lerp, type GridCoord } from '@factory/shared'
 import { TILE_SIZE, renderableEntities, type GameWorld } from '../core/index.ts'
 import { Camera } from './camera.ts'
@@ -62,10 +62,20 @@ export class Renderer {
   #world = new Container()
   #gridLayer = new Graphics()
   #entityLayer = new Container()
+  #iconLayer = new Container()
   #ghostLayer = new Graphics()
   #highlightLayer = new Graphics()
   #camera: Camera
   #sprites = new Map<number, Graphics>()
+  /**
+   * Optional per-entity overlay glyph, keyed by the entity's packed `color`. The engine stays
+   * game-agnostic: the app supplies whatever textures it likes (here, the build-bar lucide
+   * icon rasterized per building/producer colour) via {@link setIcons}; the renderer just draws
+   * the matching one in the tile's top-right corner. Empty until the app populates it.
+   */
+  #iconTextures: ReadonlyMap<number, Texture> = new Map()
+  /** Live overlay sprites, one per entity that currently has a matching icon texture. */
+  #iconSprites = new Map<number, Sprite>()
   /** Last `sprite` value painted per entity, so a changed glyph triggers a repaint. */
   #spriteVals = new Map<number, number>()
   /**
@@ -104,6 +114,7 @@ export class Renderer {
     this.#gridExtent = gridExtent
     this.#world.addChild(this.#gridLayer)
     this.#world.addChild(this.#entityLayer)
+    this.#world.addChild(this.#iconLayer)
     this.#world.addChild(this.#ghostLayer)
     this.#world.addChild(this.#highlightLayer)
     this.#app.stage.addChild(this.#world)
@@ -166,6 +177,8 @@ export class Renderer {
       const x = lerp(Position.prevX[eid]!, Position.x[eid]!, alpha) * TILE_SIZE
       const y = lerp(Position.prevY[eid]!, Position.y[eid]!, alpha) * TILE_SIZE
       g.position.set(x, y)
+
+      this.#updateIcon(eid, color, x, y, Renderable.width[eid]!)
     }
 
     // Drop graphics for entities that no longer exist.
@@ -175,7 +188,51 @@ export class Renderer {
         this.#sprites.delete(eid)
         this.#spriteVals.delete(eid)
         this.#colorVals.delete(eid)
+        this.#removeIcon(eid)
       }
+    }
+  }
+
+  /**
+   * Register the per-entity overlay icons, keyed by an entity's packed `color`. Each colour
+   * that maps to a texture has that texture drawn small in the top-right of every matching
+   * entity's tile (the app uses this to stamp the build-bar glyph onto placed buildings).
+   * Replacing the map updates existing entities on the next frame. The renderer draws the
+   * textures but does not own them — the caller is responsible for their lifetime.
+   */
+  setIcons(icons: ReadonlyMap<number, Texture>): void {
+    this.#iconTextures = icons
+  }
+
+  /** Sync entity `eid`'s overlay icon: create/move/retexture it, or drop it if its colour has none. */
+  #updateIcon(eid: number, color: number, x: number, y: number, wTiles: number): void {
+    const tex = this.#iconTextures.get(color)
+    if (!tex) {
+      this.#removeIcon(eid)
+      return
+    }
+    let icon = this.#iconSprites.get(eid)
+    if (!icon) {
+      icon = new Sprite(tex)
+      const size = TILE_SIZE * 0.3
+      icon.setSize(size, size)
+      this.#iconSprites.set(eid, icon)
+      this.#iconLayer.addChild(icon)
+    } else if (icon.texture !== tex) {
+      // A recycled entity id now hosts a different building — swap to its glyph.
+      icon.texture = tex
+    }
+    // Anchor to the tile's top-right corner, inset a little so it doesn't touch the edge.
+    const inset = TILE_SIZE * 0.08
+    icon.position.set(x + wTiles * TILE_SIZE - TILE_SIZE * 0.3 - inset, y + inset)
+  }
+
+  /** Destroy entity `eid`'s overlay icon, if it has one. */
+  #removeIcon(eid: number): void {
+    const icon = this.#iconSprites.get(eid)
+    if (icon) {
+      icon.destroy()
+      this.#iconSprites.delete(eid)
     }
   }
 
@@ -245,6 +302,7 @@ export class Renderer {
   destroy(): void {
     this.#app.destroy(false, { children: true })
     this.#sprites.clear()
+    this.#iconSprites.clear()
   }
 
   /**

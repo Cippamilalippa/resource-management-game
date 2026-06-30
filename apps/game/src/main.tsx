@@ -9,6 +9,7 @@ import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype } from './sim.ts'
 import type { DiscoveredModInfo } from '../electron/preload.ts'
 import { beltMoveAlpha } from './gameLogic.ts'
+import { buildIconTextures } from './iconTextures.ts'
 import './styles.css'
 
 /** Read a numeric prototype field, falling back when absent/ill-typed. */
@@ -105,7 +106,8 @@ async function boot(): Promise<void> {
 
   const { prototypes, discovered, mods } = await loadContent()
   const { world, scheduler, state, registry } = await createSim(prototypes, discovered)
-  buildStore.setItems(toBuildItems(prototypes))
+  const items = toBuildItems(prototypes)
+  buildStore.setItems(items)
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement
   const renderer = await Renderer.create({
@@ -113,6 +115,8 @@ async function boot(): Promise<void> {
     width: globalThis.innerWidth,
     height: globalThis.innerHeight,
   })
+  // Stamp the build-bar glyph onto placed buildings/producers, keyed by their tile colour.
+  renderer.setIcons(await buildIconTextures(items))
   globalThis.addEventListener('resize', () => {
     renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
   })
