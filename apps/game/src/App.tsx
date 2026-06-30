@@ -33,7 +33,8 @@ export function App(): React.JSX.Element {
         </div>
       </div>
       <div className="hint">
-        WASD to pan · scroll to zoom · hover to inspect · click to select · pick a tool to build
+        WASD to pan · scroll to zoom · R to rotate a port · hover to inspect · click to select ·
+        pick a tool to build
       </div>
       <BuildBar />
       <InfoSidebar />

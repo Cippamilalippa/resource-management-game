@@ -159,6 +159,21 @@ body {
   background: rgba(74, 81, 104, 0.55);
 }
 
+/* The delete tool: a danger-tinted button, set off from the category buttons to its left. */
+.buildbar .tool-delete {
+  margin-left: 8px;
+  color: #ff8a8a;
+}
+
+.buildbar .tool-delete:hover {
+  background: rgba(255, 85, 85, 0.16);
+}
+
+.buildbar .tool-delete.selected {
+  border-color: #ff5555;
+  background: rgba(255, 85, 85, 0.2);
+}
+
 .buildbar .swatch {
   width: 14px;
   height: 14px;

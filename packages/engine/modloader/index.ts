@@ -6,7 +6,6 @@
  */
 export { modManifestSchema, type ModManifest } from './manifest.ts'
 export { type FileSource } from './fileSource.ts'
-export { NodeFileSource, discoverModSources } from './nodeFileSource.ts'
 export {
   readManifest,
   resolveLoadOrder,

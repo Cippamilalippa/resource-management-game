@@ -236,8 +236,9 @@ export function BuildBar(): React.JSX.Element | null {
   if (groups.length === 0) return null
 
   const selected = openGroup?.items.find((i) => i.id === state.selected) ?? null
-  const hint =
-    selected?.kind === 'belt'
+  const hint = state.deleting
+    ? 'Click an object to delete · right-click to cancel'
+    : selected?.kind === 'belt'
       ? 'Drag from the start tile to the end tile'
       : selected?.kind === 'port'
         ? 'Click a belt tile to attach this port'
@@ -298,6 +299,15 @@ export function BuildBar(): React.JSX.Element | null {
             {shortcutLabel(i) && <span className="tool-key">{shortcutLabel(i)}</span>}
           </button>
         ))}
+        <button
+          className={`tool tool-delete${state.deleting ? ' selected' : ''}`}
+          onClick={() => buildStore.toggleDelete()}
+          title="Delete object"
+          aria-label="Delete object"
+          aria-pressed={state.deleting}
+        >
+          <Icon name="Trash2" size={22} />
+        </button>
       </div>
       <div className="buildbar-hint">{hint}</div>
     </div>

@@ -120,7 +120,11 @@ async function boot(): Promise<void> {
 
   // Fixed-tick sim driven by real frame time; render interpolates with `alpha`.
   // Render is capped to 60fps; the sim stays decoupled via the scheduler.
-  const minFrameMs = 1000 / 60
+  // Cap with a margin below the 60Hz refresh interval (16.67ms) so vsync jitter
+  // doesn't reject genuine frames that arrive a hair early — dropping one forces a
+  // wait for the next vsync, halving the rate and making the FPS readout wobble.
+  // ~12.7ms still suppresses extra frames on 120/144Hz displays (8.3/6.9ms intervals).
+  const minFrameMs = 1000 / 60 - 4
   let last = performance.now()
   let lastFrameAt = last
   let lastStatsAt = 0

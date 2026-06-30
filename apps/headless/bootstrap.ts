@@ -9,16 +9,15 @@ import {
 } from '@factory/engine/core'
 import { PrototypeRegistry } from '@factory/engine/data'
 import {
-  discoverModSources,
   readManifest,
   loadMods,
   runModScripts,
-  NodeFileSource,
   type DiscoveredMod,
   type LoadResult,
   type ScriptModule,
   type ScriptResolver,
 } from '@factory/engine/modloader'
+import { discoverModSources, NodeFileSource } from '@factory/engine/modloader/node'
 import type { GameState } from './gameLogic.ts'
 
 /**

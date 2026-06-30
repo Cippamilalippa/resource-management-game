@@ -16,6 +16,7 @@ import type {
   PlacePortCommand,
   PlaceSplitterCommand,
   PlaceProducerCommand,
+  RemoveCommand,
 } from './sim.ts'
 
 /** Queue a building placement (applied next tick). */
@@ -41,4 +42,9 @@ export function enqueuePlaceSplitter(gw: GameWorld, cmd: Omit<PlaceSplitterComma
 /** Queue a production building placement (applied next tick). */
 export function enqueuePlaceProducer(gw: GameWorld, cmd: Omit<PlaceProducerCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'place_producer', ...cmd })
+}
+
+/** Queue a removal of whatever deletable object sits at (x, y) (applied next tick). */
+export function enqueueRemove(gw: GameWorld, cmd: Omit<RemoveCommand, 'type'>): void {
+  enqueueCommand(gw, { type: 'remove', ...cmd })
 }

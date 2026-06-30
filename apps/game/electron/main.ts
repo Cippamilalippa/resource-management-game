@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { basename, join, resolve } from 'node:path'
 import { PrototypeRegistry } from '@factory/engine/data'
-import { discoverModSources, readManifest, loadMods } from '@factory/engine/modloader'
+import { readManifest, loadMods } from '@factory/engine/modloader'
+import { discoverModSources } from '@factory/engine/modloader/node'
 
 // The Electron main is bundled to CommonJS (dist-electron/main.cjs), so __dirname
 // is available natively — no import.meta.url (which would be empty under CJS).

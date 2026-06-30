@@ -4,10 +4,13 @@ import { bootstrapSim, type Sim } from '../bootstrap.ts'
 import {
   MAX_SLOTS,
   buildingAt,
+  terrainTypeAt,
   enqueuePlaceBelt,
   enqueuePlaceBuilding,
   enqueuePlacePort,
   enqueuePlaceProducer,
+  enqueuePlaceSplitter,
+  enqueueRemove,
 } from '../gameLogic.ts'
 
 /** Resource colour the test producer makes. */
@@ -130,5 +133,185 @@ describe('building stockpiles', () => {
     const b = await run()
     expect(hashState(a.world)).toBe(hashState(b.world))
     expect(stockAt(a, 29, 20)).toBe(stockAt(b, 29, 20))
+  })
+})
+
+/** The belt-grid tile id at (x, y), or -1 if none. */
+function tileIdAt(sim: Sim, x: number, y: number): number {
+  const g = sim.state.grid
+  for (let t = 0; t < g.count; t++) if (g.tx[t]! === x && g.ty[t]! === y) return t
+  return -1
+}
+
+describe('directional ports (arrow picks the building)', () => {
+  /**
+   * An output tile flanked by two producers — one WEST making SRC, one NORTH making OTHER —
+   * with its arrow facing East. The arrow points *away* from the building it drains, so it must
+   * bind to the WEST producer (opposite the facing) and ignore the one to the North.
+   */
+  async function bootTwoNeighbours(seed: number, dir: number): Promise<Sim> {
+    const sim = await bootstrapSim(seed)
+    const w = sim.world
+    enqueuePlaceBelt(w, { ax: 5, ay: 5, bx: 9, by: 5, color: 0x404040, moveEvery: 1 })
+    enqueuePlaceProducer(w, {
+      x: 4,
+      y: 5,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: SRC,
+      produceEvery: 1,
+      storageCap: 100,
+    }) // WEST
+    enqueuePlaceProducer(w, {
+      x: 5,
+      y: 4,
+      w: 1,
+      h: 1,
+      color: 0x224433,
+      itemColor: OTHER,
+      produceEvery: 1,
+      storageCap: 100,
+    }) // NORTH
+    enqueuePlacePort(w, { x: 5, y: 5, port: 'output', color: 0x44dd44, spawnEvery: 1, dir })
+    return sim
+  }
+
+  it('drains only the building behind the arrow, even with two bordering buildings', async () => {
+    const sim = await bootTwoNeighbours(1, 1) // arrow East → drain the WEST building
+    sim.scheduler.runTicks(sim.world, 200)
+    // The output is linked to the WEST producer, not the NORTH one.
+    expect(sim.state.grid.portBuilding[tileIdAt(sim, 5, 5)]!).toBe(
+      buildingAt(sim.state.buildings, 4, 5),
+    )
+    // Every item riding the belt is SRC (the west producer's), never OTHER (the north one's).
+    const colors = serialize(sim.world)
+      .entities.filter((e) => e.sprite === ITEM_SPRITE)
+      .map((e) => e.color)
+    expect(colors.length).toBeGreaterThan(0)
+    expect(colors.every((c) => c === SRC)).toBe(true)
+    // The north producer is never drained, so it fills to its cap and stays there.
+    expect(stockAt(sim, 5, 4)).toBe(100)
+  })
+
+  it('binds to the other building when the arrow is rotated to face it', async () => {
+    const sim = await bootTwoNeighbours(1, 2) // arrow South → drain the NORTH building
+    sim.scheduler.runTicks(sim.world, 200)
+    expect(sim.state.grid.portBuilding[tileIdAt(sim, 5, 5)]!).toBe(
+      buildingAt(sim.state.buildings, 5, 4),
+    )
+    const colors = serialize(sim.world)
+      .entities.filter((e) => e.sprite === ITEM_SPRITE)
+      .map((e) => e.color)
+    expect(colors.length).toBeGreaterThan(0)
+    expect(colors.every((c) => c === OTHER)).toBe(true)
+  })
+
+  it('an input feeds only the building its arrow points at', async () => {
+    const sim = await bootstrapSim(1)
+    const w = sim.world
+    enqueuePlaceBelt(w, { ax: 5, ay: 5, bx: 9, by: 5, color: 0x404040, moveEvery: 1 })
+    enqueuePlaceProducer(w, {
+      x: 4,
+      y: 5,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: SRC,
+      produceEvery: 1,
+      storageCap: 1_000_000,
+    })
+    enqueuePlacePort(w, { x: 5, y: 5, port: 'output', color: 0x44dd44, spawnEvery: 1, dir: 1 })
+    // A sink to the NORTH of the input tile and another to the SOUTH; the arrow points North.
+    enqueuePlaceBuilding(w, {
+      x: 9,
+      y: 4,
+      w: 1,
+      h: 1,
+      color: 0x334455,
+      accepts: [{ color: SRC, cap: 1_000_000 }],
+    }) // NORTH
+    enqueuePlaceBuilding(w, {
+      x: 9,
+      y: 6,
+      w: 1,
+      h: 1,
+      color: 0x445566,
+      accepts: [{ color: SRC, cap: 1_000_000 }],
+    }) // SOUTH
+    enqueuePlacePort(w, { x: 9, y: 5, port: 'input', color: 0xdd4444, dir: 0 }) // arrow North
+    sim.scheduler.runTicks(w, 600)
+    // Only the building the arrow points at (North) accumulates; the South sink stays empty.
+    expect(stockAt(sim, 9, 4)).toBeGreaterThan(0)
+    expect(stockAt(sim, 9, 6)).toBe(0)
+  })
+
+  it('is deterministic with explicitly-rotated ports', async () => {
+    const a = await bootTwoNeighbours(9, 2)
+    const b = await bootTwoNeighbours(9, 2)
+    a.scheduler.runTicks(a.world, 400)
+    b.scheduler.runTicks(b.world, 400)
+    expect(hashState(a.world)).toBe(hashState(b.world))
+  })
+})
+
+describe('removing objects', () => {
+  it('removes a belt tile, dropping it from the grid', async () => {
+    const sim = await bootstrapSim(1)
+    enqueuePlaceBelt(sim.world, { ax: 20, ay: 20, bx: 24, by: 20, color: 0x404040, moveEvery: 1 })
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.grid.count).toBe(5)
+    // Delete the middle tile; the grid compacts and the tile is gone from the index.
+    enqueueRemove(sim.world, { x: 22, y: 20 })
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.grid.count).toBe(4)
+    expect(tileIdAt(sim, 22, 20)).toBe(-1)
+    // The surviving tiles are still addressable (the swap-removed tile re-indexed correctly).
+    expect(tileIdAt(sim, 20, 20)).toBeGreaterThanOrEqual(0)
+    expect(tileIdAt(sim, 24, 20)).toBeGreaterThanOrEqual(0)
+  })
+
+  it('removing a building unlinks the output port that drained it and halts the chain', async () => {
+    const sim = await bootstrapSim(1)
+    bootChain(sim, SRC, 1_000_000)
+    sim.scheduler.runTicks(sim.world, 200)
+    expect(stockAt(sim, 29, 20)).toBeGreaterThan(0)
+    const stocked = stockAt(sim, 29, 20)
+    // Remove the producer feeding the line; its output port must unlink (no dangling building id).
+    enqueueRemove(sim.world, { x: 20, y: 20 })
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(buildingAt(sim.state.buildings, 20, 20)).toBe(-1)
+    expect(sim.state.grid.portBuilding[tileIdAt(sim, 21, 20)]!).toBe(-1)
+    // With nothing to drain, the belt drains out and the sink stops growing past the in-flight items.
+    sim.scheduler.runTicks(sim.world, 400)
+    expect(stockAt(sim, 29, 20)).toBeLessThan(stocked + 8)
+  })
+
+  it('leaves passive terrain untouched (fertile soil cannot be deleted)', async () => {
+    const sim = await bootstrapSim(1)
+    // (8, -3) is the corner of the fertile-soil patch spawned by the scene.
+    const before = terrainTypeAt(sim.state.terrain, 8, -3)
+    expect(before).not.toBe(0)
+    enqueueRemove(sim.world, { x: 8, y: -3 })
+    sim.scheduler.runTicks(sim.world, 1)
+    // Terrain is in neither store, so the remove is a no-op: the soil is still there.
+    expect(terrainTypeAt(sim.state.terrain, 8, -3)).toBe(before)
+    expect(buildingAt(sim.state.buildings, 8, -3)).toBe(-1)
+  })
+
+  it('is deterministic across a build-then-remove sequence', async () => {
+    const run = async (): Promise<Sim> => {
+      const sim = await bootstrapSim(7)
+      bootChain(sim, SRC, 50, 5)
+      enqueuePlaceSplitter(sim.world, { x: 24, y: 20, color: 0x888888 })
+      sim.scheduler.runTicks(sim.world, 120)
+      enqueueRemove(sim.world, { x: 22, y: 20 }) // a belt tile mid-run
+      enqueueRemove(sim.world, { x: 20, y: 20 }) // the producer building
+      sim.scheduler.runTicks(sim.world, 200)
+      return sim
+    }
+    const a = await run()
+    const b = await run()
+    expect(hashState(a.world)).toBe(hashState(b.world))
   })
 })

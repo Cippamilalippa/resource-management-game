@@ -21,7 +21,11 @@
  * its own stockpile every N ticks. Belts reach a building through two belt-tile modifiers
  * linked to an orthogonally adjacent building: an *output* port drains a resource out of the
  * building onto its own tile every N ticks; an *input* port deposits an arriving item into
- * the building — but only if the building accepts that resource (else the item backs up). A
+ * the building — but only if the building accepts that resource (else the item backs up). Each
+ * port carries a facing arrow that picks *which* bordering building it bridges: an output's
+ * arrow points *away* from the building it drains (the arrow starts on the building); an
+ * input's arrow points *into* the building it feeds. So a port tile flanked by two buildings
+ * binds to exactly the one its arrow designates — the other side is ignored. A
  * *splitter* tile round-robins its arriving item across every adjacent belt tile except the
  * one it came from, skipping any that are full. The resource an item carries is identified by
  * its colour.
@@ -147,6 +151,12 @@ export interface BeltGrid {
   rr: Int8Array
   /** Track entity id drawn under each tile (re-oriented when a tile's facing changes). */
   trackEid: Int32Array
+  /**
+   * Overlay entity id drawn on top of a port/splitter tile (the arrow/splitter glyph), or
+   * NONE for a plain belt tile. Tracked so deletion can despawn the overlay along with the
+   * track entity; a plain belt has only its {@link trackEid}.
+   */
+  markEid: Int32Array
   /** Neighbour belt-tile id per direction: nbr[t*4 + d], or NONE. Rebuilt on placement. */
   nbr: Int32Array
   /** Processing order (downstream tiles first). Rebuilt on placement. */
@@ -195,6 +205,7 @@ export function createBeltGrid(moveEvery: number): BeltGrid {
     portBuilding: new Int32Array(cap).fill(NONE),
     rr: new Int8Array(cap),
     trackEid: new Int32Array(cap).fill(NONE),
+    markEid: new Int32Array(cap).fill(NONE),
     nbr: new Int32Array(cap * 4).fill(NONE),
     order: new Int32Array(cap),
     period: new Int32Array(cap).fill(Math.max(1, moveEvery)),
@@ -255,6 +266,7 @@ function ensureCapacity(g: BeltGrid, need: number): void {
   g.portBuilding = grow(g.portBuilding, next, NONE)
   g.rr = grow8(g.rr, next, 0)
   g.trackEid = grow(g.trackEid, next, NONE)
+  g.markEid = grow(g.markEid, next, NONE)
   g.nbr = grow(g.nbr, next * 4, NONE)
   g.order = grow(g.order, next, 0)
   g.period = grow(g.period, next, 1)
@@ -320,6 +332,7 @@ function addOrAimTile(
   g.inDir[t] = NONE
   g.rr[t] = 0
   g.period[t] = period
+  g.markEid[t] = NONE
   g.trackEid[t] = api.spawn({
     pos: { x, y },
     sprite: sprite(SHAPE_BELT_ARROW, face),
@@ -604,21 +617,25 @@ function firstNonEmptySlot(store: BuildingStore, b: number): number {
 }
 
 /**
- * Link the belt port at tile `t` to the first building (scanning N,E,S,W in order) whose
- * footprint sits on the orthogonally adjacent tile, or NONE if none borders it. Off the hot
- * path (port placement, or a re-link when a building is placed beside an existing port).
+ * The direction from a port tile to the building it bridges, read off the port's facing arrow:
+ * an OUTPUT's arrow points *away* from the building it drains (the arrow starts on the building),
+ * so its building lies opposite the facing; an INPUT's arrow points *into* the building it feeds,
+ * so its building lies in the facing direction. This is what lets a port tile that borders two
+ * buildings bind to exactly one — the arrow picks the side.
+ */
+function portLinkDir(g: BeltGrid, t: number): number {
+  return g.kind[t] === KIND_OUTPUT ? opposite(g.face[t]!) : g.face[t]!
+}
+
+/**
+ * Link the belt port at tile `t` to the single building its arrow designates (see
+ * {@link portLinkDir}) — the one orthogonally adjacent on that side — or NONE if no building
+ * borders it there. Off the hot path (port placement, or a re-link when a building is placed
+ * beside an existing port).
  */
 function linkPort(g: BeltGrid, store: BuildingStore, t: number): void {
-  const x = g.tx[t]!
-  const y = g.ty[t]!
-  for (let d = 0; d < 4; d++) {
-    const b = buildingAt(store, x + DX[d]!, y + DY[d]!)
-    if (b !== NONE) {
-      g.portBuilding[t] = b
-      return
-    }
-  }
-  g.portBuilding[t] = NONE
+  const d = portLinkDir(g, t)
+  g.portBuilding[t] = buildingAt(store, g.tx[t]! + DX[d]!, g.ty[t]! + DY[d]!)
 }
 
 /**
@@ -663,6 +680,30 @@ function stepBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore
     Position.y[eid] = ty[t]!
   }
 
+  // Inputs deposit the item sitting on their tile into the building they feed, if it accepts
+  // that resource (matched by colour) and has room. Otherwise the item stays put and backs the
+  // belt up (an unlinked input, an unaccepted resource, or a full slot all block).
+  //
+  // This runs *before* the move pass so it only ever consumes an item that arrived on the input
+  // tile in an EARLIER cycle: the move pass below slides an item onto the input tile and lets it
+  // glide there over a whole move-cycle (prev=feeder tile, x=input tile), and only the next
+  // cycle's deposit absorbs it. Depositing in the same pass the item arrived would despawn it
+  // before the renderer ever drew it on the port, so the item appeared to vanish one tile short
+  // of the building instead of riding into it.
+  for (let t = 0; t < n; t++) {
+    if (kind[t] !== KIND_INPUT || slot[t] === NONE) continue
+    const b = portBuilding[t]!
+    if (b === NONE) continue
+    const eid = slot[t]!
+    const k = findSlot(store, b, Renderable.color[eid]!)
+    if (k === NONE) continue
+    const si = b * MAX_SLOTS + k
+    if (store.slotCount[si]! >= store.slotCap[si]!) continue
+    store.slotCount[si] = store.slotCount[si]! + 1
+    api.despawn(eid)
+    slot[t] = NONE
+  }
+
   for (let i = 0; i < n; i++) {
     const t = order[i]!
     const eid = slot[t]!
@@ -705,23 +746,6 @@ function stepBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore
       Position.x[eid] = tx[target]!
       Position.y[eid] = ty[target]!
     }
-  }
-
-  // Inputs deposit the item now sitting on their tile into the building they feed, if it
-  // accepts that resource (matched by colour) and has room. Otherwise the item stays put and
-  // backs the belt up (an unlinked input, an unaccepted resource, or a full slot all block).
-  for (let t = 0; t < n; t++) {
-    if (kind[t] !== KIND_INPUT || slot[t] === NONE) continue
-    const b = portBuilding[t]!
-    if (b === NONE) continue
-    const eid = slot[t]!
-    const k = findSlot(store, b, Renderable.color[eid]!)
-    if (k === NONE) continue
-    const si = b * MAX_SLOTS + k
-    if (store.slotCount[si]! >= store.slotCap[si]!) continue
-    store.slotCount[si] = store.slotCount[si]! + 1
-    api.despawn(eid)
-    slot[t] = NONE
   }
 }
 
@@ -872,6 +896,13 @@ export interface PlacePortCommand {
   readonly color: number
   /** Output ports only: drain the linked building every N ticks. */
   readonly spawnEvery?: number
+  /**
+   * Facing 0..3 (N,E,S,W) for the port's arrow, set by the player's rotation. An output's
+   * arrow points *away* from the building it drains (building opposite the facing); an input's
+   * arrow points *into* the building it feeds (building in the facing direction). Omitted: keep
+   * the underlying belt tile's facing — back-compat for callers that pre-date rotation.
+   */
+  readonly dir?: number
 }
 
 /** Mark the belt tile at (x, y) a splitter. A splitter off any belt is dropped. */
@@ -912,12 +943,120 @@ export interface PlaceProducerCommand {
   readonly requiresTerrainType?: number
 }
 
+/**
+ * Remove whatever the player can delete at tile (x, y): a belt-grid tile (belt, port or
+ * splitter) or a resource-holding building (producer or store). Passive terrain and plain
+ * scenery (e.g. the orchard) are NOT removable — they live in neither store, so a remove on
+ * such a tile is a no-op. The handler despawns the object's entities, compacts the affected
+ * store, and re-links any ports that pointed at a removed building.
+ */
+export interface RemoveCommand {
+  readonly type: 'remove'
+  readonly x: number
+  readonly y: number
+}
+
 export type GameCommand =
   | PlaceBuildingCommand
   | PlaceBeltCommand
   | PlacePortCommand
   | PlaceSplitterCommand
   | PlaceProducerCommand
+  | RemoveCommand
+
+/** Copy every per-tile field of the belt grid from index `src` to `dst` (swap-remove move). */
+function copyTile(g: BeltGrid, src: number, dst: number): void {
+  g.tx[dst] = g.tx[src]!
+  g.ty[dst] = g.ty[src]!
+  g.face[dst] = g.face[src]!
+  g.kind[dst] = g.kind[src]!
+  g.slot[dst] = g.slot[src]!
+  g.inDir[dst] = g.inDir[src]!
+  g.portTimer[dst] = g.portTimer[src]!
+  g.portEvery[dst] = g.portEvery[src]!
+  g.portBuilding[dst] = g.portBuilding[src]!
+  g.rr[dst] = g.rr[src]!
+  g.trackEid[dst] = g.trackEid[src]!
+  g.markEid[dst] = g.markEid[src]!
+  g.period[dst] = g.period[src]!
+  g.dueEvery[dst] = g.dueEvery[src]!
+  // nbr/order are rebuilt by the caller, so they need not be copied here.
+}
+
+/**
+ * Remove belt-grid tile `t`: despawn its riding item, its track entity and any port/splitter
+ * overlay, drop it from the index, then swap the last tile into its slot (dense compaction) and
+ * rebuild topology + cadence. Off the hot path (player deletion only).
+ */
+function removeBeltTile(api: ModApi, g: BeltGrid, t: number): void {
+  if (g.slot[t] !== NONE) api.despawn(g.slot[t]!)
+  if (g.trackEid[t] !== NONE) api.despawn(g.trackEid[t]!)
+  if (g.markEid[t] !== NONE) api.despawn(g.markEid[t]!)
+  g.index.delete(tileKey(g.tx[t]!, g.ty[t]!))
+  const last = g.count - 1
+  if (t !== last) {
+    copyTile(g, last, t)
+    g.index.set(tileKey(g.tx[t]!, g.ty[t]!), t)
+  }
+  g.count--
+  rebuildTopology(g)
+  recomputeCadence(g)
+}
+
+/** Copy every per-building field (including stockpile slots) from `src` to `dst`. */
+function copyBuilding(s: BuildingStore, src: number, dst: number): void {
+  s.eid[dst] = s.eid[src]!
+  s.bx[dst] = s.bx[src]!
+  s.by[dst] = s.by[src]!
+  s.bw[dst] = s.bw[src]!
+  s.bh[dst] = s.bh[src]!
+  s.prodColor[dst] = s.prodColor[src]!
+  s.prodEvery[dst] = s.prodEvery[src]!
+  s.prodTimer[dst] = s.prodTimer[src]!
+  s.slotN[dst] = s.slotN[src]!
+  for (let k = 0; k < MAX_SLOTS; k++) {
+    s.slotColor[dst * MAX_SLOTS + k] = s.slotColor[src * MAX_SLOTS + k]!
+    s.slotCount[dst * MAX_SLOTS + k] = s.slotCount[src * MAX_SLOTS + k]!
+    s.slotCap[dst * MAX_SLOTS + k] = s.slotCap[src * MAX_SLOTS + k]!
+  }
+}
+
+/**
+ * Remove building `b`: despawn its footprint entity, clear its footprint tiles from the index,
+ * then swap the last building into its slot. Any port that drained/fed the removed building is
+ * unlinked (set to NONE); any port that pointed at the moved building is repointed to its new
+ * dense id. Off the hot path (player deletion only).
+ */
+function removeBuilding(api: ModApi, store: BuildingStore, g: BeltGrid, b: number): void {
+  api.despawn(store.eid[b]!)
+  for (let dy = 0; dy < store.bh[b]!; dy++) {
+    for (let dx = 0; dx < store.bw[b]!; dx++) {
+      store.tileIndex.delete(tileKey(store.bx[b]! + dx, store.by[b]! + dy))
+    }
+  }
+  // Ports bound to the removed building now link to nothing.
+  for (let t = 0; t < g.count; t++) {
+    if ((g.kind[t] === KIND_OUTPUT || g.kind[t] === KIND_INPUT) && g.portBuilding[t] === b) {
+      g.portBuilding[t] = NONE
+    }
+  }
+  const last = store.count - 1
+  if (b !== last) {
+    copyBuilding(store, last, b)
+    // Re-index the moved building's footprint tiles, and follow its ports to the new id.
+    for (let dy = 0; dy < store.bh[b]!; dy++) {
+      for (let dx = 0; dx < store.bw[b]!; dx++) {
+        store.tileIndex.set(tileKey(store.bx[b]! + dx, store.by[b]! + dy), b)
+      }
+    }
+    for (let t = 0; t < g.count; t++) {
+      if ((g.kind[t] === KIND_OUTPUT || g.kind[t] === KIND_INPUT) && g.portBuilding[t] === last) {
+        g.portBuilding[t] = b
+      }
+    }
+  }
+  store.count--
+}
 
 function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCommand): void {
   const g = state.grid
@@ -949,6 +1088,9 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
     case 'place_port': {
       const t = tileAt(g, cmd.x, cmd.y)
       if (t === NONE) return // a port must sit on a belt; off-belt placements are dropped.
+      // The arrow facing — and, for an output, the direction drained items leave on — is the
+      // placed rotation when the host supplies one; otherwise keep the tile's belt facing.
+      if (cmd.dir !== undefined) g.face[t] = cmd.dir & 3
       if (cmd.port === 'output') {
         g.kind[t] = KIND_OUTPUT
         g.portEvery[t] = Math.max(1, cmd.spawnEvery ?? 20)
@@ -958,7 +1100,9 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       }
       linkPort(g, state.buildings, t)
       rebuildTopology(g)
-      api.spawn({
+      // Re-placing a port over an existing one replaces its overlay glyph; drop the old first.
+      if (g.markEid[t] !== NONE) api.despawn(g.markEid[t]!)
+      g.markEid[t] = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
         sprite: sprite(SHAPE_PORT_ARROW, g.face[t]!),
         color: cmd.color,
@@ -973,7 +1117,8 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       g.kind[t] = KIND_SPLITTER
       g.rr[t] = 0
       rebuildTopology(g)
-      api.spawn({
+      if (g.markEid[t] !== NONE) api.despawn(g.markEid[t]!)
+      g.markEid[t] = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
         sprite: sprite(SHAPE_SPLITTER, g.face[t]!),
         color: cmd.color,
@@ -1006,6 +1151,18 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         [{ color: cmd.itemColor, cap: cmd.storageCap }],
       )
       relinkUnlinkedPorts(g, state.buildings)
+      return
+    }
+    case 'remove': {
+      // Belt-grid tiles take precedence (a port/splitter sits on a belt tile); then resource
+      // buildings. Terrain and plain scenery are in neither store, so they are never removed.
+      const t = tileAt(g, cmd.x, cmd.y)
+      if (t !== NONE) {
+        removeBeltTile(api, g, t)
+        return
+      }
+      const b = buildingAt(state.buildings, cmd.x, cmd.y)
+      if (b !== NONE) removeBuilding(api, state.buildings, g, b)
       return
     }
   }

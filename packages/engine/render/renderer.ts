@@ -26,6 +26,8 @@ export type Ghost =
       readonly w: number
       readonly h: number
       readonly color: number
+      /** Optional facing 0..3 (N,E,S,W): when set, draw a direction chevron (port rotation). */
+      readonly dir?: number
     }
   | {
       readonly kind: 'line'
@@ -88,6 +90,14 @@ export class Renderer {
    * end tile equal to the start tile.
    */
   onDragEnd: ((tile: GridCoord) => void) | null = null
+  /** Called when the rotate key (R) is pressed — the app rotates the armed placement. */
+  onRotate: (() => void) | null = null
+  /**
+   * Called when the pointer is right-clicked (context menu) — the app cancels the current
+   * gesture/armed tool. The renderer suppresses the native browser menu and never mutates
+   * sim state; what "cancel" means is the app's to decide.
+   */
+  onCancel: (() => void) | null = null
 
   private constructor(app: Application, gridExtent: number) {
     this.#app = app
@@ -178,6 +188,12 @@ export class Renderer {
       g.rect(ghost.x * TILE_SIZE, ghost.y * TILE_SIZE, ghost.w * TILE_SIZE, ghost.h * TILE_SIZE)
       g.fill({ color: ghost.color, alpha: 0.45 })
       g.stroke({ width: 2, color: ghost.color, alpha: 0.9 })
+      // A facing arrow for a directional placement (e.g. a port), so rotation reads on-screen.
+      if (ghost.dir !== undefined) {
+        const cx = (ghost.x + ghost.w / 2) * TILE_SIZE
+        const cy = (ghost.y + ghost.h / 2) * TILE_SIZE
+        this.#chevron(g, ghost.dir, cx, cy, TILE_SIZE * 0.34, 0xffffff, 0.95)
+      }
       return
     }
     // Line: a one-tile-thick band covering the bounding box of A..B.
@@ -353,8 +369,15 @@ export class Renderer {
     // The pointer now drives placement only — panning is on the keyboard (WASD). A
     // press starts a gesture, moves update it, and release ends it.
     canvas.addEventListener('pointerdown', (e) => {
+      // Only the left button drives placement gestures; the right button cancels (below).
+      if (e.button !== 0) return
       pressed = true
       if (this.onDragStart) this.onDragStart(tileAt(e.clientX, e.clientY))
+    })
+    // Right-click cancels the armed tool/gesture; suppress the native context menu.
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      if (this.onCancel) this.onCancel()
     })
     globalThis.addEventListener('pointerup', (e) => {
       if (pressed && this.onDragEnd) this.onDragEnd(tileAt(e.clientX, e.clientY))
@@ -375,6 +398,12 @@ export class Renderer {
       },
       { passive: false },
     )
+
+    // R rotates the armed placement (e.g. a port's arrow). The app owns the rotation state;
+    // the renderer just relays the keypress (it never mutates sim state).
+    globalThis.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'r' && this.onRotate) this.onRotate()
+    })
 
     this.#installKeyboardPan()
   }

@@ -8,6 +8,7 @@ import {
   enqueuePlacePort,
   enqueuePlaceProducer,
   enqueuePlaceSplitter,
+  MAX_SLOTS,
 } from '../gameLogic.ts'
 
 /** village + 4 terrain patches (82 tiles) + 6x6 orchard, before anything is placed. */
@@ -88,6 +89,39 @@ describe('belt', () => {
     const fixed = BASELINE + BELT_LEN + 4
     expect(entityCount(sim.world)).toBeGreaterThan(fixed)
     expect(entityCount(sim.world)).toBeLessThan(fixed + BELT_LEN)
+  })
+
+  it('an arriving item rides onto the input port tile before the building absorbs it', async () => {
+    // Regression: the input used to despawn an item in the same move-cycle it stepped onto the
+    // port, so the renderer never drew it on the port — it vanished one tile short of the
+    // building. The deposit is now deferred a cycle: the item glides onto the port tile, dwells
+    // there for a cycle, and only then is absorbed. moveEvery:1 makes each tick a move-cycle.
+    const sim = await bootWithBelt(1)
+    placeSource(sim, 2, 0)
+    enqueuePlacePort(sim.world, { x: 2, y: 0, port: 'output', color: 0x44dd44, spawnEvery: 1 })
+    placeSink(sim, 10, 0)
+    enqueuePlacePort(sim.world, { x: 10, y: 0, port: 'input', color: 0xdd4444 })
+
+    const g = sim.state.grid
+    const store = sim.state.buildings
+    sim.scheduler.runTicks(sim.world, 1) // drain the queued placements so the grid is live
+    let inputTile = -1
+    for (let t = 0; t < g.count; t++) if (g.tx[t]! === 10) inputTile = t
+    expect(inputTile).not.toBe(-1)
+
+    let sawItemOnPort = false
+    for (let i = 0; i < 200; i++) {
+      sim.scheduler.runTicks(sim.world, 1)
+      if (g.slot[inputTile]! !== -1) sawItemOnPort = true
+    }
+    expect(sawItemOnPort).toBe(true)
+
+    // The deferral does not stall delivery: the sink (the lone non-producer store) kept absorbing.
+    let sinkStock = 0
+    for (let b = 0; b < store.count; b++) {
+      if (store.prodColor[b]! === -1) sinkStock = store.slotCount[b * MAX_SLOTS]!
+    }
+    expect(sinkStock).toBeGreaterThan(0)
   })
 
   it('an output with no input backs up and fills every tile, then stops', async () => {

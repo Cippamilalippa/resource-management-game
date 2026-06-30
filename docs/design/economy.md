@@ -52,6 +52,8 @@ No tier field (derived from the recipe graph).
 ### 3.2 Recipes — `prototypes/recipes.json` (new)
 
 The production graph. Multi-input → multi-output, with a craft time and a category.
+A recipe's inputs are **items, terrain, or both** — extraction is not a special kind
+of building, just a recipe whose only input is terrain (see 3.3).
 
 ```json
 {
@@ -64,22 +66,34 @@ The production graph. Multi-input → multi-output, with a craft time and a cate
 }
 ```
 
-| Field         | Meaning                                                             |
-| ------------- | ------------------------------------------------------------------- |
-| `category`    | Which crafter buildings can run it (see 3.3).                       |
-| `ingredients` | `{ item, amount }[]`. Empty/absent only for raw extraction recipes. |
-| `results`     | `{ item, amount }[]`.                                               |
-| `time`        | Ticks at crafter `speed` 1. Effective time = `time / speed`.        |
+An **extraction** recipe has no item ingredients and pulls from terrain instead:
+
+```json
+{
+  "id": "recipe.grain",
+  "type": "recipe",
+  "category": "farming",
+  "ingredients": [],
+  "requiresTerrain": "terrain.fertile_soil",
+  "results": [{ "item": "item.grain", "amount": 1 }],
+  "time": 30
+}
+```
+
+| Field             | Meaning                                                                   |
+| ----------------- | ------------------------------------------------------------------------- |
+| `category`        | Which buildings can run it (see 3.3).                                     |
+| `ingredients`     | `{ item, amount }[]`. Empty for pure-extraction recipes.                  |
+| `requiresTerrain` | Optional `terrain.*` id the building must sit on. May combine with items. |
+| `results`         | `{ item, amount }[]`.                                                     |
+| `time`            | Ticks at building `speed` 1. Effective time = `time / speed`.             |
 
 ### 3.3 Buildings — `prototypes/buildings.json`
 
-Split the current monolithic producer into two roles:
-
-- **`producer`** (raw extraction): no ingredients; pulls from terrain. Keeps the
-  existing `produces` / `produceEvery` / `requiresTerrain` shape. Farm, woodcutter,
-  mine stay here.
-- **`crafter`** (recipe-driven): advertises `craftingCategories`; the player assigns
-  one matching recipe per crafter instance. The new primitive.
+There is **one** producing building type — the **`crafter`**. A crafter is a generic
+machine: it advertises which `craftingCategories` it can run and nothing about _what_
+it makes. The player assigns one matching recipe per crafter instance; the recipe (§3.2)
+owns the ingredients, results, time, and any `requiresTerrain`.
 
 ```json
 {
@@ -90,6 +104,15 @@ Split the current monolithic producer into two roles:
   "storage": 100
 }
 ```
+
+**There is no separate `producer` type.** Raw extraction is not a different kind of
+building — it is a crafter assigned an _extraction recipe_ (no item ingredients, a
+`requiresTerrain`; see §3.2). A farm is a crafter in the `farming` category placed on
+fertile soil; a mine is a crafter in the `mining` category placed on a deposit. The
+terrain constraint lives on the recipe, not the building, because a building could
+legitimately consume terrain **and** items at once — so "pulls from terrain" can't be
+the type boundary. This keeps the machine decoupled from what it makes (the whole point
+of a recipe graph) and means a single furnace prototype can smelt iron _or_ copper.
 
 Belts, splitter, input, output, village are unchanged.
 
@@ -271,9 +294,11 @@ determinism check when the sim changes).
    > **Phases 2–4 are blocked on the script sandbox** (see §6.6). The recipe/technology
    > schemas + validation wiring will live in `mods/base/scripts` once it lands.
 
-2. **Data refactor.** Split `producer` / `crafter` in
-   [`buildings.json`](../../mods/base/prototypes/buildings.json); add
-   `prototypes/recipes.json`.
+2. **Data refactor.** Converge the producing buildings in
+   [`buildings.json`](../../mods/base/prototypes/buildings.json) onto the single
+   `crafter` type (the current `producer` farm/woodcutter/mine become crafters with a
+   `craftingCategories`); add `prototypes/recipes.json`, moving each old building's
+   fixed output into an extraction recipe (no item ingredients, `requiresTerrain`).
 3. **First chain + tech tree.** Author the §3.6 chain and a 2–3 node tech tree;
    validate end to end.
 4. **Village system.** Implement the §4 rule as a sim system; add a determinism test

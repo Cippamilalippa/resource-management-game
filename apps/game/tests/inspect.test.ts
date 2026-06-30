@@ -113,11 +113,13 @@ describe('resolveInspect', () => {
     })
     reg.record(5, 5, { name: 'Village', type: 'building' })
     enqueuePlaceBelt(world, { ax: 6, ay: 5, bx: 9, by: 5, color: 0x404040, moveEvery: 60 })
-    enqueuePlacePort(world, { x: 6, y: 5, port: 'input', color: 0xdd4444 })
+    // The input's arrow must point *at* the building it feeds: the Village is to the West, so
+    // the port faces West (dir 3).
+    enqueuePlacePort(world, { x: 6, y: 5, port: 'input', color: 0xdd4444, dir: 3 })
     flush(world, state)
 
     const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 5)
-    expect(info?.subtitle).toBe('Input port · facing East')
+    expect(info?.subtitle).toBe('Input port · facing West')
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Feeds', value: 'Village' })
   })
 

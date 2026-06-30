@@ -11,7 +11,8 @@
     "./scripting": "./scripting/index.ts",
     "./render": "./render/index.ts",
     "./persistence": "./persistence/index.ts",
-    "./modloader": "./modloader/index.ts"
+    "./modloader": "./modloader/index.ts",
+    "./modloader/node": "./modloader/nodeFileSource.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
