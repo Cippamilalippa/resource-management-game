@@ -21,6 +21,7 @@ export {
   enqueueCommand,
   type GameWorld,
   type Command,
+  type SpawnOptions,
 } from './world.ts'
 export { Scheduler } from './scheduler.ts'
 export { counterSystem, type System } from './systems.ts'

@@ -16,7 +16,19 @@
       "Bash(pnpm bench *)",
       "Bash(pnpm typecheck *)",
       "Bash(python3 -c ' *)",
-      "Bash(perl -0pi -e 's/applyCommand\\\\\\(gw, state, cmds\\\\[i\\\\] as GameCommand\\\\\\)/applyCommand\\(gw, state, cmds[i] as unknown as GameCommand\\)/' '$f')"
+      "Bash(perl -0pi -e 's/applyCommand\\\\\\(gw, state, cmds\\\\[i\\\\] as GameCommand\\\\\\)/applyCommand\\(gw, state, cmds[i] as unknown as GameCommand\\)/' '$f')",
+      "Bash(npx prettier *)",
+      "Bash(pnpm --filter @factory/game exec vite build)",
+      "Bash(cp packages/engine/package.json /private/tmp/engine-pkg.bak)",
+      "Bash(node -e \"const p=require\\('./packages/engine/package.json'\\); p.sideEffects=false; require\\('fs'\\).writeFileSync\\('./packages/engine/package.json', JSON.stringify\\(p,null,2\\)+'\\\\n'\\)\")",
+      "Bash(cp apps/game/src/sim.ts /private/tmp/sim.ts.bak)",
+      "Bash(cp /private/tmp/sim.ts.bak apps/game/src/sim.ts)",
+      "Bash(cp /private/tmp/engine-pkg.bak packages/engine/package.json)",
+      "Bash(pnpm build *)",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(pnpm --filter @factory/game typecheck)",
+      "Bash(npx vitest *)",
+      "Bash(echo \"=== GATE EXIT: $? ===\")"
     ]
   }
 }

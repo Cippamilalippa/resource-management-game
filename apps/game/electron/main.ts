@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { PrototypeRegistry } from '@factory/engine/data'
-import { discoverModSources, discoverAndLoad } from '@factory/engine/modloader'
+import { discoverModSources, readManifest, loadMods } from '@factory/engine/modloader'
 
 // The Electron main is bundled to CommonJS (dist-electron/main.cjs), so __dirname
 // is available natively — no import.meta.url (which would be empty under CJS).
@@ -22,9 +22,20 @@ function modsDir(): string {
 ipcMain.handle('factory:loadContent', async () => {
   const registry = new PrototypeRegistry()
   const sources = await discoverModSources(modsDir())
-  const load = await discoverAndLoad(sources, registry)
+  // Read every manifest here (in the fs-capable main process), then merge prototypes.
+  // The renderer can't touch disk, so it receives the manifests it needs to RUN the
+  // mods' scripts — script execution itself happens renderer-side, where the sim lives.
+  const discovered = await Promise.all(sources.map(readManifest))
+  const load = await loadMods(discovered, registry)
   return {
     mods: load.order.map((m) => ({ id: m.id, version: m.version })),
+    // Each mod's manifest (carries its script paths + dependency order) plus the
+    // basename of its source directory, which keys the renderer's bundled-script lookup.
+    // `sources[i]` is the NodeFileSource `discovered[i]` was read from (same order).
+    discovered: discovered.map((d, i) => ({
+      dir: basename(sources[i]!.root),
+      manifest: d.manifest,
+    })),
     prototypeCount: load.prototypeCount,
     prototypes: registry.list(),
   }

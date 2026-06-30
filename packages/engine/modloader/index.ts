@@ -12,6 +12,10 @@ export {
   resolveLoadOrder,
   loadMods,
   discoverAndLoad,
+  runModScripts,
   type DiscoveredMod,
   type LoadResult,
+  type ScriptModule,
+  type ScriptResolver,
+  type RunScriptsResult,
 } from './loader.ts'

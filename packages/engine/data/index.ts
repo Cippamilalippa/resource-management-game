@@ -9,3 +9,10 @@ export {
   basePrototypeSchema,
   type Prototype,
 } from './registry.ts'
+
+export {
+  topologicalOrder,
+  assertAcyclic,
+  validateReferences,
+  type ReferenceRule,
+} from './validate.ts'

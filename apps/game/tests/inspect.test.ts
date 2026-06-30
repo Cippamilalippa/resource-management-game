@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createGameWorld, spawnEntity, type GameWorld } from '@factory/engine/core'
+import { PrototypeRegistry } from '@factory/engine/data'
+import { createModApi } from '@factory/engine/scripting'
 import {
   createGameState,
   createGameSystems,
@@ -11,9 +13,18 @@ import {
 } from '../src/gameLogic.ts'
 import { InspectRegistry, resolveInspect } from '../src/inspect.ts'
 
-/** Drain the command queue (and tick the grid once) so a just-enqueued placement is live. */
+/**
+ * Drain the command queue (and tick the grid once) so a just-enqueued placement is live.
+ * The base systems reach the engine through the `ModApi`, so build a minimal host-bound api
+ * over this world (the registry/addSystem sink go unused by the two systems here).
+ */
 function flush(world: GameWorld, state: GameState): void {
-  for (const system of createGameSystems(state)) system(world)
+  const api = createModApi('base', {
+    registry: new PrototypeRegistry(),
+    world,
+    addSystem: () => {},
+  })
+  for (const system of createGameSystems(state, api)) system(world)
 }
 
 describe('InspectRegistry', () => {

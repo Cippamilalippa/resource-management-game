@@ -1,17 +1,7 @@
-import { spawnEntity, type GameWorld } from '@factory/engine/core'
-import {
-  tileKey,
-  terrainTypeOf,
-  registerBuilding,
-  TERRAIN_SPRITE,
-  type TerrainGrid,
-  type BuildingStore,
-  type AcceptSlot,
-} from './gameLogic.ts'
-
 /**
- * The starting scene for the base game. Kept identical to the headless copy
- * (`apps/headless/scene.ts`) so the on-screen world and the headless run match.
+ * The starting scene for the base game ("mod zero"). Spawns the clean starting world through
+ * the stable {@link ModApi} — the same surface a third-party mod gets — and populates the
+ * mod-owned {@link GameState} (terrain + building store) the systems read.
  *
  * Layout (integer tile grid; the renderer centers the camera on the origin):
  *   - one 2x2 "village" centered on the origin,
@@ -19,10 +9,24 @@ import {
  *   - four terrain patches (fertile soil, forest, iron + copper deposits) that gate which
  *     resource producers can be built on top of them.
  *
- * Reads color/size from the loaded prototypes when present, falling back to sane
- * defaults so the scene still builds if a prototype is missing. Pure setup work
- * (runs once at boot) — no RNG, so the scene is fully deterministic.
+ * Reads color/size from the loaded prototypes when present, falling back to sane defaults so
+ * the scene still builds if a prototype is missing. Pure setup work (runs once at init) — no
+ * RNG, so the scene is fully deterministic.
+ *
+ * For every object it spawns, it emits a `base:spawn` event carrying the prototype id and
+ * anchor tile. The host (the renderer) uses this — read-only — to name tiles for the
+ * inspector; the headless runner has no listener, so it is a no-op there. This keeps the
+ * sim→render flow one-way: the scene never knows about the UI.
  */
+import type { ModApi } from '@factory/engine/scripting'
+import {
+  tileKey,
+  terrainTypeOf,
+  registerBuilding,
+  TERRAIN_SPRITE,
+  type AcceptSlot,
+  type GameState,
+} from './sim.ts'
 
 /** The prototype shape this scene reads (only `color` and `size` are consulted). */
 export type SceneProto = Record<string, unknown>
@@ -87,37 +91,33 @@ function acceptSlotsOf(
 
 /**
  * Spawn the clean starting world: a central village, an apple orchard, and the terrain
- * patches resource producers are built on. The optional `onSpawn(eid, protoId)` is a
- * non-sim hook the app uses to record each spawned object's prototype for the read-only UI
- * inspector; the headless runner omits it. The optional `terrain` grid, when given, is
- * populated with each terrain tile's type so the sim can gate producer placement.
+ * patches resource producers are built on. Terrain tiles fill `state.terrain` (so the sim
+ * gates producer placement) and the village is registered in `state.buildings` as a resource
+ * store (so input ports can feed it). Each spawn emits `base:spawn` for the host inspector.
  */
-export function spawnScene(
-  gw: GameWorld,
-  getProto: (id: string) => SceneProto | undefined,
-  onSpawn?: (eid: number, protoId: string) => void,
-  terrain?: TerrainGrid,
-  buildings?: BuildingStore,
-): void {
+export function spawnScene(api: ModApi, state: GameState): void {
+  const getProto = (id: string): SceneProto | undefined => api.getPrototype(id)
+  const record = (protoId: string, x: number, y: number): void => {
+    api.emit('base:spawn', { protoId, x, y })
+  }
+
   // Village: a 2x2 block centered on the origin (top-left at -1,-1).
   const village = getProto('building.village')
   const vw = sizeDim(village, 'w', 2)
   const vh = sizeDim(village, 'h', 2)
   const vx = -Math.floor(vw / 2)
   const vy = -Math.floor(vh / 2)
-  const villageEid = spawnEntity(gw, {
+  const villageEid = api.spawn({
     pos: { x: vx, y: vy },
     color: colorOf(village, 0xb5651d),
     width: vw,
     height: vh,
   })
-  onSpawn?.(villageEid, 'building.village')
+  record('building.village', vx, vy)
   // Register the village as a resource store so input ports can feed it (a non-producer:
-  // prodColor NONE = -1). Skipped when no store is provided (e.g. a minimal headless boot).
-  if (buildings) {
-    const slots = acceptSlotsOf(getProto, village)
-    if (slots.length > 0) registerBuilding(buildings, villageEid, vx, vy, vw, vh, -1, 1, slots)
-  }
+  // prodColor NONE = -1). Skipped if the prototype stockpiles nothing.
+  const slots = acceptSlotsOf(getProto, village)
+  if (slots.length > 0) registerBuilding(state.buildings, villageEid, vx, vy, vw, vh, -1, 1, slots)
 
   // Terrain patches: a flat, full-tile fill recorded into the terrain grid (so producer
   // placement can read it). Spawned before the orchard/belts/producers that sit on top.
@@ -129,15 +129,15 @@ export function spawnScene(
       for (let dx = 0; dx < patch.w; dx++) {
         const x = patch.x + dx
         const y = patch.y + dy
-        const eid = spawnEntity(gw, {
+        api.spawn({
           pos: { x, y },
           sprite: TERRAIN_SPRITE,
           color,
           width: 1,
           height: 1,
         })
-        terrain?.set(tileKey(x, y), type)
-        onSpawn?.(eid, patch.id)
+        state.terrain.set(tileKey(x, y), type)
+        record(patch.id, x, y)
       }
     }
   }
@@ -147,13 +147,10 @@ export function spawnScene(
   const treeColor = colorOf(tree, 0x4caf50)
   for (let dy = 0; dy < ORCHARD_SIZE; dy++) {
     for (let dx = 0; dx < ORCHARD_SIZE; dx++) {
-      const treeEid = spawnEntity(gw, {
-        pos: { x: ORCHARD_X + dx, y: ORCHARD_Y + dy },
-        color: treeColor,
-        width: 1,
-        height: 1,
-      })
-      onSpawn?.(treeEid, 'resource.apple_tree')
+      const x = ORCHARD_X + dx
+      const y = ORCHARD_Y + dy
+      api.spawn({ pos: { x, y }, color: treeColor, width: 1, height: 1 })
+      record('resource.apple_tree', x, y)
     }
   }
 }

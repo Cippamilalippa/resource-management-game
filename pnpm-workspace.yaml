@@ -1,6 +1,7 @@
 packages:
   - 'packages/*'
   - 'apps/*'
+  - 'mods/*'
 allowBuilds:
   esbuild: true
   electron: true

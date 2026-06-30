@@ -7,6 +7,7 @@ import { statsStore } from './statsStore.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype } from './sim.ts'
+import type { DiscoveredModInfo } from '../electron/preload.ts'
 import { beltMoveAlpha } from './gameLogic.ts'
 import './styles.css'
 
@@ -76,17 +77,19 @@ function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
 /** Ask the Electron main process to load /content through the mod loader. */
 async function loadContent(): Promise<{
   prototypes: ClientPrototype[]
+  discovered: DiscoveredModInfo[]
   mods: string
 }> {
   const bridge = window.factory
   if (!bridge) {
     // Plain-browser fallback (e.g. `vite` without Electron): no content, just grid.
     console.warn('No Electron bridge — running with an empty prototype set.')
-    return { prototypes: [], mods: '(no bridge)' }
+    return { prototypes: [], discovered: [], mods: '(no bridge)' }
   }
   const loaded = await bridge.loadContent()
   return {
     prototypes: loaded.prototypes,
+    discovered: loaded.discovered,
     mods: loaded.mods.map((m) => `${m.id}@${m.version}`).join(', '),
   }
 }
@@ -100,8 +103,8 @@ async function boot(): Promise<void> {
     </StrictMode>,
   )
 
-  const { prototypes, mods } = await loadContent()
-  const { world, scheduler, state, registry } = createSim(prototypes)
+  const { prototypes, discovered, mods } = await loadContent()
+  const { world, scheduler, state, registry } = await createSim(prototypes, discovered)
   buildStore.setItems(toBuildItems(prototypes))
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement

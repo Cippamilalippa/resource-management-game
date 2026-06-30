@@ -1,4 +1,10 @@
-import type { GameWorld, System } from '../core/index.ts'
+import {
+  spawnEntity,
+  despawnEntity,
+  type GameWorld,
+  type System,
+  type SpawnOptions,
+} from '../core/index.ts'
 import type { Prototype, PrototypeRegistry } from '../data/index.ts'
 
 /**
@@ -25,8 +31,25 @@ export interface ModApi {
   /** Add a system to the fixed-tick schedule. */
   registerSystem(system: System): void
 
+  /**
+   * Spawn a renderable entity, returning its id. The sanctioned way for a mod to
+   * create sim entities — a thin pass-through to the engine's generic spawn
+   * primitive, so a mod never imports engine internals to do it.
+   */
+  spawn(opts: SpawnOptions): number
+
+  /** Remove an entity the mod spawned (e.g. an item consumed off a belt). */
+  despawn(eid: number): void
+
   /** Subscribe to an engine/game event. Returns an unsubscribe function. */
   on(event: string, listener: (payload: unknown) => void): () => void
+
+  /**
+   * Emit an event to the world's bus (symmetric with {@link on}). A mod uses this
+   * to hand the host a read-only handle to its own state (e.g. a `ready` event),
+   * keeping the sim→render flow one-way.
+   */
+  emit(event: string, payload: unknown): void
 
   /** Namespaced logging so mod output is attributable. */
   log(...args: unknown[]): void
@@ -50,7 +73,10 @@ export function createModApi(modId: string, host: ModApiHost): ModApi {
     registerPrototype: (raw) => host.registry.register(raw),
     getPrototype: (id) => host.registry.get(id),
     registerSystem: (system) => host.addSystem(system),
+    spawn: (opts) => spawnEntity(host.world, opts),
+    despawn: (eid) => despawnEntity(host.world, eid),
     on: (event, listener) => host.world.events.on(event, listener),
+    emit: (event, payload) => host.world.events.emit(event, payload),
     log: (...args) => console.log(`[mod:${modId}]`, ...args),
   }
 }

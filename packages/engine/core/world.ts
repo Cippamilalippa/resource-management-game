@@ -70,19 +70,23 @@ export function enqueueCommand(gw: GameWorld, command: Command): void {
 }
 
 /**
+ * Options for {@link spawnEntity}. The engine attaches no game meaning to the
+ * values; content/mods decide what `sprite`/`color`/size mean. Exported so the
+ * mod API can expose `spawn` with the exact same shape.
+ */
+export interface SpawnOptions {
+  readonly pos: GridCoord
+  readonly sprite?: number
+  readonly color?: number
+  readonly width?: number
+  readonly height?: number
+}
+
+/**
  * Spawn an entity with Position + Renderable. This is the generic primitive used
  * by content/mods; the engine attaches no game meaning to the values.
  */
-export function spawnEntity(
-  gw: GameWorld,
-  opts: {
-    pos: GridCoord
-    sprite?: number
-    color?: number
-    width?: number
-    height?: number
-  },
-): number {
+export function spawnEntity(gw: GameWorld, opts: SpawnOptions): number {
   const { Position, Renderable } = gw.components
   const eid = addEntity(gw.world)
 

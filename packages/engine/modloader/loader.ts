@@ -1,4 +1,5 @@
 import type { PrototypeRegistry } from '../data/index.ts'
+import { createModApi, type ModApi, type ModApiHost } from '../scripting/index.ts'
 import type { FileSource } from './fileSource.ts'
 import { modManifestSchema, type ModManifest } from './manifest.ts'
 
@@ -88,9 +89,10 @@ async function loadPrototypes(mod: DiscoveredMod, registry: PrototypeRegistry): 
 }
 
 /**
- * Resolve, order and merge a set of discovered mods into the registry. Script
- * execution is intentionally a no-op stub for this pass — we only prove that
- * content flows through the mod pipeline.
+ * Resolve, order and merge a set of discovered mods' **prototypes** into the
+ * registry. Scripts are handled separately by {@link runModScripts}, because they
+ * need the live world (which does not exist yet at content-load time) — prototypes
+ * load first, then the world is created, then scripts run against it.
  */
 export async function loadMods(
   mods: readonly DiscoveredMod[],
@@ -100,14 +102,61 @@ export async function loadMods(
   let prototypeCount = 0
   for (const mod of order) {
     prototypeCount += await loadPrototypes(mod, registry)
-    // Scripts: execution sandbox is out of scope; just note they exist.
-    if (mod.manifest.scripts.length > 0) {
-      console.log(
-        `[modloader] ${mod.manifest.id}: ${mod.manifest.scripts.length} script(s) registered (execution stubbed)`,
-      )
-    }
   }
   return { order: order.map((m) => m.manifest), prototypeCount }
+}
+
+/**
+ * A loaded mod script module: a default `init(api)` entry point, matching the shape
+ * of `mods/base/scripts/main.ts`. A module without a default export contributes
+ * nothing and is skipped.
+ */
+export interface ScriptModule {
+  readonly default?: (api: ModApi) => void | Promise<void>
+}
+
+/**
+ * Host-provided strategy that turns a mod's script path into an executable module.
+ *
+ * This lives with the **host**, not the engine, on purpose: how a script path
+ * becomes a module is a runtime/build concern (dynamic `import()` under tsx, a
+ * bundled chunk under Electron, an in-memory module in tests) the engine must not
+ * hardcode — exactly mirroring how {@link FileSource} abstracts file access.
+ */
+export type ScriptResolver = (source: FileSource, path: string) => Promise<ScriptModule>
+
+/** Result of a script-execution pass. */
+export interface RunScriptsResult {
+  /** Manifests in the order their scripts were executed. */
+  readonly order: readonly ModManifest[]
+  /** Number of script entry points actually invoked. */
+  readonly scriptsRun: number
+}
+
+/**
+ * Run every mod's scripts in dependency order, each against a {@link ModApi} bound
+ * to its mod id. This is the (in-process, deterministic) execution step: the base
+ * game in `mods/base` reaches the engine through the very same `ModApi` a
+ * third-party mod receives. Throws if a script throws — bad content fails loud.
+ */
+export async function runModScripts(
+  mods: readonly DiscoveredMod[],
+  host: ModApiHost,
+  resolveScript: ScriptResolver,
+): Promise<RunScriptsResult> {
+  const order = resolveLoadOrder(mods)
+  let scriptsRun = 0
+  for (const mod of order) {
+    const api = createModApi(mod.manifest.id, host)
+    for (const path of mod.manifest.scripts) {
+      const module = await resolveScript(mod.source, path)
+      if (typeof module.default === 'function') {
+        await module.default(api)
+        scriptsRun += 1
+      }
+    }
+  }
+  return { order: order.map((m) => m.manifest), scriptsRun }
 }
 
 /**
