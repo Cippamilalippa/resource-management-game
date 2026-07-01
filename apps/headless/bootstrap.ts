@@ -18,7 +18,7 @@ import {
   type ScriptResolver,
 } from '@factory/engine/modloader'
 import { discoverModSources, NodeFileSource } from '@factory/engine/modloader/node'
-import type { GameState } from './gameLogic.ts'
+import { validateContent, type GameState } from './gameLogic.ts'
 
 /**
  * Resolve a mod script to a module by dynamically importing it. Runs under tsx, so
@@ -62,6 +62,9 @@ export async function bootstrapSim(seed: number, tickRate = 60): Promise<Sim> {
   const discovered: DiscoveredMod[] = await Promise.all(sources.map(readManifest))
   // Prototypes load first — scripts need the world, which does not exist yet.
   const load = await loadMods(discovered, registry)
+  // With every prototype registered, assert the recipe/tech/crafter/village content is
+  // well-formed (shapes, references, acyclic graphs) before anything runs. Bad content fails loud.
+  validateContent(registry)
 
   const world = createGameWorld(seed)
   // The base mod publishes its read handle to the live game state; subscribe before running it.

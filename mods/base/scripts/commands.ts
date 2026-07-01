@@ -15,7 +15,7 @@ import type {
   PlaceBeltCommand,
   PlacePortCommand,
   PlaceSplitterCommand,
-  PlaceProducerCommand,
+  PlaceCrafterCommand,
   RemoveCommand,
 } from './sim.ts'
 
@@ -39,9 +39,46 @@ export function enqueuePlaceSplitter(gw: GameWorld, cmd: Omit<PlaceSplitterComma
   enqueueCommand(gw, { type: 'place_splitter', ...cmd })
 }
 
-/** Queue a production building placement (applied next tick). */
-export function enqueuePlaceProducer(gw: GameWorld, cmd: Omit<PlaceProducerCommand, 'type'>): void {
-  enqueueCommand(gw, { type: 'place_producer', ...cmd })
+/** Queue a crafter placement (applied next tick) — the general recipe-driven form. */
+export function enqueuePlaceCrafter(gw: GameWorld, cmd: Omit<PlaceCrafterCommand, 'type'>): void {
+  enqueueCommand(gw, { type: 'place_crafter', ...cmd })
+}
+
+/**
+ * Queue an *extraction* crafter placement (applied next tick): a convenience over
+ * {@link enqueuePlaceCrafter} for the common single-output, no-input case (a farm/mine that
+ * makes one unit of `itemColor` every `produceEvery` ticks). It is the host bridge's shorthand
+ * — the sim itself only knows the general `place_crafter` command.
+ */
+export function enqueuePlaceProducer(
+  gw: GameWorld,
+  cmd: {
+    x: number
+    y: number
+    w: number
+    h: number
+    color: number
+    itemColor: number
+    produceEvery: number
+    storageCap: number
+    requiresTerrainType?: number
+  },
+): void {
+  enqueueCommand(gw, {
+    type: 'place_crafter',
+    x: cmd.x,
+    y: cmd.y,
+    w: cmd.w,
+    h: cmd.h,
+    color: cmd.color,
+    inputs: [],
+    outputs: [{ color: cmd.itemColor, amount: 1 }],
+    craftEvery: cmd.produceEvery,
+    storageCap: cmd.storageCap,
+    ...(cmd.requiresTerrainType !== undefined
+      ? { requiresTerrainType: cmd.requiresTerrainType }
+      : {}),
+  })
 }
 
 /** Queue a removal of whatever deletable object sits at (x, y) (applied next tick). */

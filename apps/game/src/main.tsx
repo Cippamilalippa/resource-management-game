@@ -8,7 +8,7 @@ import { buildStore, type BuildItem } from './buildStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype } from './sim.ts'
 import type { DiscoveredModInfo } from '../electron/preload.ts'
-import { beltMoveAlpha } from './gameLogic.ts'
+import { beltMoveAlpha, buildableSet, allTechIds } from './gameLogic.ts'
 import { buildIconTextures } from './iconTextures.ts'
 import './styles.css'
 
@@ -18,7 +18,9 @@ function num(proto: ClientPrototype, key: string, fallback: number): number {
   return typeof v === 'number' ? v : fallback
 }
 
-/** Map a prototype's `type` to a build-bar tool kind, or null if it isn't placeable. */
+/** Map a prototype's `type` to a build-bar tool kind, or null if it isn't placeable. A
+ * `crafter` is NOT directly placeable: crafters are placed via their recipes (see
+ * {@link recipeItems}), which pick a matching crafter building. */
 function toolKind(type: string): { kind: BuildItem['kind']; port?: 'input' | 'output' } | null {
   switch (type) {
     case 'building':
@@ -27,8 +29,6 @@ function toolKind(type: string): { kind: BuildItem['kind']; port?: 'input' | 'ou
       return { kind: 'belt' }
     case 'splitter':
       return { kind: 'splitter' }
-    case 'producer':
-      return { kind: 'producer' }
     case 'output':
       return { kind: 'port', port: 'output' }
     case 'input':
@@ -38,10 +38,75 @@ function toolKind(type: string): { kind: BuildItem['kind']; port?: 'input' | 'ou
   }
 }
 
-/** Map the placeable prototypes (buildings, belts, input/output ports) to build-bar tools. */
+/** A recipe input/output flow as authored: `{ item, amount }`. */
+interface RecipeFlow {
+  item?: string
+  amount?: number
+}
+
+/**
+ * Synthesize a 'producer'-kind build tool per recipe, paired with the first crafter building
+ * whose `craftingCategories` include the recipe's `category` (the recipe owns the output,
+ * timing and terrain gate; the building owns the footprint, colour, icon and speed). This is
+ * how a recipe becomes placeable: selecting it drops a crafter of the matching category.
+ */
+function recipeItems(
+  prototypes: readonly ClientPrototype[],
+  colorOfItem: (id: unknown) => number,
+): BuildItem[] {
+  // category -> first crafter building that provides it.
+  const crafterFor = new Map<string, ClientPrototype>()
+  for (const p of prototypes) {
+    if (p.type !== 'crafter') continue
+    const cats = Array.isArray(p.craftingCategories) ? p.craftingCategories : []
+    for (const c of cats) if (typeof c === 'string' && !crafterFor.has(c)) crafterFor.set(c, p)
+  }
+
+  const items: BuildItem[] = []
+  for (const r of prototypes) {
+    if (r.type !== 'recipe') continue
+    const category = typeof r.category === 'string' ? r.category : ''
+    const building = crafterFor.get(category)
+    if (!building) continue // no crafter provides this category — not buildable
+    const results = Array.isArray(r.results) ? (r.results as RecipeFlow[]) : []
+    const ingredients = Array.isArray(r.ingredients) ? (r.ingredients as RecipeFlow[]) : []
+    const first = results[0]
+    if (!first || typeof first.item !== 'string') continue
+    const toFlows = (list: RecipeFlow[]): { color: number; amount: number }[] =>
+      list
+        .filter((f): f is { item: string; amount?: number } => typeof f.item === 'string')
+        .map((f) => ({
+          color: colorOfItem(f.item),
+          amount: typeof f.amount === 'number' ? f.amount : 1,
+        }))
+    const size = (building.size ?? {}) as { w?: number; h?: number }
+    items.push({
+      id: r.id,
+      name: typeof building.name === 'string' ? building.name : building.id,
+      kind: 'producer',
+      ...(typeof building.icon === 'string' ? { icon: building.icon } : {}),
+      w: typeof size.w === 'number' ? size.w : 1,
+      h: typeof size.h === 'number' ? size.h : 1,
+      color: num(building, 'color', 0xffffff),
+      itemColor: colorOfItem(first.item),
+      craftInputs: toFlows(ingredients),
+      craftOutputs: toFlows(results),
+      accepts: [],
+      spawnEvery: 20,
+      moveEvery: 1,
+      produceEvery: num(r, 'time', 30),
+      storage: num(building, 'storage', 100),
+      ...(typeof r.requiresTerrain === 'string' ? { requiresTerrain: r.requiresTerrain } : {}),
+    })
+  }
+  return items
+}
+
+/** Map the placeable prototypes (buildings, belts, ports) and recipes to build-bar tools. */
 function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
   // Resource identity is the item's colour; build an id->colour lookup so a building's
-  // `produces`/`accepts` (lists of item ids) resolve to the colours the sim works in.
+  // `accepts` and a recipe's `results` (lists of item ids) resolve to the colours the sim
+  // works in.
   const itemColors = new Map<string, number>()
   for (const p of prototypes) if (p.type === 'item') itemColors.set(p.id, num(p, 'color', 0xffffff))
   const colorOfItem = (id: unknown): number =>
@@ -62,8 +127,7 @@ function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
       w: typeof size.w === 'number' ? size.w : 1,
       h: typeof size.h === 'number' ? size.h : 1,
       color: num(p, 'color', 0xffffff),
-      itemColor:
-        typeof p.produces === 'string' ? colorOfItem(p.produces) : num(p, 'itemColor', 0xffffff),
+      itemColor: num(p, 'itemColor', 0xffffff),
       accepts,
       spawnEvery: num(p, 'spawnEvery', 20),
       moveEvery: num(p, 'moveEvery', 1),
@@ -72,6 +136,8 @@ function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
       ...(typeof p.requiresTerrain === 'string' ? { requiresTerrain: p.requiresTerrain } : {}),
     })
   }
+  // Recipes become 'producer' tools, paired with a crafter building of a matching category.
+  items.push(...recipeItems(prototypes, colorOfItem))
   return items
 }
 
@@ -106,7 +172,11 @@ async function boot(): Promise<void> {
 
   const { prototypes, discovered, mods } = await loadContent()
   const { world, scheduler, state, registry } = await createSim(prototypes, discovered)
-  const items = toBuildItems(prototypes)
+  // Derive which recipes/buildings are buildable from the researched technologies. There is no
+  // runtime research yet (author + gate only), so every authored tech is seeded as researched —
+  // the gate machinery is live and one-way (content → UI), just not withholding anything yet.
+  const buildable = buildableSet(prototypes, allTechIds(prototypes))
+  const items = toBuildItems(prototypes).filter((i) => buildable.has(i.id))
   buildStore.setItems(items)
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement

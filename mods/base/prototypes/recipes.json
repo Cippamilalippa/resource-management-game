@@ -1,0 +1,62 @@
+[
+  {
+    "id": "recipe.grain",
+    "type": "recipe",
+    "category": "farming",
+    "ingredients": [],
+    "requiresTerrain": "terrain.fertile_soil",
+    "results": [{ "item": "item.grain", "amount": 1 }],
+    "time": 30
+  },
+  {
+    "id": "recipe.wood",
+    "type": "recipe",
+    "category": "forestry",
+    "ingredients": [],
+    "requiresTerrain": "terrain.forest",
+    "results": [{ "item": "item.wood", "amount": 1 }],
+    "time": 45
+  },
+  {
+    "id": "recipe.iron_ore",
+    "type": "recipe",
+    "category": "iron_mining",
+    "ingredients": [],
+    "requiresTerrain": "terrain.iron_deposit",
+    "results": [{ "item": "item.iron_ore", "amount": 1 }],
+    "time": 40
+  },
+  {
+    "id": "recipe.copper_ore",
+    "type": "recipe",
+    "category": "copper_mining",
+    "ingredients": [],
+    "requiresTerrain": "terrain.copper_deposit",
+    "results": [{ "item": "item.copper_ore", "amount": 1 }],
+    "time": 40
+  },
+  {
+    "id": "recipe.iron_plate",
+    "type": "recipe",
+    "category": "smelting",
+    "ingredients": [{ "item": "item.iron_ore", "amount": 2 }],
+    "results": [{ "item": "item.iron_plate", "amount": 1 }],
+    "time": 60
+  },
+  {
+    "id": "recipe.gear",
+    "type": "recipe",
+    "category": "assembly",
+    "ingredients": [{ "item": "item.iron_plate", "amount": 2 }],
+    "results": [{ "item": "item.gear", "amount": 1 }],
+    "time": 80
+  },
+  {
+    "id": "recipe.bread",
+    "type": "recipe",
+    "category": "cooking",
+    "ingredients": [{ "item": "item.grain", "amount": 2 }],
+    "results": [{ "item": "item.bread", "amount": 1 }],
+    "time": 50
+  }
+]

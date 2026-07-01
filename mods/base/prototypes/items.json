@@ -33,5 +33,26 @@
     "name": "Copper Ore",
     "stackSize": 100,
     "color": 13135931
+  },
+  {
+    "id": "item.iron_plate",
+    "type": "item",
+    "name": "Iron Plate",
+    "stackSize": 100,
+    "color": 11583173
+  },
+  {
+    "id": "item.gear",
+    "type": "item",
+    "name": "Gear",
+    "stackSize": 100,
+    "color": 9479342
+  },
+  {
+    "id": "item.bread",
+    "type": "item",
+    "name": "Bread",
+    "stackSize": 100,
+    "color": 13213795
   }
 ]

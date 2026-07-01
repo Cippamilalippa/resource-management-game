@@ -23,9 +23,14 @@ import {
   tileKey,
   terrainTypeOf,
   registerBuilding,
+  registerVillage,
+  villageDemandNeed,
   TERRAIN_SPRITE,
-  type AcceptSlot,
+  ROLE_DEPOSIT,
+  ROLE_DRAIN,
+  type BuildingSlot,
   type GameState,
+  type VillageStageConfig,
 } from './sim.ts'
 
 /** The prototype shape this scene reads (only `color` and `size` are consulted). */
@@ -77,16 +82,49 @@ function sizeDim(proto: SceneProto | undefined, key: 'w' | 'h', fallback: number
 function acceptSlotsOf(
   getProto: (id: string) => SceneProto | undefined,
   proto: SceneProto | undefined,
-): AcceptSlot[] {
+): BuildingSlot[] {
   const accepts = proto?.accepts
   if (!Array.isArray(accepts)) return []
   const cap = typeof proto?.storage === 'number' ? proto.storage : 100
-  const slots: AcceptSlot[] = []
+  const slots: BuildingSlot[] = []
   for (const id of accepts) {
     const item = getProto(String(id))
-    slots.push({ color: typeof item?.color === 'number' ? item.color : 0xffffff, cap })
+    // A store slot is both fillable (input ports) and drainable (output ports); it is not a
+    // recipe slot, so its per-craft amount is 0.
+    slots.push({
+      color: typeof item?.color === 'number' ? item.color : 0xffffff,
+      cap,
+      role: ROLE_DEPOSIT | ROLE_DRAIN,
+      amt: 0,
+    })
   }
   return slots
+}
+
+/**
+ * Parse a village prototype's `stages` into the sim's stage ladder: each stage's `demands`
+ * (item id + `ratePerMin`) become {@link VillageDemand}s with the demanded item's colour and the
+ * integer per-cadence amount. Returns an empty ladder for a building with no stages.
+ */
+function villageStagesOf(
+  getProto: (id: string) => SceneProto | undefined,
+  proto: SceneProto | undefined,
+): VillageStageConfig[] {
+  const stages = proto?.stages
+  if (!Array.isArray(stages)) return []
+  return stages.map((raw): VillageStageConfig => {
+    const s = (raw ?? {}) as Record<string, unknown>
+    const demandsRaw = Array.isArray(s.demands) ? s.demands : []
+    const demands = demandsRaw.map((d) => {
+      const dem = (d ?? {}) as Record<string, unknown>
+      const item = getProto(String(dem.item))
+      return {
+        color: typeof item?.color === 'number' ? item.color : 0xffffff,
+        need: villageDemandNeed(typeof dem.ratePerMin === 'number' ? dem.ratePerMin : 0),
+      }
+    })
+    return { population: typeof s.population === 'number' ? s.population : 0, demands }
+  })
 }
 
 /**
@@ -114,10 +152,19 @@ export function spawnScene(api: ModApi, state: GameState): void {
     height: vh,
   })
   record('building.village', vx, vy)
-  // Register the village as a resource store so input ports can feed it (a non-producer:
-  // prodColor NONE = -1). Skipped if the prototype stockpiles nothing.
+  // Register the village as a resource store so input ports can feed it (not a crafter:
+  // crafts = 0). Skipped if the prototype stockpiles nothing.
   const slots = acceptSlotsOf(getProto, village)
-  if (slots.length > 0) registerBuilding(state.buildings, villageEid, vx, vy, vw, vh, -1, 1, slots)
+  if (slots.length > 0) {
+    registerBuilding(state.buildings, villageEid, vx, vy, vw, vh, 0, 1, slots)
+    // Wire up the village demand ladder so it grows/declines on how well it is supplied. All
+    // base villages share the one prototype's stages.
+    const stages = villageStagesOf(getProto, village)
+    if (stages.length > 0) {
+      state.villages.stages = stages
+      registerVillage(state.villages, vx, vy)
+    }
+  }
 
   // Terrain patches: a flat, full-tile fill recorded into the terrain grid (so producer
   // placement can read it). Spawned before the orchard/belts/producers that sit on top.

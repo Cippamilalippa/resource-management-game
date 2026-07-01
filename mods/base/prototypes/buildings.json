@@ -1,13 +1,39 @@
 [
   {
     "id": "building.village",
-    "type": "building",
+    "type": "village",
     "name": "Village",
     "icon": "Home",
     "size": { "w": 2, "h": 2 },
     "color": 11887901,
-    "accepts": ["item.grain", "item.wood", "item.iron_ore", "item.copper_ore", "item.apple"],
-    "storage": 500
+    "accepts": ["item.grain", "item.wood", "item.bread", "item.gear"],
+    "storage": 500,
+    "stages": [
+      {
+        "level": 1,
+        "population": 50,
+        "demands": [{ "item": "item.grain", "ratePerMin": 30 }]
+      },
+      {
+        "level": 2,
+        "population": 150,
+        "demands": [
+          { "item": "item.grain", "ratePerMin": 30 },
+          { "item": "item.wood", "ratePerMin": 15 },
+          { "item": "item.bread", "ratePerMin": 10 }
+        ]
+      },
+      {
+        "level": 3,
+        "population": 400,
+        "demands": [
+          { "item": "item.grain", "ratePerMin": 30 },
+          { "item": "item.wood", "ratePerMin": 15 },
+          { "item": "item.bread", "ratePerMin": 10 },
+          { "item": "item.gear", "ratePerMin": 5 }
+        ]
+      }
+    ]
   },
   {
     "id": "building.belt",
@@ -55,51 +81,80 @@
   },
   {
     "id": "building.farm",
-    "type": "producer",
+    "type": "crafter",
     "name": "Farm",
     "icon": "Wheat",
     "size": { "w": 1, "h": 1 },
     "color": 8101979,
-    "produces": "item.grain",
-    "produceEvery": 30,
-    "storage": 100,
-    "requiresTerrain": "terrain.fertile_soil"
+    "craftingCategories": ["farming"],
+    "speed": 1,
+    "storage": 100
   },
   {
     "id": "building.woodcutter",
-    "type": "producer",
+    "type": "crafter",
     "name": "Woodcutter",
     "icon": "TreePine",
     "size": { "w": 1, "h": 1 },
     "color": 7232060,
-    "produces": "item.wood",
-    "produceEvery": 45,
-    "storage": 100,
-    "requiresTerrain": "terrain.forest"
+    "craftingCategories": ["forestry"],
+    "speed": 1,
+    "storage": 100
   },
   {
     "id": "building.iron_mine",
-    "type": "producer",
+    "type": "crafter",
     "name": "Iron Mine",
     "icon": "Pickaxe",
     "size": { "w": 1, "h": 1 },
     "color": 9081502,
-    "produces": "item.iron_ore",
-    "produceEvery": 40,
-    "storage": 100,
-    "requiresTerrain": "terrain.iron_deposit"
+    "craftingCategories": ["iron_mining"],
+    "speed": 1,
+    "storage": 100
   },
   {
     "id": "building.copper_mine",
-    "type": "producer",
+    "type": "crafter",
     "name": "Copper Mine",
     "icon": "Gem",
     "size": { "w": 1, "h": 1 },
     "color": 11565642,
-    "produces": "item.copper_ore",
-    "produceEvery": 40,
-    "storage": 100,
-    "requiresTerrain": "terrain.copper_deposit"
+    "craftingCategories": ["copper_mining"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.furnace",
+    "type": "crafter",
+    "name": "Furnace",
+    "icon": "Flame",
+    "size": { "w": 1, "h": 1 },
+    "color": 14380834,
+    "craftingCategories": ["smelting"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.assembler",
+    "type": "crafter",
+    "name": "Assembler",
+    "icon": "Cog",
+    "size": { "w": 1, "h": 1 },
+    "color": 5808268,
+    "craftingCategories": ["assembly"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.kitchen",
+    "type": "crafter",
+    "name": "Kitchen",
+    "icon": "CookingPot",
+    "size": { "w": 1, "h": 1 },
+    "color": 14257226,
+    "craftingCategories": ["cooking"],
+    "speed": 1,
+    "storage": 100
   },
   {
     "id": "building.splitter",

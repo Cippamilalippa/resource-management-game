@@ -9,10 +9,10 @@ const FERTILE_Y = -3
 const FERTILE = terrainTypeOf('terrain.fertile_soil')
 const FOREST = terrainTypeOf('terrain.forest')
 
-/** Whether a registered producer building (one that produces a resource) sits at (x, y). */
+/** Whether a registered crafter building (one that runs a recipe) sits at (x, y). */
 function isProducer(state: GameState, x: number, y: number): boolean {
   const b = buildingAt(state.buildings, x, y)
-  return b >= 0 && state.buildings.prodColor[b]! >= 0
+  return b >= 0 && state.buildings.crafts[b]! === 1
 }
 
 /** Drop a terrain-gated producer building on the tile (x, y). Producers no longer need a belt. */

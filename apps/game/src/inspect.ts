@@ -16,10 +16,13 @@ import {
   KIND_INPUT,
   KIND_SPLITTER,
   MAX_SLOTS,
+  ROLE_DRAIN,
   buildingAt,
   tileKey,
+  villageStageAt,
   type BeltGrid,
   type BuildingStore,
+  type VillageStore,
 } from './gameLogic.ts'
 
 /** Compass names for a direction index 0..3 (N, E, S, W). */
@@ -224,6 +227,7 @@ function buildingSubtitle(type: string | undefined): string {
 function describeBuilding(
   world: GameWorld,
   buildings: BuildingStore,
+  villages: VillageStore,
   registry: InspectRegistry,
   x: number,
   y: number,
@@ -244,11 +248,27 @@ function describeBuilding(
     // A resource-holding building shows its production and a bar per stockpiled resource.
     const b = buildingAt(buildings, px, py)
     if (b >= 0) {
-      if (buildings.prodColor[b]! >= 0) {
-        stats.push(
-          { kind: 'text', label: 'Produces', value: perSec(buildings.prodEvery[b]!) },
-          { kind: 'color', label: 'Resource', color: buildings.prodColor[b]! },
-        )
+      if (buildings.crafts[b]) {
+        // The crafted resource is the first drain (output) slot's colour.
+        let outColor = -1
+        const slots = buildings.slotN[b]!
+        for (let k = 0; k < slots; k++) {
+          const si = b * MAX_SLOTS + k
+          if (buildings.slotRole[si]! & ROLE_DRAIN && buildings.slotAmt[si]! > 0) {
+            outColor = buildings.slotColor[si]!
+            break
+          }
+        }
+        stats.push({ kind: 'text', label: 'Produces', value: perSec(buildings.craftEvery[b]!) })
+        if (outColor >= 0) stats.push({ kind: 'color', label: 'Resource', color: outColor })
+      }
+      // A village shows its current level and population (read-only, one-way).
+      const vs = villageStageAt(villages, px, py)
+      if (vs >= 0) {
+        stats.push({ kind: 'text', label: 'Level', value: String(vs + 1) })
+        const pop = villages.stages[vs]?.population
+        if (typeof pop === 'number')
+          stats.push({ kind: 'text', label: 'Population', value: String(pop) })
       }
       const n = buildings.slotN[b]!
       for (let k = 0; k < n; k++) {
@@ -287,11 +307,12 @@ export function resolveInspect(
   world: GameWorld,
   grid: BeltGrid,
   buildings: BuildingStore,
+  villages: VillageStore,
   registry: InspectRegistry,
   x: number,
   y: number,
 ): InspectInfo | null {
   const t = grid.index.get(tileKey(x, y))
   if (t !== undefined) return describeBeltTile(world, grid, buildings, registry, t, x, y)
-  return describeBuilding(world, buildings, registry, x, y)
+  return describeBuilding(world, buildings, villages, registry, x, y)
 }

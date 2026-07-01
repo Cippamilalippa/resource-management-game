@@ -17,8 +17,10 @@
  * anything ahead of them.
  *
  * Resources live in *buildings*, not on the belt: a building owns an internal stockpile of
- * one or more resources (each capped). A *producer* building also generates a resource into
- * its own stockpile every N ticks. Belts reach a building through two belt-tile modifiers
+ * one or more resources (each capped). A *crafter* building runs a recipe, consuming its input
+ * slots and producing into its output slots every N ticks (an extraction recipe has no inputs,
+ * so it just makes a resource from nothing but time + terrain). Belts reach a building through
+ * two belt-tile modifiers
  * linked to an orthogonally adjacent building: an *output* port drains a resource out of the
  * building onto its own tile every N ticks; an *input* port deposits an arriving item into
  * the building — but only if the building accepts that resource (else the item backs up). Each
@@ -70,7 +72,7 @@ const SHAPE_CIRCLE = 1
 const SHAPE_BELT_ARROW = 2
 const SHAPE_PORT_ARROW = 3
 const SHAPE_SPLITTER = 4
-const SHAPE_PRODUCER = 5
+const SHAPE_CRAFTER = 5
 const SHAPE_TERRAIN = 6
 function sprite(shape: number, orient: number): number {
   return shape * 4 + orient
@@ -79,8 +81,8 @@ function sprite(shape: number, orient: number): number {
 /**
  * Glyph for a terrain tile (the engine draws shape 6 as a flat, full-tile fill). Terrain is
  * a passive background layer placed by the starting scene; it produces nothing on its own
- * but gates which resource producers may be built on top (see {@link terrainTypeOf} and the
- * `place_producer` handler). Exported so the scene spawner can paint terrain patches.
+ * but gates which crafters may be built on top (see {@link terrainTypeOf} and the
+ * `place_crafter` handler). Exported so the scene spawner can paint terrain patches.
  */
 export const TERRAIN_SPRITE = sprite(SHAPE_TERRAIN, 0)
 
@@ -469,11 +471,22 @@ function successorCount(g: BeltGrid, t: number): number {
 export const MAX_SLOTS = 8
 
 /**
- * Every resource-holding building as flat parallel arrays indexed by a dense building id.
- * Producers generate a resource into one of their slots; output/input ports (see
- * {@link BeltGrid.portBuilding}) drain/fill these slots. Buildings without a stockpile (the
- * apple orchard, plain scenery) are never registered here. Lives outside the ECS world, like
- * {@link BeltGrid}; grown only at registration, read by index on the hot path.
+ * Per-slot role bits (bitmask in {@link BuildingStore.slotRole}). A slot can be a deposit
+ * target (an input port fills it, matched by colour), a drain source (an output port pulls
+ * from it), or both. A crafter's recipe *inputs* are deposit-only (so an output port can
+ * never pull raw materials back out), its *outputs* drain-only; a plain resource store
+ * (village, generic building) is both — belts can fill it and, in principle, drain it.
+ */
+export const ROLE_DEPOSIT = 1
+export const ROLE_DRAIN = 2
+
+/**
+ * Every resource-holding building as flat parallel arrays indexed by a dense building id. A
+ * *crafter* runs a recipe: it consumes its deposit (input) slots and fills its drain (output)
+ * slots every `craftEvery` ticks. Output/input ports (see {@link BeltGrid.portBuilding})
+ * drain/fill these slots. Buildings without a stockpile (the apple orchard, plain scenery) are
+ * never registered here. Lives outside the ECS world, like {@link BeltGrid}; grown only at
+ * registration, read by index on the hot path.
  */
 export interface BuildingStore {
   /** Packed key of *every* footprint tile -> dense building id (port/inspector lookup). */
@@ -487,12 +500,12 @@ export interface BuildingStore {
   by: Int32Array
   bw: Int32Array
   bh: Int32Array
-  /** Produced resource colour, or NONE for a non-producer. */
-  prodColor: Int32Array
-  /** Producer cadence: make one unit every N ticks. */
-  prodEvery: Int32Array
-  /** Ticks since this producer last made a unit. */
-  prodTimer: Int32Array
+  /** 1 if this building runs a recipe (a crafter), 0 for a pure store. */
+  crafts: Int8Array
+  /** Crafter cadence: attempt one craft every N ticks (recipe `time` / building `speed`). */
+  craftEvery: Int32Array
+  /** Ticks since this crafter last attempted/completed a craft. */
+  craftTimer: Int32Array
   /** Number of active stockpile slots (<= MAX_SLOTS). */
   slotN: Int32Array
   /** Flattened per-slot resource colour: [id*MAX_SLOTS + k]. */
@@ -501,6 +514,10 @@ export interface BuildingStore {
   slotCount: Int32Array
   /** Flattened per-slot capacity. */
   slotCap: Int32Array
+  /** Flattened per-slot role bits (ROLE_DEPOSIT | ROLE_DRAIN). */
+  slotRole: Int8Array
+  /** Flattened per-slot recipe amount: units consumed (input) or produced (output) per craft; 0 if not a recipe slot. */
+  slotAmt: Int32Array
 }
 
 export function createBuildingStore(): BuildingStore {
@@ -513,13 +530,15 @@ export function createBuildingStore(): BuildingStore {
     by: new Int32Array(cap),
     bw: new Int32Array(cap),
     bh: new Int32Array(cap),
-    prodColor: new Int32Array(cap).fill(NONE),
-    prodEvery: new Int32Array(cap).fill(1),
-    prodTimer: new Int32Array(cap),
+    crafts: new Int8Array(cap),
+    craftEvery: new Int32Array(cap).fill(1),
+    craftTimer: new Int32Array(cap),
     slotN: new Int32Array(cap),
     slotColor: new Int32Array(cap * MAX_SLOTS),
     slotCount: new Int32Array(cap * MAX_SLOTS),
     slotCap: new Int32Array(cap * MAX_SLOTS),
+    slotRole: new Int8Array(cap * MAX_SLOTS),
+    slotAmt: new Int32Array(cap * MAX_SLOTS),
   }
 }
 
@@ -534,25 +553,55 @@ function ensureBuildingCapacity(s: BuildingStore, need: number): void {
   s.by = grow(s.by, next, 0)
   s.bw = grow(s.bw, next, 0)
   s.bh = grow(s.bh, next, 0)
-  s.prodColor = grow(s.prodColor, next, NONE)
-  s.prodEvery = grow(s.prodEvery, next, 1)
-  s.prodTimer = grow(s.prodTimer, next, 0)
+  s.crafts = grow8(s.crafts, next, 0)
+  s.craftEvery = grow(s.craftEvery, next, 1)
+  s.craftTimer = grow(s.craftTimer, next, 0)
   s.slotN = grow(s.slotN, next, 0)
   s.slotColor = grow(s.slotColor, next * MAX_SLOTS, 0)
   s.slotCount = grow(s.slotCount, next * MAX_SLOTS, 0)
   s.slotCap = grow(s.slotCap, next * MAX_SLOTS, 0)
+  s.slotRole = grow8(s.slotRole, next * MAX_SLOTS, 0)
+  s.slotAmt = grow(s.slotAmt, next * MAX_SLOTS, 0)
 }
 
-/** A stockpile slot definition: which resource (colour) and how much it can hold. */
+/**
+ * A stockpile slot definition: which resource (colour), how much it can hold, its role bits
+ * ({@link ROLE_DEPOSIT} | {@link ROLE_DRAIN}), and its recipe amount (units consumed/produced
+ * per craft; 0 for a plain store slot). {@link AcceptSlot} is the simpler `{ color, cap }`
+ * form for a pure store; {@link registerBuilding} widens it to a deposit+drain store slot.
+ */
+export interface BuildingSlot {
+  readonly color: number
+  readonly cap: number
+  readonly role: number
+  readonly amt: number
+}
+
+/** A pure-store stockpile slot: which resource (colour) and how much it can hold. */
 export interface AcceptSlot {
   readonly color: number
   readonly cap: number
 }
 
+/** Widen a pure-store `{ color, cap }` accept list into deposit+drain store slots (amt 0). */
+function storeSlots(accepts: readonly AcceptSlot[]): BuildingSlot[] {
+  const slots: BuildingSlot[] = []
+  for (let j = 0; j < accepts.length; j++) {
+    slots.push({
+      color: accepts[j]!.color,
+      cap: accepts[j]!.cap,
+      role: ROLE_DEPOSIT | ROLE_DRAIN,
+      amt: 0,
+    })
+  }
+  return slots
+}
+
 /**
  * Register a resource-holding building: record its footprint (every tile maps back to it),
- * its optional production (`prodColor` NONE for a pure store), and one stockpile slot per
- * accepted resource. Returns the dense building id. Off the hot path (placement/scene only).
+ * whether it runs a recipe (`crafts`) and how often (`craftEvery`), and its stockpile slots
+ * (each with a colour, cap, role bits and recipe amount). Returns the dense building id. Off
+ * the hot path (placement/scene only).
  */
 export function registerBuilding(
   store: BuildingStore,
@@ -561,9 +610,9 @@ export function registerBuilding(
   y: number,
   w: number,
   h: number,
-  prodColor: number,
-  prodEvery: number,
-  accepts: readonly AcceptSlot[],
+  crafts: number,
+  craftEvery: number,
+  slots: readonly BuildingSlot[],
 ): number {
   ensureBuildingCapacity(store, store.count + 1)
   const b = store.count++
@@ -572,15 +621,17 @@ export function registerBuilding(
   store.by[b] = y
   store.bw[b] = w
   store.bh[b] = h
-  store.prodColor[b] = prodColor
-  store.prodEvery[b] = Math.max(1, prodEvery)
-  store.prodTimer[b] = 0
+  store.crafts[b] = crafts ? 1 : 0
+  store.craftEvery[b] = Math.max(1, craftEvery)
+  store.craftTimer[b] = 0
   let n = 0
-  for (let j = 0; j < accepts.length && n < MAX_SLOTS; j++) {
+  for (let j = 0; j < slots.length && n < MAX_SLOTS; j++) {
     const i = b * MAX_SLOTS + n
-    store.slotColor[i] = accepts[j]!.color
+    store.slotColor[i] = slots[j]!.color
     store.slotCount[i] = 0
-    store.slotCap[i] = Math.max(0, accepts[j]!.cap)
+    store.slotCap[i] = Math.max(0, slots[j]!.cap)
+    store.slotRole[i] = slots[j]!.role
+    store.slotAmt[i] = Math.max(0, slots[j]!.amt)
     n++
   }
   store.slotN[b] = n
@@ -598,20 +649,30 @@ export function buildingAt(store: BuildingStore, x: number, y: number): number {
   return b === undefined ? NONE : b
 }
 
-/** Slot index (0..slotN) holding `color` in building `b`, or NONE. Bounded scan. */
+/**
+ * Deposit slot index (0..slotN) holding `color` in building `b`, or NONE. Only slots an input
+ * port may fill (role {@link ROLE_DEPOSIT}) are considered, so an item can never be pushed into
+ * a crafter's drain-only output slot. Bounded scan.
+ */
 function findSlot(store: BuildingStore, b: number, color: number): number {
   const n = store.slotN[b]!
   for (let k = 0; k < n; k++) {
-    if (store.slotColor[b * MAX_SLOTS + k] === color) return k
+    const i = b * MAX_SLOTS + k
+    if (store.slotColor[i] === color && store.slotRole[i]! & ROLE_DEPOSIT) return k
   }
   return NONE
 }
 
-/** First slot of building `b` that holds at least one unit, or NONE. Fixed slot order. */
+/**
+ * First drainable slot of building `b` that holds at least one unit, or NONE. Only slots an
+ * output port may pull (role {@link ROLE_DRAIN}) count, so an output on a crafter drains its
+ * product, never its raw inputs. Fixed slot order.
+ */
 function firstNonEmptySlot(store: BuildingStore, b: number): number {
   const n = store.slotN[b]!
   for (let k = 0; k < n; k++) {
-    if (store.slotCount[b * MAX_SLOTS + k]! > 0) return k
+    const i = b * MAX_SLOTS + k
+    if (store.slotRole[i]! & ROLE_DRAIN && store.slotCount[i]! > 0) return k
   }
   return NONE
 }
@@ -647,6 +708,164 @@ function relinkUnlinkedPorts(g: BeltGrid, store: BuildingStore): void {
   for (let t = 0; t < g.count; t++) {
     if ((g.kind[t] === KIND_OUTPUT || g.kind[t] === KIND_INPUT) && g.portBuilding[t] === NONE) {
       linkPort(g, store, t)
+    }
+  }
+}
+
+// --- Villages ---------------------------------------------------------------
+
+/**
+ * How often the village system runs (ticks). Consumption + growth/decline are evaluated once
+ * per cadence, not every tick — villages change slowly and this keeps the per-tick cost near
+ * zero. At 60 tps this is one evaluation per second.
+ */
+export const VILLAGE_CADENCE = 60
+/** Ticks per in-game minute at 60 tps — used to convert a demand's `ratePerMin` to per-cadence units. */
+export const VILLAGE_TICKS_PER_MIN = 3600
+/** Sustained cadences of full satisfaction before a village grows a stage (10s at 60 tps). */
+const VILLAGE_GROWTH_AFTER = 600
+/** Sustained cadences of unmet demand before a village drops a stage (10s at 60 tps). */
+const VILLAGE_DECLINE_AFTER = 600
+
+/** Convert a demand's `ratePerMin` into the integer amount consumed per {@link VILLAGE_CADENCE}. */
+export function villageDemandNeed(ratePerMin: number): number {
+  return Math.max(1, Math.round((ratePerMin * VILLAGE_CADENCE) / VILLAGE_TICKS_PER_MIN))
+}
+
+/** One demand of a village stage: a resource colour and the integer units it eats per cadence. */
+export interface VillageDemand {
+  readonly color: number
+  readonly need: number
+}
+
+/** A village stage: its (cumulative) demands and a flavour population figure. */
+export interface VillageStageConfig {
+  readonly population: number
+  readonly demands: readonly VillageDemand[]
+}
+
+/**
+ * The villages: flat parallel arrays indexed by a dense village id, plus the shared stage
+ * ladder (all base villages use the one `building.village` prototype). A village consumes its
+ * current stage's demands from its own building stockpile (its buffer) every
+ * {@link VILLAGE_CADENCE} ticks: satisfy every demand and a growth timer accrues toward the
+ * next stage; miss any and a decline timer accrues toward the previous one (floored at stage 0
+ * — a village is never removed). Anchored by tile so it survives building-store compaction.
+ */
+export interface VillageStore {
+  /** Number of live villages. */
+  count: number
+  /** Village anchor tile (top-left of its footprint) — re-resolved to a building id each cadence. */
+  vx: Int32Array
+  vy: Int32Array
+  /** Current stage index (0-based; 0 = level 1). */
+  stage: Int32Array
+  /** Cadences of sustained full satisfaction (toward growth). */
+  growthTimer: Int32Array
+  /** Cadences of sustained unmet demand (toward decline). */
+  declineTimer: Int32Array
+  /** Shared cadence countdown (ticks since the last evaluation). */
+  timer: number
+  /** The stage ladder, shared by every village (from the village prototype). */
+  stages: VillageStageConfig[]
+}
+
+export function createVillageStore(): VillageStore {
+  const cap = 4
+  return {
+    count: 0,
+    vx: new Int32Array(cap),
+    vy: new Int32Array(cap),
+    stage: new Int32Array(cap),
+    growthTimer: new Int32Array(cap),
+    declineTimer: new Int32Array(cap),
+    timer: 0,
+    stages: [],
+  }
+}
+
+/** Register a village at anchor tile (x, y). Its stage ladder is the store's shared {@link VillageStore.stages}. */
+export function registerVillage(v: VillageStore, x: number, y: number): number {
+  const need = v.count + 1
+  if (need > v.vx.length) {
+    let next = v.vx.length
+    while (next < need) next *= 2
+    v.vx = grow(v.vx, next, 0)
+    v.vy = grow(v.vy, next, 0)
+    v.stage = grow(v.stage, next, 0)
+    v.growthTimer = grow(v.growthTimer, next, 0)
+    v.declineTimer = grow(v.declineTimer, next, 0)
+  }
+  const i = v.count++
+  v.vx[i] = x
+  v.vy[i] = y
+  v.stage[i] = 0
+  v.growthTimer[i] = 0
+  v.declineTimer[i] = 0
+  return i
+}
+
+/** Current stage index (0-based) of the village anchored at (x, y), or NONE if none there. */
+export function villageStageAt(v: VillageStore, x: number, y: number): number {
+  for (let i = 0; i < v.count; i++) if (v.vx[i] === x && v.vy[i] === y) return v.stage[i]!
+  return NONE
+}
+
+/** Consume `need` of `color` from building `b`'s buffer; returns true if the buffer covered it. */
+function consumeFromBuffer(store: BuildingStore, b: number, color: number, need: number): boolean {
+  const n = store.slotN[b]!
+  for (let k = 0; k < n; k++) {
+    const i = b * MAX_SLOTS + k
+    if (store.slotColor[i] !== color) continue
+    const have = store.slotCount[i]!
+    if (have >= need) {
+      store.slotCount[i] = have - need
+      return true
+    }
+    store.slotCount[i] = 0 // eat what's there; the demand is still unmet.
+    return false
+  }
+  return false // the village doesn't even stock this resource yet.
+}
+
+/**
+ * Advance every village once per {@link VILLAGE_CADENCE} ticks: consume the current stage's
+ * demands from the village buffer, then move a growth/decline timer. All current-stage demands
+ * met (the stages list demands cumulatively, so a missing low-tier good starves the higher
+ * tiers too) accrues the growth timer and clears decline; any unmet accrues decline and clears
+ * growth. A full growth timer advances a stage (capped at the top); a full decline timer drops
+ * one (floored at 0 — never removed). Integer math, no RNG; runs off the per-tick hot path.
+ */
+function updateVillages(state: GameState): void {
+  const v = state.villages
+  if (v.count === 0 || v.stages.length === 0) return
+  if (++v.timer < VILLAGE_CADENCE) return
+  v.timer = 0
+  const store = state.buildings
+  for (let i = 0; i < v.count; i++) {
+    const b = buildingAt(store, v.vx[i]!, v.vy[i]!)
+    if (b === NONE) continue // the village building was removed — leave the entry inert.
+    const cfg = v.stages[v.stage[i]!]!
+    let allMet = true
+    for (let d = 0; d < cfg.demands.length; d++) {
+      const dem = cfg.demands[d]!
+      if (!consumeFromBuffer(store, b, dem.color, dem.need)) allMet = false
+    }
+    if (allMet) {
+      v.declineTimer[i] = 0
+      v.growthTimer[i] = v.growthTimer[i]! + VILLAGE_CADENCE
+    } else {
+      v.growthTimer[i] = 0
+      v.declineTimer[i] = v.declineTimer[i]! + VILLAGE_CADENCE
+    }
+    if (v.growthTimer[i]! >= VILLAGE_GROWTH_AFTER && v.stage[i]! < v.stages.length - 1) {
+      v.stage[i] = v.stage[i]! + 1
+      v.growthTimer[i] = 0
+      v.declineTimer[i] = 0
+    } else if (v.declineTimer[i]! >= VILLAGE_DECLINE_AFTER && v.stage[i]! > 0) {
+      v.stage[i] = v.stage[i]! - 1
+      v.growthTimer[i] = 0
+      v.declineTimer[i] = 0
     }
   }
 }
@@ -750,25 +969,55 @@ function stepBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore
 }
 
 /**
- * Resource producers (farm, woodcutter, mine) make one unit of their resource into their own
- * stockpile slot every `prodEvery` ticks, capped — overflow is discarded. Runs every tick,
- * independent of the belt move cadence; allocation-free.
+ * Run every crafter's recipe. A crafter attempts one craft every `craftEvery` ticks: it fires
+ * only when every deposit (input) slot holds at least its recipe `amt` and every drain (output)
+ * slot has room for its `amt` (capped — a full output blocks the craft). On a fire it subtracts
+ * the inputs and adds the outputs. An *extraction* recipe (a farm/mine) has no input slots, so
+ * it reduces to "make one unit into the output slot every craftEvery ticks", capped. When a
+ * craft cannot fire the timer holds at the cadence so it retries as soon as inputs arrive / room
+ * frees. Runs every tick, independent of the belt move cadence; allocation-free.
  */
-function updateBuildingProduction(store: BuildingStore): void {
+function runCrafters(store: BuildingStore): void {
   const n = store.count
   for (let b = 0; b < n; b++) {
-    const pc = store.prodColor[b]!
-    if (pc === NONE) continue
-    const timer = store.prodTimer[b]! + 1
-    if (timer < store.prodEvery[b]!) {
-      store.prodTimer[b] = timer
+    if (!store.crafts[b]) continue
+    const timer = store.craftTimer[b]! + 1
+    if (timer < store.craftEvery[b]!) {
+      store.craftTimer[b] = timer
       continue
     }
-    store.prodTimer[b] = 0
-    const k = findSlot(store, b, pc)
-    if (k === NONE) continue
-    const si = b * MAX_SLOTS + k
-    if (store.slotCount[si]! < store.slotCap[si]!) store.slotCount[si] = store.slotCount[si]! + 1
+    // Cadence reached — can we fire? Inputs (deposit slots with amt) need enough; outputs
+    // (drain slots with amt) need room. A slot is a recipe slot iff its amt > 0.
+    const base = b * MAX_SLOTS
+    const slotN = store.slotN[b]!
+    let canCraft = true
+    for (let k = 0; k < slotN; k++) {
+      const i = base + k
+      const amt = store.slotAmt[i]!
+      if (amt === 0) continue
+      if (store.slotRole[i]! & ROLE_DEPOSIT) {
+        if (store.slotCount[i]! < amt) {
+          canCraft = false
+          break
+        }
+      } else if (store.slotCount[i]! + amt > store.slotCap[i]!) {
+        canCraft = false
+        break
+      }
+    }
+    if (!canCraft) {
+      // Hold the timer at the cadence so we retry next tick without re-accumulating.
+      store.craftTimer[b] = store.craftEvery[b]!
+      continue
+    }
+    store.craftTimer[b] = 0
+    for (let k = 0; k < slotN; k++) {
+      const i = base + k
+      const amt = store.slotAmt[i]!
+      if (amt === 0) continue
+      if (store.slotRole[i]! & ROLE_DEPOSIT) store.slotCount[i] = store.slotCount[i]! - amt
+      else store.slotCount[i] = store.slotCount[i]! + amt
+    }
   }
 }
 
@@ -811,9 +1060,9 @@ function extractFromOutputs(api: ModApi, g: BeltGrid, store: BuildingStore): voi
 }
 
 /**
- * Tick the whole game: move items on the move-cycle, then let buildings produce into their
- * stores and output ports drain those stores onto the belts. Production runs before drain so
- * a unit made this tick can leave the same tick if the belt is free.
+ * Tick the whole game: move items on the move-cycle, then let crafters run their recipes into
+ * their stores and output ports drain those stores onto the belts. Crafting runs before drain
+ * so a unit made this tick can leave the same tick if the belt is free.
  */
 function updateBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore): void {
   if (++g.moveTimer >= g.moveEvery) {
@@ -821,7 +1070,7 @@ function updateBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingSto
     stepBelts(gw, api, g, store)
     g.moveCount++
   }
-  updateBuildingProduction(store)
+  runCrafters(store)
   extractFromOutputs(api, g, store)
 }
 
@@ -831,14 +1080,21 @@ function updateBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingSto
 export interface GameState {
   /** The belt network. */
   readonly grid: BeltGrid
-  /** The passive terrain layer that gates where resource producers may be built. */
+  /** The passive terrain layer that gates where crafters may be built. */
   readonly terrain: TerrainGrid
-  /** The resource-holding buildings (producers and stores). */
+  /** The resource-holding buildings (crafters and stores). */
   readonly buildings: BuildingStore
+  /** The villages — staged demand consumers that grow/decline on how well they are supplied. */
+  readonly villages: VillageStore
 }
 
 export function createGameState(moveEvery = 60): GameState {
-  return { grid: createBeltGrid(moveEvery), terrain: new Map(), buildings: createBuildingStore() }
+  return {
+    grid: createBeltGrid(moveEvery),
+    terrain: new Map(),
+    buildings: createBuildingStore(),
+    villages: createVillageStore(),
+  }
 }
 
 /**
@@ -914,38 +1170,48 @@ export interface PlaceSplitterCommand {
   readonly color: number
 }
 
+/** One resource flow of a crafter recipe: a resource colour and its per-craft amount. */
+export interface CraftFlow {
+  readonly color: number
+  readonly amount: number
+}
+
 /**
- * Place a resource producer (farm/woodcutter/mine) as a building with its top-left at (x, y).
- * It makes one unit of `itemColor` every `produceEvery` ticks into its own stockpile (capped
- * at `storageCap`), which an adjacent output port can drain onto a belt. If
- * `requiresTerrainType` is set (non-zero), the placement is dropped unless the terrain layer
- * at (x, y) matches it — that is how terrain enables/disables a producer.
+ * Place a crafter (farm/woodcutter/mine/furnace/assembler) as a building with its top-left at
+ * (x, y). It runs a recipe: every `craftEvery` ticks, when each `input` slot holds enough and
+ * each `output` slot has room, it consumes the inputs and produces the outputs into its own
+ * stockpile (each slot capped at `storageCap`). Input slots are filled by adjacent input ports;
+ * output slots are drained by adjacent output ports. An *extraction* recipe has no inputs (a
+ * farm/mine). If `requiresTerrainType` is set (non-zero), the placement is dropped unless the
+ * terrain layer at (x, y) matches it — that is how terrain enables/disables a crafter.
  */
-export interface PlaceProducerCommand {
-  readonly type: 'place_producer'
+export interface PlaceCrafterCommand {
+  readonly type: 'place_crafter'
   readonly x: number
   readonly y: number
   /** Footprint size. */
   readonly w: number
   readonly h: number
-  /** Color of the production building's footprint. */
+  /** Color of the crafter building's footprint. */
   readonly color: number
-  /** Color (resource identity) of the produced item. */
-  readonly itemColor: number
-  /** Produce a fresh unit every N ticks. */
-  readonly produceEvery: number
-  /** Maximum units the internal store can hold. */
+  /** Recipe inputs (resource colour + amount consumed per craft); empty for extraction. */
+  readonly inputs: readonly CraftFlow[]
+  /** Recipe outputs (resource colour + amount produced per craft). */
+  readonly outputs: readonly CraftFlow[]
+  /** Attempt one craft every N ticks (recipe `time` / building `speed`). */
+  readonly craftEvery: number
+  /** Maximum units each stockpile slot can hold. */
   readonly storageCap: number
   /**
-   * Terrain type (see {@link terrainTypeOf}) this producer needs under it, or
-   * {@link TERRAIN_NONE}/omitted for a producer that may sit anywhere.
+   * Terrain type (see {@link terrainTypeOf}) this crafter needs under it, or
+   * {@link TERRAIN_NONE}/omitted for a crafter that may sit anywhere.
    */
   readonly requiresTerrainType?: number
 }
 
 /**
  * Remove whatever the player can delete at tile (x, y): a belt-grid tile (belt, port or
- * splitter) or a resource-holding building (producer or store). Passive terrain and plain
+ * splitter) or a resource-holding building (crafter or store). Passive terrain and plain
  * scenery (e.g. the orchard) are NOT removable — they live in neither store, so a remove on
  * such a tile is a no-op. The handler despawns the object's entities, compacts the affected
  * store, and re-links any ports that pointed at a removed building.
@@ -961,7 +1227,7 @@ export type GameCommand =
   | PlaceBeltCommand
   | PlacePortCommand
   | PlaceSplitterCommand
-  | PlaceProducerCommand
+  | PlaceCrafterCommand
   | RemoveCommand
 
 /** Copy every per-tile field of the belt grid from index `src` to `dst` (swap-remove move). */
@@ -1010,14 +1276,16 @@ function copyBuilding(s: BuildingStore, src: number, dst: number): void {
   s.by[dst] = s.by[src]!
   s.bw[dst] = s.bw[src]!
   s.bh[dst] = s.bh[src]!
-  s.prodColor[dst] = s.prodColor[src]!
-  s.prodEvery[dst] = s.prodEvery[src]!
-  s.prodTimer[dst] = s.prodTimer[src]!
+  s.crafts[dst] = s.crafts[src]!
+  s.craftEvery[dst] = s.craftEvery[src]!
+  s.craftTimer[dst] = s.craftTimer[src]!
   s.slotN[dst] = s.slotN[src]!
   for (let k = 0; k < MAX_SLOTS; k++) {
     s.slotColor[dst * MAX_SLOTS + k] = s.slotColor[src * MAX_SLOTS + k]!
     s.slotCount[dst * MAX_SLOTS + k] = s.slotCount[src * MAX_SLOTS + k]!
     s.slotCap[dst * MAX_SLOTS + k] = s.slotCap[src * MAX_SLOTS + k]!
+    s.slotRole[dst * MAX_SLOTS + k] = s.slotRole[src * MAX_SLOTS + k]!
+    s.slotAmt[dst * MAX_SLOTS + k] = s.slotAmt[src * MAX_SLOTS + k]!
   }
 }
 
@@ -1069,7 +1337,17 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         height: cmd.h,
       })
       if (cmd.accepts && cmd.accepts.length > 0) {
-        registerBuilding(state.buildings, eid, cmd.x, cmd.y, cmd.w, cmd.h, NONE, 1, cmd.accepts)
+        registerBuilding(
+          state.buildings,
+          eid,
+          cmd.x,
+          cmd.y,
+          cmd.w,
+          cmd.h,
+          0,
+          1,
+          storeSlots(cmd.accepts),
+        )
         relinkUnlinkedPorts(g, state.buildings)
       }
       return
@@ -1127,29 +1405,39 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       })
       return
     }
-    case 'place_producer': {
-      // Terrain gate: a producer that needs a specific ground is dropped off the matching
-      // terrain (an unrestricted producer carries TERRAIN_NONE and places anywhere).
+    case 'place_crafter': {
+      // Terrain gate: a crafter that needs a specific ground is dropped off the matching
+      // terrain (an unrestricted crafter carries TERRAIN_NONE and places anywhere).
       const need = cmd.requiresTerrainType ?? TERRAIN_NONE
       if (need !== TERRAIN_NONE && terrainTypeAt(state.terrain, cmd.x, cmd.y) !== need) return
       const eid = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
-        sprite: sprite(SHAPE_PRODUCER, 0),
+        sprite: sprite(SHAPE_CRAFTER, 0),
         color: cmd.color,
         width: cmd.w,
         height: cmd.h,
       })
-      registerBuilding(
-        state.buildings,
-        eid,
-        cmd.x,
-        cmd.y,
-        cmd.w,
-        cmd.h,
-        cmd.itemColor,
-        cmd.produceEvery,
-        [{ color: cmd.itemColor, cap: cmd.storageCap }],
-      )
+      // Build the crafter's slots from its recipe: inputs are deposit-only (fed by input
+      // ports, consumed each craft), outputs drain-only (produced each craft, pulled by
+      // output ports). Slot order is inputs then outputs.
+      const slots: BuildingSlot[] = []
+      for (let i = 0; i < cmd.inputs.length; i++) {
+        slots.push({
+          color: cmd.inputs[i]!.color,
+          cap: cmd.storageCap,
+          role: ROLE_DEPOSIT,
+          amt: cmd.inputs[i]!.amount,
+        })
+      }
+      for (let i = 0; i < cmd.outputs.length; i++) {
+        slots.push({
+          color: cmd.outputs[i]!.color,
+          cap: cmd.storageCap,
+          role: ROLE_DRAIN,
+          amt: cmd.outputs[i]!.amount,
+        })
+      }
+      registerBuilding(state.buildings, eid, cmd.x, cmd.y, cmd.w, cmd.h, 1, cmd.craftEvery, slots)
       relinkUnlinkedPorts(g, state.buildings)
       return
     }
@@ -1172,9 +1460,10 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
 
 /**
  * Build the base-game systems bound to `state` and `api`. Returned in run order: drain
- * commands first (so a belt placed this tick is live), then advance the belt grid +
- * buildings. The closures are created once at init — never per tick — so the hot path stays
- * allocation-free; entity lifecycle goes through the stable {@link ModApi} (`spawn`/`despawn`).
+ * commands first (so a belt placed this tick is live), advance the belt grid + crafters, then
+ * evaluate villages (on their own slow cadence). The closures are created once at init — never
+ * per tick — so the hot path stays allocation-free; entity lifecycle goes through the stable
+ * {@link ModApi} (`spawn`/`despawn`).
  */
 export function createGameSystems(state: GameState, api: ModApi): System[] {
   const commandSystem: System = (gw) => {
@@ -1190,5 +1479,9 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
     updateBelts(gw, api, state.grid, state.buildings)
   }
 
-  return [commandSystem, beltSystem]
+  const villageSystem: System = () => {
+    updateVillages(state)
+  }
+
+  return [commandSystem, beltSystem, villageSystem]
 }

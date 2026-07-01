@@ -1,0 +1,38 @@
+[
+  {
+    "id": "tech.farming",
+    "type": "technology",
+    "prerequisites": [],
+    "unlocks": [
+      "recipe.grain",
+      "recipe.wood",
+      "building.farm",
+      "building.woodcutter",
+      "recipe.bread",
+      "building.kitchen"
+    ]
+  },
+  {
+    "id": "tech.mining",
+    "type": "technology",
+    "prerequisites": [],
+    "unlocks": [
+      "recipe.iron_ore",
+      "recipe.copper_ore",
+      "building.iron_mine",
+      "building.copper_mine"
+    ]
+  },
+  {
+    "id": "tech.basic_smelting",
+    "type": "technology",
+    "prerequisites": ["tech.mining"],
+    "unlocks": ["recipe.iron_plate", "building.furnace"]
+  },
+  {
+    "id": "tech.assembly",
+    "type": "technology",
+    "prerequisites": ["tech.basic_smelting"],
+    "unlocks": ["recipe.gear", "building.assembler"]
+  }
+]

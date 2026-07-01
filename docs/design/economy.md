@@ -237,17 +237,24 @@ only (§5).
 
 ## 6. Open decisions (settle before / during implementation)
 
-1. **Demand scaling: discrete stages vs continuous population.** This spec uses
-   discrete stages (simple to balance, trivially deterministic). Alternative: a float
-   population driven by a supply/demand differential, with continuously scaling needs.
-   **Recommendation: ship stages first**, interpolate later if it feels too steppy.
-2. **Recipe loops.** Are cyclic production chains allowed (A→B→A)? Default
-   **no — recipe graph is a strict DAG**; revisit only if a mechanic needs it.
-3. **Research model.** Are research packs craftable items consumed from a building
-   (Factorio-style, assumed here via `cost`), or an abstract accumulating currency?
-4. **Satisfaction aggregation.** `min` (assumed) vs weighted average across demands.
-5. **Decline destructiveness.** Does a village drop levels only, or can it be
-   abandoned/removed at level 0?
+1. **Demand scaling: discrete stages vs continuous population.** **Decided: discrete
+   stages** (simple to balance, trivially deterministic). A float population driven by a
+   supply/demand differential remains a possible later refinement if stages feel steppy.
+2. **Recipe loops.** **Decided: no — the recipe graph is a strict DAG**; revisit only if
+   a mechanic needs cyclic production (A→B→A).
+3. **Research model.** **Decided: author + gate only (for now).** Recipes and technologies
+   are authored data and validated; the buildable set is _derived_ from a `researchedSet`
+   seeded at start. A runtime research loop (research-pack items consumed by a lab to
+   complete techs live) is a deliberate **follow-up**, not built this pass. `cost` is
+   authored on the tech but not consumed yet.
+4. **Satisfaction aggregation.** **Decided: all current-stage demands must be met.**
+   Stages list demands _cumulatively_ (each higher stage re-lists the lower needs), so a
+   missing low-tier good starves every higher tier too. The village keeps an internal
+   **buffer** and a **decline timer**: while any current-stage demand is unmet the timer
+   accumulates; if satisfaction isn't restored before it elapses the village downgrades
+   (equivalent to `min` semantics with hysteresis).
+5. **Decline destructiveness.** **Decided: drop levels only, floored at level 1.** A
+   starved village declines one stage at a time and is **never removed/abandoned**.
 6. **Where game-specific schema + validation lives.** `mods/` is not a workspace
    package and the script sandbox is out of scope, so base-game logic currently lives
    **duplicated in the apps** (the headless app's
@@ -261,23 +268,27 @@ only (§5).
    is exactly the kind of drift the determinism rules warn about, and a shared package
    is the smallest step that avoids it without depending on the out-of-scope sandbox.
 
-   **Decided: (c) — wait for the script sandbox.** The recipe/technology Zod schemas
-   and the validator wiring will live in `mods/base/scripts`, built on the engine
-   primitives. Phases 2–4 below are therefore **blocked until the sandbox lands**.
+   **Decided: (c) — live in `mods/base/scripts`.** The recipe/technology Zod schemas and
+   the validator wiring live in the base mod, built on the engine primitives.
 
-   **Sandbox status (in progress):** the in-process, deterministic script runner now
-   exists — `runModScripts` in
+   **Sandbox status: ✅ done — Phases 2–4 are unblocked.** The in-process, deterministic
+   script runner `runModScripts` in
    [`packages/engine/modloader/loader.ts`](../../packages/engine/modloader/loader.ts)
    executes each mod's `init(api)` in dependency order through the stable `ModApi`,
    collecting contributed systems. It is host-agnostic: the host supplies a
-   `ScriptResolver` (how a script path becomes a module), mirroring `FileSource`. The
-   **headless** app is wired ([`apps/headless/bootstrap.ts`](../../apps/headless/bootstrap.ts),
-   resolver = dynamic `import()` under tsx) and the base mod's script runs for real
-   with the state hash unchanged. _Remaining before Phases 2–4 unblock:_ (i) an
-   **Electron** resolver (renderer/main bundling — the build-system fork) and (ii)
-   migrating the app-duplicated `gameLogic.ts` into `mods/base/scripts` (large,
-   determinism-sensitive). True OS-level isolation for untrusted third-party mods stays
-   a later concern — it can harden behind the same `ModApi` without breaking it.
+   `ScriptResolver` (how a script path becomes a module), mirroring `FileSource`. Both
+   hosts are wired:
+   - **Headless** ([`apps/headless/bootstrap.ts`](../../apps/headless/bootstrap.ts)) —
+     resolver = dynamic `import()` under tsx.
+   - **Electron** ([`apps/game/src/sim.ts`](../../apps/game/src/sim.ts)) — resolver =
+     Vite `import.meta.glob` bundle lookup (`matchScriptKey`, covered by
+     [`apps/game/tests/sim-script-resolver.test.ts`](../../apps/game/tests/sim-script-resolver.test.ts)).
+
+   The base sim has been migrated into
+   [`mods/base/scripts/sim.ts`](../../mods/base/scripts/sim.ts); the apps consume its
+   read-only helpers through the thin `gameLogic.ts` re-export barrels (no app-side
+   copies). True OS-level isolation for untrusted third-party mods stays a later concern —
+   it can harden behind the same `ModApi` without breaking it.
 
 ## 7. Implementation phases
 
@@ -291,15 +302,32 @@ determinism check when the sim changes).
    `engine/data` tests. The base game wires its recipe/tech schemas on top of these
    (see §5 validation, and §6.6 for placement).
 
-   > **Phases 2–4 are blocked on the script sandbox** (see §6.6). The recipe/technology
-   > schemas + validation wiring will live in `mods/base/scripts` once it lands.
+   > **The script sandbox is done (see §6.6), so Phases 2–4 are unblocked.** The
+   > recipe/technology schemas + validation wiring live in `mods/base/scripts`.
 
-2. **Data refactor.** Converge the producing buildings in
-   [`buildings.json`](../../mods/base/prototypes/buildings.json) onto the single
-   `crafter` type (the current `producer` farm/woodcutter/mine become crafters with a
-   `craftingCategories`); add `prototypes/recipes.json`, moving each old building's
-   fixed output into an extraction recipe (no item ingredients, `requiresTerrain`).
-3. **First chain + tech tree.** Author the §3.6 chain and a 2–3 node tech tree;
-   validate end to end.
-4. **Village system.** Implement the §4 rule as a sim system; add a determinism test
-   (same seed + ticks → identical `hashState`) and keep the perf guard green.
+2. **Data refactor.** ✅ Done — the four producing buildings in
+   [`buildings.json`](../../mods/base/prototypes/buildings.json) are now the single
+   `crafter` type (each with a `craftingCategories` + `speed`), and
+   [`recipes.json`](../../mods/base/prototypes/recipes.json) holds their extraction
+   recipes (no item ingredients, `requiresTerrain`). The sim runs a generic recipe-driven
+   crafter (`runCrafters` in [`sim.ts`](../../mods/base/scripts/sim.ts)) over deposit/drain
+   slots; the `place_crafter` command carries the recipe I/O.
+3. **First chain + tech tree (author + gate only).** ✅ Done — the §3.6 chain
+   (ore→plate→gear, grain→bread) and a 4-node tech tree are authored in
+   [`recipes.json`](../../mods/base/prototypes/recipes.json) /
+   [`technologies.json`](../../mods/base/prototypes/technologies.json). `validateContent`
+   in [`content.ts`](../../mods/base/scripts/content.ts) (host-side, on the engine
+   primitives) checks shapes, references, and the recipe/tech acyclic graphs; `buildableSet`
+   derives the buildable set from a seeded `researchedSet` (seeded to _all_ techs until a
+   research loop lands). No runtime research this pass (§6.3).
+
+   > **Note:** validation lives host-side (`content.ts`, imported by both hosts like
+   > `commands.ts`) rather than reached through a `ModApi.listPrototypes` addition, because
+   > the engine validators are _value_ imports the sandboxed sim may not use — the host is
+   > their correct home and keeps the stable `ModApi` untouched.
+
+4. **Village system.** ✅ Done — the §4 rule (cumulative staged demand, internal buffer,
+   decline timer, floored at level 1 — §6.4/§6.5) is the `villageSystem` in
+   [`sim.ts`](../../mods/base/scripts/sim.ts), running on a slow cadence over a `VillageStore`.
+   Determinism + grow/decline scenario tests read village stage/timers directly (building
+   inventories are not in engine `hashState`); the perf guard stays green.

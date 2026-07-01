@@ -14,7 +14,7 @@ import {
   type ScriptResolver,
 } from '@factory/engine/modloader'
 import type { DiscoveredModInfo } from '../electron/preload.ts'
-import type { GameState } from './gameLogic.ts'
+import { validateContent, type GameState } from './gameLogic.ts'
 import { InspectRegistry } from './inspect.ts'
 
 /** A prototype as delivered by the preload bridge. */
@@ -135,6 +135,8 @@ export async function createSim(
   // no fs, so each reconstructed source carries only its directory id for the resolver.
   const hostRegistry = new PrototypeRegistry()
   for (const p of prototypes) hostRegistry.register(p)
+  // Assert the recipe/tech/crafter/village content is well-formed before running anything.
+  validateContent(hostRegistry)
   const mods: DiscoveredMod[] = discovered.map((d) => ({
     manifest: d.manifest,
     source: new BundledModSource(d.dir),

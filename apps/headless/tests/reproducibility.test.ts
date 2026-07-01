@@ -8,7 +8,9 @@ describe('headless reproducibility', () => {
     const { load, registry } = await bootstrapSim(1)
     expect(load.order.map((m) => m.id)).toContain('base')
     expect(load.prototypeCount).toBeGreaterThan(0)
-    expect(registry.listByType('building').length).toBeGreaterThan(0)
+    // The base game ships crafters (farm/mine/furnace…) and a village.
+    expect(registry.listByType('crafter').length).toBeGreaterThan(0)
+    expect(registry.listByType('village').length).toBeGreaterThan(0)
   })
 
   it('same seed + tick count -> identical final state hash', async () => {

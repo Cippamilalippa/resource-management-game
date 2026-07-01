@@ -116,10 +116,10 @@ describe('belt', () => {
     }
     expect(sawItemOnPort).toBe(true)
 
-    // The deferral does not stall delivery: the sink (the lone non-producer store) kept absorbing.
+    // The deferral does not stall delivery: the sink (the lone non-crafter store) kept absorbing.
     let sinkStock = 0
     for (let b = 0; b < store.count; b++) {
-      if (store.prodColor[b]! === -1) sinkStock = store.slotCount[b * MAX_SLOTS]!
+      if (store.crafts[b]! === 0) sinkStock = store.slotCount[b * MAX_SLOTS]!
     }
     expect(sinkStock).toBeGreaterThan(0)
   })

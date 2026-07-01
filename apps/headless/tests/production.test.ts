@@ -7,6 +7,7 @@ import {
   buildingAt,
   enqueuePlaceBelt,
   enqueuePlaceBuilding,
+  enqueuePlaceCrafter,
   enqueuePlacePort,
   enqueuePlaceProducer,
   enqueuePlaceSplitter,
@@ -150,6 +151,98 @@ describe('production building', () => {
     const b = await boot()
     expect(hashState(a.world)).toBe(hashState(b.world))
     expect(stockAt(a, 20, 20)).toBe(stockAt(b, 20, 20))
+  })
+})
+
+describe('processing crafter (multi-input recipe)', () => {
+  const ORE = 0x8a8a8a
+  const PLATE = 0xd0d0e0
+
+  /**
+   * A full processing chain clear of the origin: an ore producer feeds a furnace over a belt,
+   * and the furnace smelts 2 ore → 1 plate every `craftEvery` ticks into its own output slot.
+   * Returns the sim with everything queued (not yet ticked).
+   */
+  function bootSmelter(sim: Sim): void {
+    const w = sim.world
+    // Ore producer at (20,40), draining east onto a belt to the furnace's input at (25,40).
+    enqueuePlaceProducer(w, {
+      x: 20,
+      y: 40,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: ORE,
+      produceEvery: 2,
+      storageCap: 100,
+    })
+    enqueuePlaceBelt(w, { ax: 21, ay: 40, bx: 25, by: 40, color: 0x404040, moveEvery: 1 })
+    enqueuePlacePort(w, { x: 21, y: 40, port: 'output', color: 0x44dd44, spawnEvery: 1 })
+    // Furnace at (26,40): consumes 2 ORE, produces 1 PLATE every 4 ticks.
+    enqueuePlaceCrafter(w, {
+      x: 26,
+      y: 40,
+      w: 1,
+      h: 1,
+      color: 0x554433,
+      inputs: [{ color: ORE, amount: 2 }],
+      outputs: [{ color: PLATE, amount: 1 }],
+      craftEvery: 4,
+      storageCap: 100,
+    })
+    enqueuePlacePort(w, { x: 25, y: 40, port: 'input', color: 0xdd4444 })
+  }
+
+  /** Ore in the furnace input slot (k=0) and plate in its output slot (k=1). */
+  function furnaceStock(sim: Sim): { ore: number; plate: number } {
+    const b = buildingAt(sim.state.buildings, 26, 40)
+    return {
+      ore: sim.state.buildings.slotCount[b * MAX_SLOTS]!,
+      plate: sim.state.buildings.slotCount[b * MAX_SLOTS + 1]!,
+    }
+  }
+
+  it('consumes its inputs and accumulates its output', async () => {
+    const sim = await bootstrapSim(5)
+    bootSmelter(sim)
+    sim.scheduler.runTicks(sim.world, 1000)
+    const { ore, plate } = furnaceStock(sim)
+    expect(plate).toBeGreaterThan(0) // it actually smelted
+    expect(plate).toBeLessThanOrEqual(100) // capped
+    // Ore is being consumed by crafts, so the input slot never runs away past its cap.
+    expect(ore).toBeGreaterThanOrEqual(0)
+    expect(ore).toBeLessThanOrEqual(100)
+  })
+
+  it('is deterministic: same seed + commands -> identical hash and furnace stock', async () => {
+    const run = async (): Promise<Sim> => {
+      const sim = await bootstrapSim(17)
+      bootSmelter(sim)
+      sim.scheduler.runTicks(sim.world, 800)
+      return sim
+    }
+    const a = await run()
+    const b = await run()
+    expect(hashState(a.world)).toBe(hashState(b.world))
+    expect(furnaceStock(a)).toEqual(furnaceStock(b))
+  })
+
+  it('a furnace with no ore delivered never crafts', async () => {
+    const sim = await bootstrapSim(5)
+    // A lone furnace, unfed: its output stays empty because inputs are never satisfied.
+    enqueuePlaceCrafter(sim.world, {
+      x: 26,
+      y: 40,
+      w: 1,
+      h: 1,
+      color: 0x554433,
+      inputs: [{ color: ORE, amount: 2 }],
+      outputs: [{ color: PLATE, amount: 1 }],
+      craftEvery: 4,
+      storageCap: 100,
+    })
+    sim.scheduler.runTicks(sim.world, 500)
+    expect(furnaceStock(sim).plate).toBe(0)
   })
 })
 

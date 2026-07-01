@@ -20,6 +20,10 @@ export interface BuildItem {
   readonly color: number
   /** Resource colour a producer makes (producers only; ignored otherwise). */
   readonly itemColor: number
+  /** Recipe inputs a crafter consumes per craft (producer tools only; empty for extraction). */
+  readonly craftInputs?: readonly { color: number; amount: number }[]
+  /** Recipe outputs a crafter produces per craft (producer tools only). */
+  readonly craftOutputs?: readonly { color: number; amount: number }[]
   /** Resource colours a building stockpiles from input ports (buildings only). */
   readonly accepts: readonly number[]
   /** Ticks between drains for an output port. */

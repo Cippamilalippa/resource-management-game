@@ -6,6 +6,8 @@
   "prototypes": [
     "prototypes/items.json",
     "prototypes/buildings.json",
+    "prototypes/recipes.json",
+    "prototypes/technologies.json",
     "prototypes/resources.json",
     "prototypes/terrains.json"
   ],

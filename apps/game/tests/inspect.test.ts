@@ -41,7 +41,15 @@ describe('resolveInspect', () => {
     const world = createGameWorld(1)
     const state = createGameState()
     expect(
-      resolveInspect(world, state.grid, state.buildings, new InspectRegistry(), 99, 99),
+      resolveInspect(
+        world,
+        state.grid,
+        state.buildings,
+        state.villages,
+        new InspectRegistry(),
+        99,
+        99,
+      ),
     ).toBeNull()
   })
 
@@ -53,7 +61,7 @@ describe('resolveInspect', () => {
     flush(world, state)
     reg.record(0, 0, { name: 'Conveyor Belt Mk1', type: 'belt' })
 
-    const info = resolveInspect(world, state.grid, state.buildings, reg, 0, 0)
+    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 0, 0)
     expect(info?.title).toBe('Conveyor Belt Mk1')
     expect(info?.subtitle).toBe('Conveyor belt · facing East')
     expect(info?.footprint).toEqual({ x: 0, y: 0, w: 1, h: 1 })
@@ -68,7 +76,15 @@ describe('resolveInspect', () => {
     enqueuePlaceBelt(world, { ax: 0, ay: 0, bx: 2, by: 0, color: 0x404040, moveEvery: 60 })
     flush(world, state)
     expect(
-      resolveInspect(world, state.grid, state.buildings, new InspectRegistry(), 1, 0)?.title,
+      resolveInspect(
+        world,
+        state.grid,
+        state.buildings,
+        state.villages,
+        new InspectRegistry(),
+        1,
+        0,
+      )?.title,
     ).toBe('Conveyor belt')
   })
 
@@ -92,7 +108,7 @@ describe('resolveInspect', () => {
     enqueuePlacePort(world, { x: 6, y: 5, port: 'output', color: 0x445500, spawnEvery: 20 })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 5)
+    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 5)
     expect(info?.subtitle).toBe('Output port · facing East')
     // 20 ticks/item at 60 tps = 3 items/s.
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Output rate', value: '3 /s' })
@@ -118,7 +134,7 @@ describe('resolveInspect', () => {
     enqueuePlacePort(world, { x: 6, y: 5, port: 'input', color: 0xdd4444, dir: 3 })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 5)
+    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 5)
     expect(info?.subtitle).toBe('Input port · facing West')
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Feeds', value: 'Village' })
   })
@@ -140,7 +156,7 @@ describe('resolveInspect', () => {
     reg.record(5, 5, { name: 'Farm', type: 'producer' })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, state.buildings, reg, 5, 5)
+    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 5, 5)
     expect(info?.subtitle).toBe('Producer')
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Produces', value: '2 /s' })
     const stock = info?.stats.find((s) => s.label === 'Stock')
@@ -163,7 +179,7 @@ describe('resolveInspect', () => {
     flush(world, state)
 
     // Resolving any footprint tile finds the building and its stock bar.
-    const info = resolveInspect(world, state.grid, state.buildings, reg, 6, 6)
+    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 6)
     expect(info?.title).toBe('Village')
     const stock = info?.stats.find((s) => s.label === 'Stock')
     expect(stock).toMatchObject({ kind: 'bar', max: 50, color: 0x112233 })
@@ -183,12 +199,14 @@ describe('resolveInspect', () => {
       [-1, 0],
       [0, 0],
     ] as const) {
-      const info = resolveInspect(world, state.grid, state.buildings, reg, x, y)
+      const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, x, y)
       expect(info?.title).toBe('Village')
       expect(info?.subtitle).toBe('Building')
       expect(info?.footprint).toEqual({ x: -1, y: -1, w: 2, h: 2 })
     }
-    expect(info_size(resolveInspect(world, state.grid, state.buildings, reg, 0, 0))).toBe('2×2')
+    expect(
+      info_size(resolveInspect(world, state.grid, state.buildings, state.villages, reg, 0, 0)),
+    ).toBe('2×2')
   })
 })
 

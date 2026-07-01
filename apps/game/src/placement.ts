@@ -5,7 +5,7 @@ import {
   enqueuePlaceBuilding,
   enqueuePlaceBelt,
   enqueuePlacePort,
-  enqueuePlaceProducer,
+  enqueuePlaceCrafter,
   enqueuePlaceSplitter,
   enqueueRemove,
   projectBelt,
@@ -69,8 +69,8 @@ export function installPlacement(
 
   /**
    * Whether a producer tool could legally drop on the tile (x, y): a producer is now an
-   * off-belt building, so it just needs matching terrain (if it declares `requiresTerrain`).
-   * Mirrors the sim's `place_producer` gate so the ghost preview agrees with placement.
+   * off-belt crafter, so it just needs matching terrain (if it declares `requiresTerrain`).
+   * Mirrors the sim's `place_crafter` gate so the ghost preview agrees with placement.
    */
   const producerValid = (item: BuildItem, x: number, y: number): boolean => {
     if (!item.requiresTerrain) return true
@@ -117,6 +117,7 @@ export function installPlacement(
         world,
         grid,
         state.buildings,
+        state.villages,
         registry,
         pinned.tile.x,
         pinned.tile.y,
@@ -129,7 +130,15 @@ export function installPlacement(
       pinned = null // the pinned object vanished — fall through to hover.
     }
     const info = hoverTile
-      ? resolveInspect(world, grid, state.buildings, registry, hoverTile.x, hoverTile.y)
+      ? resolveInspect(
+          world,
+          grid,
+          state.buildings,
+          state.villages,
+          registry,
+          hoverTile.x,
+          hoverTile.y,
+        )
       : null
     inspectStore.set({ info, pinned: false })
     renderer.setHighlight(info ? { ...info.footprint, color: info.color, selected: false } : null)
@@ -145,7 +154,15 @@ export function installPlacement(
 
   /** A click in inspect mode: pin the object under the cursor, or unpin (toggle / empty). */
   const inspectClick = (tile: GridCoord): void => {
-    const info = resolveInspect(world, grid, state.buildings, registry, tile.x, tile.y)
+    const info = resolveInspect(
+      world,
+      grid,
+      state.buildings,
+      state.villages,
+      registry,
+      tile.x,
+      tile.y,
+    )
     if (!info) {
       pinned = null
     } else if (pinned && sameFootprint(pinned.footprint, info.footprint)) {
@@ -298,17 +315,19 @@ export function installPlacement(
       registry.record(tile.x, tile.y, { name: item.name, type: 'splitter' })
       return
     }
-    // Producer (farm/woodcutter/mine): an off-belt building, valid only where its required
-    // terrain allows it — the sim re-checks and drops a bad placement.
+    // Crafter (farm/mine/furnace/assembler…): an off-belt building running a recipe. Terrain-
+    // gated extraction crafters are valid only on matching terrain; the sim re-checks and drops
+    // a bad placement. The recipe's inputs/outputs ride on the build item.
     if (item.kind === 'producer') {
-      enqueuePlaceProducer(world, {
+      enqueuePlaceCrafter(world, {
         x: tile.x,
         y: tile.y,
         w: item.w,
         h: item.h,
         color: item.color,
-        itemColor: item.itemColor,
-        produceEvery: item.produceEvery,
+        inputs: item.craftInputs ?? [],
+        outputs: item.craftOutputs ?? [{ color: item.itemColor, amount: 1 }],
+        craftEvery: item.produceEvery,
         storageCap: item.storage,
         ...(item.requiresTerrain
           ? { requiresTerrainType: terrainTypeOf(item.requiresTerrain) }
