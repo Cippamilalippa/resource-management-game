@@ -19,7 +19,7 @@ const KIND_ICON: Record<BuildItem['kind'], IconName> = {
 export const GROUP_ICON: Record<string, IconName> = { ...KIND_ICON }
 
 /** Narrow an arbitrary string to a real lucide icon name. */
-function isIconName(s: string): s is IconName {
+export function isIconName(s: string): s is IconName {
   return Object.prototype.hasOwnProperty.call(icons, s)
 }
 

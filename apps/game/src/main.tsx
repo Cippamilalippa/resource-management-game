@@ -8,8 +8,15 @@ import { buildStore, type BuildItem } from './buildStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype } from './sim.ts'
 import type { DiscoveredModInfo } from '../electron/preload.ts'
-import { beltMoveAlpha, buildableSet, allTechIds } from './gameLogic.ts'
-import { buildIconTextures } from './iconTextures.ts'
+import {
+  beltMoveAlpha,
+  buildableSet,
+  techTypeOf,
+  enqueueSetActiveResearch,
+  RESEARCH_NONE,
+} from './gameLogic.ts'
+import { buildIconTextures, resourceIconTextures } from './iconTextures.ts'
+import { setResources } from './resources.ts'
 import './styles.css'
 
 /** Read a numeric prototype field, falling back when absent/ill-typed. */
@@ -102,6 +109,34 @@ function recipeItems(
   return items
 }
 
+/**
+ * Per-technology metadata the host owns: the sim's opaque integer id (see `techTypeOf`), the
+ * research-pack `cost` to complete it, and its prerequisites. The sandboxed sim never sees a tech
+ * string; the host maps between the two so the sim can track research purely as integers.
+ */
+interface TechMeta {
+  readonly id: string
+  readonly int: number
+  readonly cost: number
+  readonly prereqs: readonly string[]
+}
+
+/** Read every technology's { int id, pack cost, prerequisites } from the loaded prototypes. */
+function techMetas(prototypes: readonly ClientPrototype[]): TechMeta[] {
+  const metas: TechMeta[] = []
+  for (const p of prototypes) {
+    if (p.type !== 'technology') continue
+    const prereqs = (Array.isArray(p.prerequisites) ? p.prerequisites : []).filter(
+      (x): x is string => typeof x === 'string',
+    )
+    const costList = Array.isArray(p.cost) ? (p.cost as RecipeFlow[]) : []
+    let cost = 0
+    for (const c of costList) if (c && typeof c.amount === 'number') cost += c.amount
+    metas.push({ id: p.id, int: techTypeOf(p.id), cost, prereqs })
+  }
+  return metas
+}
+
 /** Map the placeable prototypes (buildings, belts, ports) and recipes to build-bar tools. */
 function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
   // Resource identity is the item's colour; build an id->colour lookup so a building's
@@ -129,6 +164,7 @@ function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
       color: num(p, 'color', 0xffffff),
       itemColor: num(p, 'itemColor', 0xffffff),
       accepts,
+      ...(p.researchLab === true ? { researchLab: true } : {}),
       spawnEvery: num(p, 'spawnEvery', 20),
       moveEvery: num(p, 'moveEvery', 1),
       produceEvery: num(p, 'produceEvery', 30),
@@ -172,12 +208,20 @@ async function boot(): Promise<void> {
 
   const { prototypes, discovered, mods } = await loadContent()
   const { world, scheduler, state, registry } = await createSim(prototypes, discovered)
-  // Derive which recipes/buildings are buildable from the researched technologies. There is no
-  // runtime research yet (author + gate only), so every authored tech is seeded as researched —
-  // the gate machinery is live and one-way (content → UI), just not withholding anything yet.
-  const buildable = buildableSet(prototypes, allTechIds(prototypes))
-  const items = toBuildItems(prototypes).filter((i) => buildable.has(i.id))
-  buildStore.setItems(items)
+
+  // Live research → buildable set. The sim tracks completed technologies by opaque integer id
+  // (it never sees a tech string); the host owns the string↔int map and the authored costs. Root
+  // techs (no prerequisites) are researched from the start; the rest are earned by feeding a lab
+  // research packs. As the sim completes techs, `researchedIds` grows and the build bar re-derives.
+  const techs = techMetas(prototypes)
+  const techIdByInt = new Map(techs.map((t) => [t.int, t.id] as const))
+  const researchedIds = new Set(techs.filter((t) => t.prereqs.length === 0).map((t) => t.id))
+  const allBuildItems = toBuildItems(prototypes)
+
+  // Install the resource registry (colour → icon + name) and rasterize a glyph per resource
+  // colour. Resources don't change with research, so this is built once and merged with the
+  // per-research building overlays below.
+  const resourceTextures = await resourceIconTextures(setResources(prototypes))
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement
   const renderer = await Renderer.create({
@@ -185,8 +229,18 @@ async function boot(): Promise<void> {
     width: globalThis.innerWidth,
     height: globalThis.innerHeight,
   })
-  // Stamp the build-bar glyph onto placed buildings/producers, keyed by their tile colour.
-  renderer.setIcons(await buildIconTextures(items))
+  // Re-derive the build bar (and its glyphs) from the current researched set. Called at boot and
+  // again whenever research completes a tech and unlocks new buildings/recipes.
+  const refreshBuildBar = async (): Promise<void> => {
+    const buildable = buildableSet(prototypes, researchedIds)
+    const items = allBuildItems.filter((i) => buildable.has(i.id))
+    buildStore.setItems(items)
+    // Stamp the build-bar glyph onto placed buildings/producers (keyed by their tile colour), and
+    // the resource glyph onto every item riding a belt (keyed by its identity colour). Buildings go
+    // last so a building colour wins over an item colour in the unlikely event the two collide.
+    renderer.setIcons(new Map([...resourceTextures, ...(await buildIconTextures(items))]))
+  }
+  await refreshBuildBar()
   globalThis.addEventListener('resize', () => {
     renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
   })
@@ -227,6 +281,25 @@ async function boot(): Promise<void> {
       fps = Math.round((frames * 1000) / (now - lastStatsAt))
       frames = 0
       lastStatsAt = now
+      // Pull runtime tech completions into the researched set, and keep research self-driving
+      // until the M4 research screen lands. The sim records completed techs as integer ids; map
+      // them back to strings, and when research is idle auto-select the next tech whose
+      // prerequisites are met (deterministic prototype order). Replaced by the M4 research UI.
+      let grew = false
+      for (let i = 0; i < state.research.completed.length; i++) {
+        const id = techIdByInt.get(state.research.completed[i]!)
+        if (id !== undefined && !researchedIds.has(id)) {
+          researchedIds.add(id)
+          grew = true
+        }
+      }
+      if (grew) void refreshBuildBar()
+      if (state.research.activeTech === RESEARCH_NONE) {
+        const next = techs.find(
+          (t) => !researchedIds.has(t.id) && t.prereqs.every((p) => researchedIds.has(p)),
+        )
+        if (next) enqueueSetActiveResearch(world, { tech: next.int, cost: next.cost })
+      }
       // Refresh the inspector so a pinned/hovered object's live numbers stay current.
       inspect.refresh()
       statsStore.set({

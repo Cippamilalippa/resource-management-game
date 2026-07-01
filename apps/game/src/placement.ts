@@ -291,6 +291,7 @@ export function installPlacement(
         h: item.h,
         color: item.color,
         accepts: item.accepts.map((color) => ({ color, cap: item.storage })),
+        ...(item.researchLab ? { researchLab: true } : {}),
       })
       registry.record(tile.x, tile.y, { name: item.name, type: 'building' })
       return

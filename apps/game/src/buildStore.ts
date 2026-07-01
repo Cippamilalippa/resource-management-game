@@ -26,6 +26,8 @@ export interface BuildItem {
   readonly craftOutputs?: readonly { color: number; amount: number }[]
   /** Resource colours a building stockpiles from input ports (buildings only). */
   readonly accepts: readonly number[]
+  /** Building tool only: register the placed store as a research lab (its packs drive research). */
+  readonly researchLab?: boolean
   /** Ticks between drains for an output port. */
   readonly spawnEvery: number
   /** Ticks between item advances for a belt. */

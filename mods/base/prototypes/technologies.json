@@ -27,12 +27,14 @@
     "id": "tech.basic_smelting",
     "type": "technology",
     "prerequisites": ["tech.mining"],
+    "cost": [{ "item": "item.research_pack", "amount": 20 }],
     "unlocks": ["recipe.iron_plate", "building.furnace"]
   },
   {
     "id": "tech.assembly",
     "type": "technology",
     "prerequisites": ["tech.basic_smelting"],
+    "cost": [{ "item": "item.research_pack", "amount": 40 }],
     "unlocks": ["recipe.gear", "building.assembler"]
   }
 ]

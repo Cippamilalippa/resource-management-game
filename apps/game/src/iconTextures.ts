@@ -4,6 +4,7 @@ import { icons } from 'lucide-react'
 import { Texture } from 'pixi.js'
 import type { BuildItem } from './buildStore.ts'
 import { iconForItem } from './buildIcons.ts'
+import type { Resource } from './resources.ts'
 
 /** Resolution the lucide glyph is rasterized at; downscaled to ~30% of a tile when drawn. */
 const ICON_PX = 64
@@ -46,6 +47,26 @@ export async function buildIconTextures(
         const tex = await loadTexture(glyphDataUrl(iconForItem(item).name))
         textures.set(item.color >>> 0, tex)
       }),
+  )
+  return textures
+}
+
+/**
+ * Build the `color -> Texture` map for *resources* — the glyph drawn centred on each item as it
+ * rides a belt, keyed by the item's identity colour (see {@link Resource}). Built once at boot
+ * (resources don't change with research) and merged with the building overlays into the single
+ * map the renderer resolves by entity colour. The renderer centres these on the item circle while
+ * corner-badging the building ones; both are just white glyphs on the tile's own colour.
+ */
+export async function resourceIconTextures(
+  resources: readonly Resource[],
+): Promise<Map<number, Texture>> {
+  const textures = new Map<number, Texture>()
+  await Promise.all(
+    resources.map(async (res) => {
+      const tex = await loadTexture(glyphDataUrl(res.icon))
+      textures.set(res.color >>> 0, tex)
+    }),
   )
   return textures
 }

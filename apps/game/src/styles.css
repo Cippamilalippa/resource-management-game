@@ -174,11 +174,15 @@ body {
   background: rgba(255, 85, 85, 0.2);
 }
 
-.buildbar .swatch {
+/* Fallback colour chip for a resource with no registry entry (used by ResourceLabel in both
+   the build detail panel and the inspector). */
+.swatch {
+  display: inline-block;
   width: 14px;
   height: 14px;
   border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.25);
+  vertical-align: middle;
 }
 
 /* Hover detail panel, raised above the bar to describe the tool/category under the cursor. */
@@ -240,7 +244,51 @@ body {
 
 .buildbar-detail-swatches {
   display: flex;
-  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+}
+
+/* A resource shown as its icon (tinted its colour) beside its name — the shared way the UI
+   refers to a resource, in the build detail panel and the inspector alike. */
+.resource-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Popover naming the resource, raised above its icon on hover (see ResourceLabel). Purely
+   presentational — pointer-events off so it never intercepts the cursor. */
+.resource-popover {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(20, 23, 33, 0.96);
+  border: 1px solid #2a2e3a;
+  color: #e6e8ef;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.08s ease;
+  z-index: 30;
+}
+
+.resource-label:hover .resource-popover,
+.resource-label:focus-within .resource-popover {
+  opacity: 1;
+  visibility: visible;
+}
+
+.resource-name {
+  font-size: 12px;
+  color: #e6e8ef;
 }
 
 .buildbar-detail-list {
@@ -347,6 +395,17 @@ body {
   gap: 7px;
 }
 
+.sidebar-heading {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7180;
+  border-bottom: 1px solid rgba(60, 66, 82, 0.6);
+  padding-bottom: 3px;
+}
+
 .sidebar-row {
   display: flex;
   justify-content: space-between;
@@ -364,39 +423,48 @@ body {
   text-align: right;
 }
 
-.sidebar-swatch {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  vertical-align: middle;
-}
-
 .sidebar-barwrap {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 120px;
+  min-width: 150px;
 }
 
 .sidebar-bartext {
   font-size: 11px;
   color: #b6bccb;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .sidebar-bar {
   flex: 1;
-  height: 6px;
-  background: rgba(60, 66, 82, 0.6);
-  border-radius: 3px;
+  /* Match the text line box so the bar reads as the same height as the numbers beside it. */
+  align-self: stretch;
+  min-height: 12px;
+  background: rgba(60, 66, 82, 0.55);
+  border: 1px solid rgba(90, 98, 120, 0.45);
+  border-radius: 4px;
   overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .sidebar-barfill {
   display: block;
   height: 100%;
   background: #4fa8ff;
+  border-radius: 3px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  transition: width 0.15s ease-out;
+}
+
+.sidebar-barrate {
+  font-size: 11px;
+  color: #b6bccb;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 32px;
+  text-align: right;
 }
 
 .sidebar-foot {

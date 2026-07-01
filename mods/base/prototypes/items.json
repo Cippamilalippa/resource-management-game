@@ -4,55 +4,71 @@
     "type": "item",
     "name": "Apple",
     "stackSize": 100,
-    "color": 14100029
+    "color": 14100029,
+    "icon": "Apple"
   },
   {
     "id": "item.grain",
     "type": "item",
     "name": "Grain",
     "stackSize": 100,
-    "color": 15255899
+    "color": 15255899,
+    "icon": "Wheat"
   },
   {
     "id": "item.wood",
     "type": "item",
     "name": "Wood",
     "stackSize": 100,
-    "color": 11106379
+    "color": 11106379,
+    "icon": "Trees"
   },
   {
     "id": "item.iron_ore",
     "type": "item",
     "name": "Iron Ore",
     "stackSize": 100,
-    "color": 12042444
+    "color": 12042444,
+    "icon": "Mountain"
   },
   {
     "id": "item.copper_ore",
     "type": "item",
     "name": "Copper Ore",
     "stackSize": 100,
-    "color": 13135931
+    "color": 13135931,
+    "icon": "Gem"
   },
   {
     "id": "item.iron_plate",
     "type": "item",
     "name": "Iron Plate",
     "stackSize": 100,
-    "color": 11583173
+    "color": 11583173,
+    "icon": "Layers"
   },
   {
     "id": "item.gear",
     "type": "item",
     "name": "Gear",
     "stackSize": 100,
-    "color": 9479342
+    "color": 9479342,
+    "icon": "Cog"
   },
   {
     "id": "item.bread",
     "type": "item",
     "name": "Bread",
     "stackSize": 100,
-    "color": 13213795
+    "color": 13213795,
+    "icon": "Croissant"
+  },
+  {
+    "id": "item.research_pack",
+    "type": "item",
+    "name": "Research Pack",
+    "stackSize": 100,
+    "color": 3062647,
+    "icon": "FlaskConical"
   }
 ]

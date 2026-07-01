@@ -2,11 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { buildStore, type BuildItem } from './buildStore.ts'
 import { Icon } from './Icon.tsx'
 import { GROUP_ICON, iconForItem } from './buildIcons.ts'
-
-/** 0xRRGGBB packed color -> CSS hex string. */
-function cssColor(color: number): string {
-  return `#${(color >>> 0).toString(16).padStart(6, '0')}`
-}
+import { ResourceLabel } from './ResourceLabel.tsx'
 
 /** Display labels for each tool kind; unknown kinds fall back to the raw kind string. */
 const GROUP_LABEL: Record<string, string> = {
@@ -164,7 +160,7 @@ function DetailPanel({ hover }: { hover: Hover }): React.JSX.Element {
             {row.swatches ? (
               <span className="buildbar-detail-swatches">
                 {row.swatches.map((c, i) => (
-                  <span key={i} className="swatch" style={{ background: cssColor(c) }} />
+                  <ResourceLabel key={i} color={c} />
                 ))}
               </span>
             ) : (

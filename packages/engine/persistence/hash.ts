@@ -17,7 +17,11 @@ export function hashSnapshot(snapshot: WorldSnapshot): string {
   return (h >>> 0).toString(16).padStart(8, '0')
 }
 
-/** Convenience: snapshot a live world and hash it. */
-export function hashState(gw: GameWorld): string {
-  return hashSnapshot(serialize(gw))
+/**
+ * Convenience: snapshot a live world and hash it. Pass a mod-state blob (see
+ * {@link serialize}) to fold each mod's out-of-ECS state into the hash, so the
+ * reproducibility guarantee covers stockpiles/research/villages, not just entities.
+ */
+export function hashState(gw: GameWorld, modState: Record<string, unknown> = {}): string {
+  return hashSnapshot(serialize(gw, modState))
 }

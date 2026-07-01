@@ -16,6 +16,7 @@ import type {
   PlacePortCommand,
   PlaceSplitterCommand,
   PlaceCrafterCommand,
+  SetActiveResearchCommand,
   RemoveCommand,
 } from './sim.ts'
 
@@ -79,6 +80,18 @@ export function enqueuePlaceProducer(
       ? { requiresTerrainType: cmd.requiresTerrainType }
       : {}),
   })
+}
+
+/**
+ * Queue selection of the technology research works toward (applied next tick). `tech` is the
+ * opaque integer id (host-side `techTypeOf`) and `cost` its authored pack requirement; the sim
+ * drains labs into it until the cost is met (single-active model).
+ */
+export function enqueueSetActiveResearch(
+  gw: GameWorld,
+  cmd: Omit<SetActiveResearchCommand, 'type'>,
+): void {
+  enqueueCommand(gw, { type: 'set_active_research', ...cmd })
 }
 
 /** Queue a removal of whatever deletable object sits at (x, y) (applied next tick). */

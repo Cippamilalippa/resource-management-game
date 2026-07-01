@@ -18,7 +18,9 @@ import {
   type ScriptResolver,
 } from '@factory/engine/modloader'
 import { discoverModSources, NodeFileSource } from '@factory/engine/modloader/node'
-import { validateContent, type GameState } from './gameLogic.ts'
+import { serialize, type WorldSnapshot } from '@factory/engine/persistence'
+import type { BaseReady } from '../../mods/base/scripts/main.ts'
+import { validateContent, serializeGameState, type GameState } from './gameLogic.ts'
 
 /**
  * Resolve a mod script to a module by dynamically importing it. Runs under tsx, so
@@ -46,17 +48,39 @@ export interface Sim {
   readonly load: LoadResult
   /** Mutable base-game state (placed belts, …), owned by mods/base and published via `base:ready`. */
   readonly state: GameState
+  /** Snapshot the whole sim (engine entities + the base mod's out-of-ECS state) for a save. */
+  serialize(): WorldSnapshot
+  /**
+   * Restore a saved snapshot in place: fast-forward the world clock/RNG and rebuild the base
+   * mod's stores + entities. Meant for a sim bootstrapped with `startScene: false` (an empty
+   * origin), matching how a real load starts before any scene exists.
+   */
+  restore(snapshot: WorldSnapshot): void
+}
+
+/** Options for {@link bootstrapSim}. */
+export interface BootstrapOptions {
+  readonly tickRate?: number
+  /**
+   * Spawn the clean starting scene (default). Pass `false` to leave the world empty — the
+   * origin a save is loaded into (see {@link Sim.restore}), so a load never doubles the scene.
+   */
+  readonly startScene?: boolean
 }
 
 /**
  * Build a fully wired sim from a seed: discover every mod in /mods (the base game
  * is mods/base) and load them through the mod loader, create a deterministic
- * world, then run the mods. The base mod owns the game state, spawns the starting
- * scene and registers the base systems through the `ModApi` — there is no app-side
- * game logic here. We capture the state the base mod publishes (`base:ready`) for
- * the runner/tests. Shared by the headless runner and the tests.
+ * world, then run the mods. The base mod owns the game state and registers the base
+ * systems through the `ModApi` — there is no app-side game logic here. It publishes
+ * `base:ready` with the live state plus new-game/load closures; the host picks the
+ * world's origin (a fresh scene by default, or nothing when `startScene: false`).
+ * Shared by the headless runner and the tests.
  */
-export async function bootstrapSim(seed: number, tickRate = 60): Promise<Sim> {
+export async function bootstrapSim(
+  seed: number,
+  { tickRate = 60, startScene = true }: BootstrapOptions = {},
+): Promise<Sim> {
   const registry = new PrototypeRegistry()
   const sources = await discoverModSources(modsDir())
   const discovered: DiscoveredMod[] = await Promise.all(sources.map(readManifest))
@@ -67,22 +91,38 @@ export async function bootstrapSim(seed: number, tickRate = 60): Promise<Sim> {
   validateContent(registry)
 
   const world = createGameWorld(seed)
-  // The base mod publishes its read handle to the live game state; subscribe before running it.
-  let state: GameState | undefined
-  world.events.on('base:ready', (s) => {
-    state = s as GameState
+  // The base mod publishes its read handle plus the origin closures; subscribe before running it,
+  // then pick the world's origin — a clean scene, or nothing (loaded later via `restore`).
+  let ready: BaseReady | undefined
+  world.events.on('base:ready', (r) => {
+    ready = r as BaseReady
   })
 
-  // Run mod scripts against the live world. The base mod spawns the scene and contributes
-  // its systems here, collected in order and scheduled after the engine's counter.
+  // Run mod scripts against the live world. The base mod contributes its systems here,
+  // collected in order and scheduled after the engine's counter.
   const modSystems: System[] = []
   await runModScripts(
     discovered,
     { registry, world, addSystem: (s) => modSystems.push(s) },
     importScript,
   )
-  if (!state) throw new Error('base mod did not publish game state (base:ready)')
+  if (!ready) throw new Error('base mod did not publish game state (base:ready)')
+  if (startScene) ready.newGame()
 
+  const state = ready.state
   const scheduler = new Scheduler([counterSystem, ...modSystems], { tickRate })
-  return { world, registry, scheduler, load, state }
+  return {
+    world,
+    registry,
+    scheduler,
+    load,
+    state,
+    serialize: () => serialize(world, { base: serializeGameState(state) }),
+    restore: (snapshot) => {
+      // Fast-forward the engine clock/RNG (the hash covers both), then hand the mod its state.
+      world.tick = snapshot.tick
+      world.rng.setState(snapshot.rngState)
+      ready!.load(snapshot)
+    },
+  }
 }

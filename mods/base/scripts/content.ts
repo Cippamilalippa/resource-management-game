@@ -82,6 +82,9 @@ function validateTechShapes(registry: PrototypeRegistry): void {
     idList(t, 'prerequisites')
     const unlocks = idList(t, 'unlocks')
     if (unlocks.length === 0) fail(`${t.id}: technology must "unlocks" at least one id`)
+    // `cost` is the research-pack requirement consumed to research the tech; optional (a root
+    // tech seeded as researched needs none), but when present it must be a well-formed flow list.
+    flows(t, 'cost')
   }
 }
 
@@ -210,6 +213,12 @@ export function validateContent(registry: PrototypeRegistry): void {
       select: (t) => idList(t, 'prerequisites'),
       expectType: 'technology',
       label: 'prerequisite',
+    },
+    {
+      type: 'technology',
+      select: (t) => flows(t, 'cost').map((f) => f.item),
+      expectType: 'item',
+      label: 'cost',
     },
     // Unlocks may reference a recipe OR a building/crafter; check existence here and the
     // recipe/building type separately below so the message stays specific.

@@ -23,7 +23,7 @@ import {
  * it supplied so items keep entering.
  */
 async function bootBelt(moveEvery: number, tickRate = 60): Promise<Sim> {
-  const sim = await bootstrapSim(1, tickRate)
+  const sim = await bootstrapSim(1, { tickRate })
   enqueuePlaceBelt(sim.world, { ax: 2, ay: 0, bx: 10, by: 0, color: 0x404040, moveEvery })
   enqueuePlaceProducer(sim.world, {
     x: 1,

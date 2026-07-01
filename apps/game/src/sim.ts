@@ -109,13 +109,16 @@ export async function createSim(
   const byId = new Map(prototypes.map((p) => [p.id, p]))
   const registry = new InspectRegistry()
 
-  // The base mod owns the game state and spawns the scene; subscribe before running it.
-  // `base:ready` hands us the read handle (render interpolation, inspector, placement
-  // ghosts); `base:spawn` lets us name each scene tile for the read-only inspector from the
-  // prototypes we already hold — a non-sim side effect that never mutates the world.
+  // The base mod owns the game state; subscribe before running it. `base:ready` hands us the
+  // read handle (render interpolation, inspector, placement ghosts) plus the new-game/load
+  // closures; we start a clean scene here (save/load wiring lands in a later M2 pass).
+  // `base:spawn` lets us name each scene tile for the read-only inspector from the prototypes we
+  // already hold — a non-sim side effect that never mutates the world.
   let state: GameState | undefined
-  world.events.on('base:ready', (s) => {
-    state = s as GameState
+  world.events.on('base:ready', (r) => {
+    const ready = r as { state: GameState; newGame: () => void }
+    state = ready.state
+    ready.newGame()
   })
   world.events.on('base:spawn', (payload) => {
     const { protoId, x, y } = payload as { protoId: string; x: number; y: number }

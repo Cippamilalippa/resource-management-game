@@ -26,10 +26,21 @@ export interface WorldSnapshot {
   readonly rngState: number
   /** Entities sorted by (x, y, sprite) for a canonical, order-independent form. */
   readonly entities: readonly EntitySnapshot[]
+  /**
+   * Opaque, JSON-safe per-mod state, keyed by mod id. The engine stays game-agnostic: it
+   * only carries and hashes this blob, never interprets it. Each mod owns the shape under
+   * its own key (the base game serializes its `GameState` here), so nothing sim-critical
+   * that lives outside the ECS is dropped from a save. Keys are sorted for a canonical form.
+   */
+  readonly modState: Readonly<Record<string, unknown>>
 }
 
-/** Capture a canonical snapshot of the world's sim state. */
-export function serialize(gw: GameWorld): WorldSnapshot {
+/**
+ * Capture a canonical snapshot of the world's sim state. `modState` is an opaque per-mod
+ * blob the engine carries verbatim (see {@link WorldSnapshot.modState}); callers that hold
+ * no mod state pass nothing.
+ */
+export function serialize(gw: GameWorld, modState: Record<string, unknown> = {}): WorldSnapshot {
   const { Position, Renderable } = gw.components
   const ents = renderableEntities(gw)
 
@@ -55,7 +66,17 @@ export function serialize(gw: GameWorld): WorldSnapshot {
     tick: gw.tick,
     rngState: gw.rng.getState(),
     entities,
+    // Re-key in sorted order so two worlds with the same mod state hash identically
+    // regardless of the insertion order the host handed us.
+    modState: canonicalizeModState(modState),
   }
+}
+
+/** Rebuild a plain object with its top-level keys sorted, for a canonical, hash-stable form. */
+function canonicalizeModState(modState: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(modState).sort()) out[key] = modState[key]
+  return out
 }
 
 /** Rebuild a world from a snapshot. Inverse of {@link serialize}. */

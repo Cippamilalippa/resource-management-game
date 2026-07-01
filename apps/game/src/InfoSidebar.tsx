@@ -1,21 +1,33 @@
 import { useSyncExternalStore } from 'react'
 import { inspectStore } from './inspectStore.ts'
 import type { InspectStat } from './inspect.ts'
+import { ResourceLabel } from './ResourceLabel.tsx'
 
 /** 0xRRGGBB packed color -> CSS hex string. */
 function cssColor(color: number): string {
   return `#${(color >>> 0).toString(16).padStart(6, '0')}`
 }
 
-/** Render one declarative info row by its kind (text / colour swatch / progress bar). */
+/** Render one declarative info row by its kind (heading / text / colour swatch / progress bar). */
 function StatRow({ stat }: { stat: InspectStat }): React.JSX.Element {
+  // A heading is a section title spanning the row (e.g. "Produces" / "Consumes").
+  if (stat.kind === 'heading') {
+    return <div className="sidebar-heading">{stat.label}</div>
+  }
   return (
     <div className="sidebar-row">
-      <span className="sidebar-label">{stat.label}</span>
+      {/* A resource bar is labelled by the resource's icon; other rows by their text label. */}
+      {stat.kind === 'bar' && stat.color !== undefined ? (
+        <span className="sidebar-label">
+          <ResourceLabel color={stat.color} showName={false} />
+        </span>
+      ) : (
+        <span className="sidebar-label">{stat.label}</span>
+      )}
       {stat.kind === 'text' && <span className="sidebar-value">{stat.value}</span>}
       {stat.kind === 'color' && (
         <span className="sidebar-value">
-          <span className="sidebar-swatch" style={{ background: cssColor(stat.color) }} />
+          <ResourceLabel color={stat.color} />
         </span>
       )}
       {stat.kind === 'bar' && (
@@ -32,6 +44,7 @@ function StatRow({ stat }: { stat: InspectStat }): React.JSX.Element {
               }}
             />
           </span>
+          {stat.rate !== undefined && <span className="sidebar-barrate">{stat.rate}</span>}
         </span>
       )}
     </div>

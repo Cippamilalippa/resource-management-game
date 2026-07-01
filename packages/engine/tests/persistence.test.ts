@@ -53,3 +53,28 @@ describe('persistence save/load round-trip', () => {
     expect(() => deserialize(snap)).toThrow(/version/)
   })
 })
+
+describe('persistence opaque mod-state', () => {
+  it('defaults to an empty blob and carries a blob through hashing', () => {
+    const gw = populated(3)
+    expect(serialize(gw).modState).toEqual({})
+    const blob = { base: { belts: 2, packs: 7 } }
+    expect(serialize(gw, blob).modState).toEqual(blob)
+  })
+
+  it('canonicalizes key order so equal mod state hashes identically', () => {
+    const gw = populated(4)
+    const a = hashState(gw, { alpha: 1, omega: 2 })
+    const b = hashState(gw, { omega: 2, alpha: 1 })
+    expect(a).toBe(b)
+  })
+
+  it('folds mod state into the hash: differing blobs hash differently', () => {
+    const gw = populated(4)
+    const bare = hashState(gw)
+    const withState = hashState(gw, { base: { count: 1 } })
+    const withOther = hashState(gw, { base: { count: 2 } })
+    expect(withState).not.toBe(bare)
+    expect(withState).not.toBe(withOther)
+  })
+})

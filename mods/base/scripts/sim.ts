@@ -122,6 +122,23 @@ export function terrainTypeAt(terrain: TerrainGrid, x: number, y: number): numbe
 }
 
 /**
+ * Map a technology's string id to a stable, non-zero 32-bit integer (FNV-1a) — the twin of
+ * {@link terrainTypeOf} for techs. The sandboxed sim never enumerates or names technologies
+ * (its {@link ModApi} only looks a prototype up by id); the host owns the string↔int mapping
+ * and hashes ids through here so the integer the sim tracks as the "active"/"completed" tech
+ * matches on both sides without the sim ever seeing the string. Deterministic and
+ * allocation-free; `|| 1` keeps {@link RESEARCH_NONE} (0) reserved.
+ */
+export function techTypeOf(id: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  return h >>> 0 || 1
+}
+
+/**
  * The whole base-game belt network as flat parallel arrays indexed by a dense belt-tile
  * id. `index` maps a packed tile coordinate to that id. Capacity grows (doubling) only
  * when tiles are placed; the per-tick hot path reads these arrays by index and never
@@ -870,6 +887,165 @@ function updateVillages(state: GameState): void {
   }
 }
 
+// --- Research ---------------------------------------------------------------
+
+/**
+ * How often the research system runs (ticks). Like villages, research changes slowly, so packs
+ * are drained from labs once per cadence rather than every tick — keeping the per-tick cost near
+ * zero. At 60 tps this is one evaluation per second.
+ */
+export const RESEARCH_CADENCE = 60
+
+/** "No active technology" sentinel for {@link ResearchStore.activeTech}; {@link techTypeOf} never returns it. */
+export const RESEARCH_NONE = 0
+
+/**
+ * The live research progression, owned by the base game (not the engine). A single technology is
+ * "active" at a time ({@link ResearchStore.activeTech}, an opaque integer id — see
+ * {@link techTypeOf}); every {@link RESEARCH_CADENCE} ticks the {@link updateResearch} system
+ * drains research packs from every registered *lab* (a store building holding packs) into
+ * {@link ResearchStore.progress} until the active tech's `cost` is met, then records it complete
+ * and goes idle. The sim knows nothing tech-specific: the host supplies the active tech's integer
+ * id and its pack cost through the `set_active_research` command, and reads the completed integer
+ * ids back to drive the buildable set. Labs are anchored by tile (re-resolved to a building id
+ * each cadence) so the store survives building-store compaction, exactly like villages.
+ */
+export interface ResearchStore {
+  /** Number of registered labs. */
+  labCount: number
+  /** Lab anchor tiles (top-left of the lab footprint). */
+  lx: Int32Array
+  ly: Int32Array
+  /** Active technology integer id, or {@link RESEARCH_NONE} when idle. */
+  activeTech: number
+  /** Research packs required to complete the active tech (its authored `cost`). */
+  activeCost: number
+  /** Packs accumulated toward the active tech so far. */
+  progress: number
+  /** Integer ids of technologies completed at runtime (in completion order). */
+  completed: number[]
+  /** Shared cadence countdown (ticks since the last evaluation). */
+  timer: number
+}
+
+export function createResearchStore(): ResearchStore {
+  const cap = 4
+  return {
+    labCount: 0,
+    lx: new Int32Array(cap),
+    ly: new Int32Array(cap),
+    activeTech: RESEARCH_NONE,
+    activeCost: 0,
+    progress: 0,
+    completed: [],
+    timer: 0,
+  }
+}
+
+/** Register a lab at anchor tile (x, y). Its pack buffer lives in the building store keyed by that tile. */
+export function registerResearchLab(r: ResearchStore, x: number, y: number): number {
+  const need = r.labCount + 1
+  if (need > r.lx.length) {
+    let next = r.lx.length
+    while (next < need) next *= 2
+    r.lx = grow(r.lx, next, 0)
+    r.ly = grow(r.ly, next, 0)
+  }
+  const i = r.labCount++
+  r.lx[i] = x
+  r.ly[i] = y
+  return i
+}
+
+/** True once the technology with integer id `tech` has been researched. */
+export function researchCompleted(r: ResearchStore, tech: number): boolean {
+  for (let i = 0; i < r.completed.length; i++) if (r.completed[i] === tech) return true
+  return false
+}
+
+/**
+ * Drain up to `max` research packs out of building `b`'s drainable slots, returning the amount
+ * removed. A lab only stocks packs, so this empties its pack slots (fixed slot order) toward the
+ * active tech without ever exceeding what is still needed. Integer math, allocation-free.
+ */
+function drainResearchPacks(store: BuildingStore, b: number, max: number): number {
+  if (max <= 0) return 0
+  const n = store.slotN[b]!
+  let taken = 0
+  for (let k = 0; k < n && taken < max; k++) {
+    const i = b * MAX_SLOTS + k
+    if (!(store.slotRole[i]! & ROLE_DRAIN)) continue
+    const want = max - taken
+    const have = store.slotCount[i]!
+    const pull = have < want ? have : want
+    store.slotCount[i] = have - pull
+    taken += pull
+  }
+  return taken
+}
+
+/**
+ * Advance research once per {@link RESEARCH_CADENCE} ticks: while a technology is active, drain
+ * research packs from every registered lab into {@link ResearchStore.progress} (never past the
+ * active tech's `cost` — leftover packs stay in the lab for the next tech). When the cost is met,
+ * record the tech complete and go idle (single-active model — the host selects the next tech).
+ * Integer math, no RNG; runs off the per-tick hot path.
+ */
+function updateResearch(state: GameState): void {
+  const r = state.research
+  if (r.activeTech === RESEARCH_NONE) return
+  if (++r.timer < RESEARCH_CADENCE) return
+  r.timer = 0
+  const store = state.buildings
+  for (let i = 0; i < r.labCount && r.progress < r.activeCost; i++) {
+    const b = buildingAt(store, r.lx[i]!, r.ly[i]!)
+    if (b === NONE) continue // the lab building was removed — leave the anchor inert.
+    r.progress += drainResearchPacks(store, b, r.activeCost - r.progress)
+  }
+  if (r.progress >= r.activeCost) {
+    r.completed.push(r.activeTech)
+    r.activeTech = RESEARCH_NONE
+    r.activeCost = 0
+    r.progress = 0
+  }
+}
+
+/** Plain, JSON-safe capture of a {@link ResearchStore} for save/load round-trips. */
+export interface ResearchSnapshot {
+  readonly labs: readonly { readonly x: number; readonly y: number }[]
+  readonly activeTech: number
+  readonly activeCost: number
+  readonly progress: number
+  readonly completed: readonly number[]
+  readonly timer: number
+}
+
+/** Capture the research store as a plain snapshot (see {@link deserializeResearch}). */
+export function serializeResearch(r: ResearchStore): ResearchSnapshot {
+  const labs: { x: number; y: number }[] = []
+  for (let i = 0; i < r.labCount; i++) labs.push({ x: r.lx[i]!, y: r.ly[i]! })
+  return {
+    labs,
+    activeTech: r.activeTech,
+    activeCost: r.activeCost,
+    progress: r.progress,
+    completed: r.completed.slice(),
+    timer: r.timer,
+  }
+}
+
+/** Rebuild a research store from a snapshot. Inverse of {@link serializeResearch}. */
+export function deserializeResearch(snap: ResearchSnapshot): ResearchStore {
+  const r = createResearchStore()
+  for (const lab of snap.labs) registerResearchLab(r, lab.x, lab.y)
+  r.activeTech = snap.activeTech
+  r.activeCost = snap.activeCost
+  r.progress = snap.progress
+  r.completed = snap.completed.slice()
+  r.timer = snap.timer
+  return r
+}
+
 // --- Per-tick systems -------------------------------------------------------
 
 /**
@@ -1086,6 +1262,8 @@ export interface GameState {
   readonly buildings: BuildingStore
   /** The villages — staged demand consumers that grow/decline on how well they are supplied. */
   readonly villages: VillageStore
+  /** The live research progression — labs consume packs to complete the active technology. */
+  readonly research: ResearchStore
 }
 
 export function createGameState(moveEvery = 60): GameState {
@@ -1094,7 +1272,311 @@ export function createGameState(moveEvery = 60): GameState {
     terrain: new Map(),
     buildings: createBuildingStore(),
     villages: createVillageStore(),
+    research: createResearchStore(),
   }
+}
+
+// --- Save / load: mod-owned GameState serialization -------------------------
+
+/**
+ * The minimal entity shape the load path re-spawns — structurally identical to the engine's
+ * `EntitySnapshot`. Declared locally so the sandboxed sim depends only on a *type*, never a
+ * value import from the engine's persistence module (the base game reaches the engine solely
+ * through {@link ModApi}). The host passes the snapshot's `entities` list straight through.
+ */
+export interface EntityData {
+  readonly x: number
+  readonly y: number
+  readonly sprite: number
+  readonly color: number
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * One belt tile's sim state. The tile's entities (track arrow, port/splitter overlay, riding
+ * item) are re-linked from the re-spawned world by tile + sprite-class on load, so no entity
+ * ids are stored here. `nbr`/`order`/`dueEvery`/`moveEvery` are recomputed on rebuild.
+ */
+export interface BeltTileSnapshot {
+  readonly tx: number
+  readonly ty: number
+  readonly face: number
+  readonly kind: number
+  readonly inDir: number
+  readonly portTimer: number
+  readonly portEvery: number
+  readonly rr: number
+  readonly period: number
+}
+
+/** The belt grid: its live tiles plus the mid-cadence move counters that pace them. */
+export interface BeltSnapshot {
+  readonly tiles: readonly BeltTileSnapshot[]
+  readonly moveTimer: number
+  readonly moveCount: number
+}
+
+/** One stockpile slot, plain form (colour + current count + cap + role bits + recipe amount). */
+export interface SlotSnapshot {
+  readonly color: number
+  readonly count: number
+  readonly cap: number
+  readonly role: number
+  readonly amt: number
+}
+
+/** One building: footprint, crafter cadence/timer, and its stockpile slots. */
+export interface BuildingSnapshot {
+  readonly bx: number
+  readonly by: number
+  readonly bw: number
+  readonly bh: number
+  readonly crafts: number
+  readonly craftEvery: number
+  readonly craftTimer: number
+  readonly slots: readonly SlotSnapshot[]
+}
+
+/** One village's anchor tile, current stage and growth/decline timers. */
+export interface VillageEntrySnapshot {
+  readonly vx: number
+  readonly vy: number
+  readonly stage: number
+  readonly growthTimer: number
+  readonly declineTimer: number
+}
+
+/** The villages: the shared stage ladder, the cadence countdown, and the per-village entries. */
+export interface VillageSnapshot {
+  readonly stages: readonly VillageStageConfig[]
+  readonly timer: number
+  readonly entries: readonly VillageEntrySnapshot[]
+}
+
+/**
+ * Plain, JSON-safe capture of the whole base-game {@link GameState} — everything the sim keeps
+ * outside the ECS (belt grid, building stockpiles, terrain types, villages, research). This is
+ * what the base game contributes to a save's per-mod state blob so nothing sim-critical is
+ * dropped. Terrain is emitted sorted by packed key so the capture is canonical (Map order is
+ * insertion-dependent); belts/buildings/villages keep dense-index order (rebuilt in the same
+ * order, so a round-trip re-serializes byte-identically).
+ */
+export interface GameStateSnapshot {
+  readonly belt: BeltSnapshot
+  readonly buildings: readonly BuildingSnapshot[]
+  readonly terrain: readonly (readonly [number, number])[]
+  readonly villages: VillageSnapshot
+  readonly research: ResearchSnapshot
+}
+
+/** Capture the base game's {@link GameState} as a plain snapshot (see {@link loadGameState}). */
+export function serializeGameState(state: GameState): GameStateSnapshot {
+  const g = state.grid
+  const tiles: BeltTileSnapshot[] = []
+  for (let t = 0; t < g.count; t++) {
+    tiles.push({
+      tx: g.tx[t]!,
+      ty: g.ty[t]!,
+      face: g.face[t]!,
+      kind: g.kind[t]!,
+      inDir: g.inDir[t]!,
+      portTimer: g.portTimer[t]!,
+      portEvery: g.portEvery[t]!,
+      rr: g.rr[t]!,
+      period: g.period[t]!,
+    })
+  }
+
+  const store = state.buildings
+  const buildings: BuildingSnapshot[] = []
+  for (let b = 0; b < store.count; b++) {
+    const slotN = store.slotN[b]!
+    const slots: SlotSnapshot[] = []
+    for (let k = 0; k < slotN; k++) {
+      const i = b * MAX_SLOTS + k
+      slots.push({
+        color: store.slotColor[i]!,
+        count: store.slotCount[i]!,
+        cap: store.slotCap[i]!,
+        role: store.slotRole[i]!,
+        amt: store.slotAmt[i]!,
+      })
+    }
+    buildings.push({
+      bx: store.bx[b]!,
+      by: store.by[b]!,
+      bw: store.bw[b]!,
+      bh: store.bh[b]!,
+      crafts: store.crafts[b]!,
+      craftEvery: store.craftEvery[b]!,
+      craftTimer: store.craftTimer[b]!,
+      slots,
+    })
+  }
+
+  // Sort terrain by packed key: a Map iterates in insertion order, which differs between the
+  // scene's insert order and a rebuilt store's, so sorting gives one canonical form.
+  const terrain: [number, number][] = [...state.terrain.entries()].sort((a, b) => a[0] - b[0])
+
+  const v = state.villages
+  const entries: VillageEntrySnapshot[] = []
+  for (let i = 0; i < v.count; i++) {
+    entries.push({
+      vx: v.vx[i]!,
+      vy: v.vy[i]!,
+      stage: v.stage[i]!,
+      growthTimer: v.growthTimer[i]!,
+      declineTimer: v.declineTimer[i]!,
+    })
+  }
+
+  return {
+    belt: { tiles, moveTimer: g.moveTimer, moveCount: g.moveCount },
+    buildings,
+    terrain,
+    villages: { stages: v.stages, timer: v.timer, entries },
+    research: serializeResearch(state.research),
+  }
+}
+
+/**
+ * Reconstruct the base game's {@link GameState} from a save. Mutates `state`'s stores IN PLACE
+ * (the per-tick systems close over these exact store references, so they must not be replaced),
+ * and re-spawns every renderable from `entities` through {@link ModApi.spawn} — learning each
+ * fresh entity id at creation, then linking the belt/building stores to them by tile and
+ * sprite-class. Scenery (terrain fills, orchard trees) is re-spawned and simply left unlinked.
+ *
+ * Assumes a fresh, scene-less `state` (the base mod's load seam runs this INSTEAD of spawning
+ * the starting scene — see main.ts), so there are no prior entities to reconcile.
+ */
+export function loadGameState(
+  api: ModApi,
+  state: GameState,
+  entities: readonly EntityData[],
+  snap: GameStateSnapshot,
+): void {
+  // Re-spawn everything, indexing the store-owned entities by tile. A belt tile carries at most
+  // one track arrow, one overlay and one item; a building footprint is unique by its top-left.
+  const trackByTile = new Map<number, number>()
+  const markByTile = new Map<number, number>()
+  const itemByTile = new Map<number, number>()
+  const footprintByTopLeft = new Map<number, number>()
+  for (let i = 0; i < entities.length; i++) {
+    const e = entities[i]!
+    const eid = api.spawn({
+      pos: { x: e.x, y: e.y },
+      sprite: e.sprite,
+      color: e.color,
+      width: e.width,
+      height: e.height,
+    })
+    const key = tileKey(e.x, e.y)
+    const shape = e.sprite >> 2 // sprite = shape * 4 + orient
+    if (shape === SHAPE_BELT_ARROW) trackByTile.set(key, eid)
+    else if (shape === SHAPE_PORT_ARROW || shape === SHAPE_SPLITTER) markByTile.set(key, eid)
+    else if (shape === SHAPE_CIRCLE) itemByTile.set(key, eid)
+    else if (shape !== SHAPE_TERRAIN) footprintByTopLeft.set(key, eid) // building footprint
+  }
+
+  // Belt grid: replay the tiles, then link each tile's entities from the index.
+  const g = state.grid
+  const bs = snap.belt
+  ensureCapacity(g, Math.max(1, bs.tiles.length))
+  g.index.clear()
+  g.count = bs.tiles.length
+  for (let t = 0; t < bs.tiles.length; t++) {
+    const tile = bs.tiles[t]!
+    g.tx[t] = tile.tx
+    g.ty[t] = tile.ty
+    g.face[t] = tile.face
+    g.kind[t] = tile.kind
+    g.inDir[t] = tile.inDir
+    g.portTimer[t] = tile.portTimer
+    g.portEvery[t] = tile.portEvery
+    g.rr[t] = tile.rr
+    g.period[t] = tile.period
+    const key = tileKey(tile.tx, tile.ty)
+    g.trackEid[t] = trackByTile.get(key) ?? NONE
+    g.markEid[t] = markByTile.get(key) ?? NONE
+    g.slot[t] = itemByTile.get(key) ?? NONE
+    g.portBuilding[t] = NONE // relinked below, once buildings are rebuilt.
+    g.index.set(key, t)
+  }
+
+  // Building store: replay each building and its stockpile slots, linking the footprint entity.
+  const store = state.buildings
+  ensureBuildingCapacity(store, Math.max(1, snap.buildings.length))
+  store.tileIndex.clear()
+  store.count = snap.buildings.length
+  for (let b = 0; b < snap.buildings.length; b++) {
+    const bldg = snap.buildings[b]!
+    store.eid[b] = footprintByTopLeft.get(tileKey(bldg.bx, bldg.by)) ?? NONE
+    store.bx[b] = bldg.bx
+    store.by[b] = bldg.by
+    store.bw[b] = bldg.bw
+    store.bh[b] = bldg.bh
+    store.crafts[b] = bldg.crafts
+    store.craftEvery[b] = bldg.craftEvery
+    store.craftTimer[b] = bldg.craftTimer
+    store.slotN[b] = bldg.slots.length
+    for (let k = 0; k < bldg.slots.length; k++) {
+      const slot = bldg.slots[k]!
+      const i = b * MAX_SLOTS + k
+      store.slotColor[i] = slot.color
+      store.slotCount[i] = slot.count
+      store.slotCap[i] = slot.cap
+      store.slotRole[i] = slot.role
+      store.slotAmt[i] = slot.amt
+    }
+    for (let dy = 0; dy < bldg.bh; dy++) {
+      for (let dx = 0; dx < bldg.bw; dx++) {
+        store.tileIndex.set(tileKey(bldg.bx + dx, bldg.by + dy), b)
+      }
+    }
+  }
+
+  // Ports link to the buildings they border; then rebuild topology + cadence. recomputeCadence
+  // resets the move counters when the base period changes, so restore them AFTERWARDS.
+  relinkUnlinkedPorts(g, store)
+  rebuildTopology(g)
+  recomputeCadence(g)
+  g.moveTimer = bs.moveTimer
+  g.moveCount = bs.moveCount
+
+  // Terrain layer (already canonical-sorted in the snapshot).
+  state.terrain.clear()
+  for (let i = 0; i < snap.terrain.length; i++) {
+    state.terrain.set(snap.terrain[i]![0], snap.terrain[i]![1])
+  }
+
+  // Villages: reset the store, restore the shared stage ladder (deep-copied so the store never
+  // aliases the snapshot), then replay each village's anchor, stage and timers.
+  const v = state.villages
+  v.count = 0
+  v.stages = snap.villages.stages.map((s) => ({
+    population: s.population,
+    demands: s.demands.map((d) => ({ color: d.color, need: d.need })),
+  }))
+  for (let i = 0; i < snap.villages.entries.length; i++) {
+    const entry = snap.villages.entries[i]!
+    const idx = registerVillage(v, entry.vx, entry.vy)
+    v.stage[idx] = entry.stage
+    v.growthTimer[idx] = entry.growthTimer
+    v.declineTimer[idx] = entry.declineTimer
+  }
+  v.timer = snap.villages.timer
+
+  // Research: mutate the existing store in place (systems close over it).
+  const r = state.research
+  const rs = snap.research
+  r.labCount = 0
+  for (const lab of rs.labs) registerResearchLab(r, lab.x, lab.y)
+  r.activeTech = rs.activeTech
+  r.activeCost = rs.activeCost
+  r.progress = rs.progress
+  r.completed = rs.completed.slice()
+  r.timer = rs.timer
 }
 
 /**
@@ -1125,6 +1607,11 @@ export interface PlaceBuildingCommand {
   readonly color: number
   /** Resources this building stockpiles (from input ports); omitted/empty for plain scenery. */
   readonly accepts?: readonly AcceptSlot[]
+  /**
+   * Register this store as a research *lab* (its pack buffer is drained by {@link updateResearch}).
+   * Only meaningful when `accepts` gives it a stockpile; omitted/false for a plain store.
+   */
+  readonly researchLab?: boolean
 }
 
 /** Place a conveyor running from tile A to tile B. */
@@ -1222,12 +1709,26 @@ export interface RemoveCommand {
   readonly y: number
 }
 
+/**
+ * Select the technology research works toward. Single-active: the {@link updateResearch} system
+ * drains packs into this tech until its `cost` is met, then goes idle until the next selection.
+ * `tech` is the opaque integer id ({@link techTypeOf}) and `cost` its authored pack requirement —
+ * both supplied by the host, which owns the tech string↔int mapping. A tech already completed is
+ * ignored.
+ */
+export interface SetActiveResearchCommand {
+  readonly type: 'set_active_research'
+  readonly tech: number
+  readonly cost: number
+}
+
 export type GameCommand =
   | PlaceBuildingCommand
   | PlaceBeltCommand
   | PlacePortCommand
   | PlaceSplitterCommand
   | PlaceCrafterCommand
+  | SetActiveResearchCommand
   | RemoveCommand
 
 /** Copy every per-tile field of the belt grid from index `src` to `dst` (swap-remove move). */
@@ -1349,6 +1850,8 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
           storeSlots(cmd.accepts),
         )
         relinkUnlinkedPorts(g, state.buildings)
+        // A lab is a store the research system drains its packs from; anchor it by tile.
+        if (cmd.researchLab) registerResearchLab(state.research, cmd.x, cmd.y)
       }
       return
     }
@@ -1441,6 +1944,15 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       relinkUnlinkedPorts(g, state.buildings)
       return
     }
+    case 'set_active_research': {
+      // Ignore a re-selection of an already-completed tech; otherwise arm it and reset progress.
+      const r = state.research
+      if (researchCompleted(r, cmd.tech)) return
+      r.activeTech = cmd.tech
+      r.activeCost = Math.max(1, cmd.cost)
+      r.progress = 0
+      return
+    }
     case 'remove': {
       // Belt-grid tiles take precedence (a port/splitter sits on a belt tile); then resource
       // buildings. Terrain and plain scenery are in neither store, so they are never removed.
@@ -1461,7 +1973,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
 /**
  * Build the base-game systems bound to `state` and `api`. Returned in run order: drain
  * commands first (so a belt placed this tick is live), advance the belt grid + crafters, then
- * evaluate villages (on their own slow cadence). The closures are created once at init — never
+ * evaluate villages and research (each on their own slow cadence). The closures are created once at init — never
  * per tick — so the hot path stays allocation-free; entity lifecycle goes through the stable
  * {@link ModApi} (`spawn`/`despawn`).
  */
@@ -1483,5 +1995,9 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
     updateVillages(state)
   }
 
-  return [commandSystem, beltSystem, villageSystem]
+  const researchSystem: System = () => {
+    updateResearch(state)
+  }
+
+  return [commandSystem, beltSystem, villageSystem, researchSystem]
 }

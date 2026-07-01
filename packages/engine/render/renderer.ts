@@ -194,7 +194,7 @@ export class Renderer {
       const y = lerp(Position.prevY[eid]!, Position.y[eid]!, alpha) * TILE_SIZE
       g.position.set(x, y)
 
-      this.#updateIcon(eid, color, x, y, Renderable.width[eid]!)
+      this.#updateIcon(eid, color, x, y, Renderable.width[eid]!, spr)
     }
 
     // Drop graphics for entities that no longer exist.
@@ -220,27 +220,46 @@ export class Renderer {
     this.#iconTextures = icons
   }
 
-  /** Sync entity `eid`'s overlay icon: create/move/retexture it, or drop it if its colour has none. */
-  #updateIcon(eid: number, color: number, x: number, y: number, wTiles: number): void {
+  /**
+   * Sync entity `eid`'s overlay icon: create/move/retexture it, or drop it if its colour has none.
+   * A small item riding a belt (circle shape, `sprite >> 2 === 1`) gets its glyph centred on the
+   * tile and sized to the item disc, so a resource reads as its icon-on-colour; anything larger
+   * (buildings/producers) gets a small top-right corner badge instead.
+   */
+  #updateIcon(
+    eid: number,
+    color: number,
+    x: number,
+    y: number,
+    wTiles: number,
+    sprite: number,
+  ): void {
     const tex = this.#iconTextures.get(color)
     if (!tex) {
       this.#removeIcon(eid)
       return
     }
+    const centred = sprite >> 2 === 1
+    const size = TILE_SIZE * (centred ? 0.42 : 0.3)
     let icon = this.#iconSprites.get(eid)
     if (!icon) {
       icon = new Sprite(tex)
-      const size = TILE_SIZE * 0.3
       icon.setSize(size, size)
       this.#iconSprites.set(eid, icon)
       this.#iconLayer.addChild(icon)
     } else if (icon.texture !== tex) {
-      // A recycled entity id now hosts a different building — swap to its glyph.
+      // A recycled entity id now hosts a different building/resource — swap glyph and resize.
       icon.texture = tex
+      icon.setSize(size, size)
     }
-    // Anchor to the tile's top-right corner, inset a little so it doesn't touch the edge.
-    const inset = TILE_SIZE * 0.08
-    icon.position.set(x + wTiles * TILE_SIZE - TILE_SIZE * 0.3 - inset, y + inset)
+    if (centred) {
+      // Centre the glyph on the item disc.
+      icon.position.set(x + (TILE_SIZE - size) / 2, y + (TILE_SIZE - size) / 2)
+    } else {
+      // Anchor to the tile's top-right corner, inset a little so it doesn't touch the edge.
+      const inset = TILE_SIZE * 0.08
+      icon.position.set(x + wTiles * TILE_SIZE - size - inset, y + inset)
+    }
   }
 
   /** Destroy entity `eid`'s overlay icon, if it has one. */

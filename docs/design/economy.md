@@ -46,8 +46,17 @@ sim code.
 
 ### 3.1 Items — `prototypes/items.json`
 
-Unchanged in shape. Items are pure leaves: `id`, `name`, `stackSize`, `color`.
+Items are pure leaves: `id`, `name`, `stackSize`, `color`, `icon`.
 No tier field (derived from the recipe graph).
+
+A resource is defined once, in one place, as an **icon + colour** pair — exactly like a
+building. `color` is the resource's identity throughout the sim (it's what rides belts and
+fills building slots); `icon` is a lucide glyph name (PascalCase, e.g. `"Wheat"`) drawn in
+that colour wherever the UI or world refers to the resource — on the item as it rides a belt,
+in a building's _Accepts_ / _Produces_ rows, and in the inspector. Every item must carry an
+`icon`; the client resolves it through a colour→resource registry (`apps/game/src/resources.ts`)
+so a bare colour alone renders the right glyph and name (an unknown colour falls back to a plain
+swatch). Keep each item's `color` unique — it doubles as the lookup key.
 
 ### 3.2 Recipes — `prototypes/recipes.json` (new)
 
@@ -242,11 +251,13 @@ only (§5).
    supply/demand differential remains a possible later refinement if stages feel steppy.
 2. **Recipe loops.** **Decided: no — the recipe graph is a strict DAG**; revisit only if
    a mechanic needs cyclic production (A→B→A).
-3. **Research model.** **Decided: author + gate only (for now).** Recipes and technologies
-   are authored data and validated; the buildable set is _derived_ from a `researchedSet`
-   seeded at start. A runtime research loop (research-pack items consumed by a lab to
-   complete techs live) is a deliberate **follow-up**, not built this pass. `cost` is
-   authored on the tech but not consumed yet.
+3. **Research model.** **Decided: author + gate first, then a live loop (M1, now built).**
+   Recipes and technologies are authored data and validated; the buildable set is _derived_
+   from a `researchedSet`. The runtime loop is now live: a `workshop` (category `research`)
+   crafts `item.research_pack` from early goods, a `lab` building stockpiles them, and a slow
+   `researchSystem` drains packs into the single active tech (`set_active_research`) until its
+   authored `cost` is met — then it is marked complete and unlocks its content. Root/no-prereq
+   techs are seeded researched. See roadmap M1.
 4. **Satisfaction aggregation.** **Decided: all current-stage demands must be met.**
    Stages list demands _cumulatively_ (each higher stage re-lists the lower needs), so a
    missing low-tier good starves every higher tier too. The village keeps an internal
@@ -291,6 +302,9 @@ only (§5).
    it can harden behind the same `ModApi` without breaking it.
 
 ## 7. Implementation phases
+
+> Phases 1–4 below are complete. For the forward-looking, whole-game plan (macro/micro
+> tasks toward a playable vertical slice and beyond), see [roadmap.md](./roadmap.md).
 
 Each phase passes the full verification gate before the next
 (`pnpm typecheck && pnpm lint && pnpm test && pnpm format:check`; plus the headless

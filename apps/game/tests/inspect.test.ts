@@ -158,9 +158,12 @@ describe('resolveInspect', () => {
 
     const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 5, 5)
     expect(info?.subtitle).toBe('Producer')
-    expect(info?.stats).toContainEqual({ kind: 'text', label: 'Produces', value: '2 /s' })
-    const stock = info?.stats.find((s) => s.label === 'Stock')
-    expect(stock).toMatchObject({ kind: 'bar', max: 100, color: 0x112233 })
+    expect(info?.stats).toContainEqual({ kind: 'text', label: 'Craft rate', value: '2 /s' })
+    // A drain-only recipe output shows under the "Produces" section as an icon + current/total bar.
+    expect(info?.stats).toContainEqual({ kind: 'heading', label: 'Produces' })
+    const stock = info?.stats.find((s) => s.kind === 'bar')
+    // The output bar carries a positive per-second throughput (1 unit every 30 ticks → "2/s").
+    expect(stock).toMatchObject({ kind: 'bar', max: 100, color: 0x112233, rate: '2/s' })
   })
 
   it('shows a stock bar per resource on a resource-holding building', () => {
@@ -178,10 +181,12 @@ describe('resolveInspect', () => {
     reg.record(5, 5, { name: 'Village', type: 'building' })
     flush(world, state)
 
-    // Resolving any footprint tile finds the building and its stock bar.
+    // Resolving any footprint tile finds the building and its stock bar. A dual-role store slot
+    // (fillable + drainable) is held/consumed, so it appears under the "Consumes" section.
     const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 6)
     expect(info?.title).toBe('Village')
-    const stock = info?.stats.find((s) => s.label === 'Stock')
+    expect(info?.stats).toContainEqual({ kind: 'heading', label: 'Consumes' })
+    const stock = info?.stats.find((s) => s.kind === 'bar')
     expect(stock).toMatchObject({ kind: 'bar', max: 50, color: 0x112233 })
   })
 

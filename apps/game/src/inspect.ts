@@ -16,6 +16,7 @@ import {
   KIND_INPUT,
   KIND_SPLITTER,
   MAX_SLOTS,
+  ROLE_DEPOSIT,
   ROLE_DRAIN,
   buildingAt,
   tileKey,
@@ -32,13 +33,22 @@ const DIR_NAMES = ['North', 'East', 'South', 'West'] as const
 export type InspectStat =
   | { readonly kind: 'text'; readonly label: string; readonly value: string }
   | { readonly kind: 'color'; readonly label: string; readonly color: number }
+  | { readonly kind: 'heading'; readonly label: string }
   | {
       readonly kind: 'bar'
       readonly label: string
       readonly value: number
       readonly max: number
-      /** Optional fill colour — used to tint a stockpile bar by its resource. */
+      /**
+       * Optional fill colour — used to tint a stockpile bar by its resource. When set, the row is
+       * labelled by the resource's icon (resolved from this colour) instead of a text label.
+       */
       readonly color?: number
+      /**
+       * Optional throughput label (e.g. "3/s") shown after the bar. Always a positive rate — a
+       * consumed slot reads the same way as a produced one — set only for recipe slots.
+       */
+      readonly rate?: string
     }
 
 /** The resolved description of whatever sits under the cursor. */
@@ -91,6 +101,16 @@ function perSec(everyTicks: number): string {
   if (everyTicks <= 0) return '—'
   const rate = DEFAULT_TICK_RATE / everyTicks
   return `${rate >= 10 ? Math.round(rate) : Number(rate.toFixed(2))} /s`
+}
+
+/**
+ * Format a slot's throughput as a positive "/s" rate: `amt` units moved every `everyTicks`
+ * ticks. Used for both produced and consumed slots — consumption reads as a positive rate too.
+ */
+function slotRate(amt: number, everyTicks: number): string {
+  if (everyTicks <= 0) return '—'
+  const rate = (amt * DEFAULT_TICK_RATE) / everyTicks
+  return `${rate >= 10 ? Math.round(rate) : Number(rate.toFixed(2))}/s`
 }
 
 /** Generic fall-back name for a belt-grid tile of the given kind. */
@@ -245,23 +265,12 @@ function describeBuilding(
     const stats: InspectStat[] = []
     // A terrain (or any object) blurb leads the rows, e.g. "build a Farm on top".
     if (meta?.detail) stats.push({ kind: 'text', label: 'Use', value: meta.detail })
-    // A resource-holding building shows its production and a bar per stockpiled resource.
+    // A resource-holding building shows its craft rate and its stockpile, split into what it
+    // makes (recipe outputs) and what it holds/consumes (recipe inputs and plain stores).
     const b = buildingAt(buildings, px, py)
     if (b >= 0) {
-      if (buildings.crafts[b]) {
-        // The crafted resource is the first drain (output) slot's colour.
-        let outColor = -1
-        const slots = buildings.slotN[b]!
-        for (let k = 0; k < slots; k++) {
-          const si = b * MAX_SLOTS + k
-          if (buildings.slotRole[si]! & ROLE_DRAIN && buildings.slotAmt[si]! > 0) {
-            outColor = buildings.slotColor[si]!
-            break
-          }
-        }
-        stats.push({ kind: 'text', label: 'Produces', value: perSec(buildings.craftEvery[b]!) })
-        if (outColor >= 0) stats.push({ kind: 'color', label: 'Resource', color: outColor })
-      }
+      if (buildings.crafts[b])
+        stats.push({ kind: 'text', label: 'Craft rate', value: perSec(buildings.craftEvery[b]!) })
       // A village shows its current level and population (read-only, one-way).
       const vs = villageStageAt(villages, px, py)
       if (vs >= 0) {
@@ -270,16 +279,35 @@ function describeBuilding(
         if (typeof pop === 'number')
           stats.push({ kind: 'text', label: 'Population', value: String(pop) })
       }
+      // A drain-only slot is a recipe output (produced); everything else (recipe inputs and
+      // dual-role store slots, e.g. a lab's research packs) is held/consumed. Each becomes an
+      // icon + current/total bar under its section heading.
+      const produces: InspectStat[] = []
+      const consumes: InspectStat[] = []
       const n = buildings.slotN[b]!
       for (let k = 0; k < n; k++) {
         const si = b * MAX_SLOTS + k
-        stats.push({
+        const role = buildings.slotRole[si]!
+        const amt = buildings.slotAmt[si]!
+        const bar: InspectStat = {
           kind: 'bar',
-          label: 'Stock',
+          label: '',
           value: buildings.slotCount[si]!,
           max: buildings.slotCap[si]!,
           color: buildings.slotColor[si]!,
-        })
+          // Recipe slots (amt > 0) move at the craft cadence; plain stores (amt 0) have no rate.
+          ...(amt > 0 ? { rate: slotRate(amt, buildings.craftEvery[b]!) } : {}),
+        }
+        if (role & ROLE_DRAIN && !(role & ROLE_DEPOSIT)) produces.push(bar)
+        else consumes.push(bar)
+      }
+      if (produces.length > 0) {
+        stats.push({ kind: 'heading', label: 'Produces' })
+        for (let k = 0; k < produces.length; k++) stats.push(produces[k]!)
+      }
+      if (consumes.length > 0) {
+        stats.push({ kind: 'heading', label: 'Consumes' })
+        for (let k = 0; k < consumes.length; k++) stats.push(consumes[k]!)
       }
     }
     stats.push(

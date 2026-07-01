@@ -163,5 +163,27 @@
     "icon": "Split",
     "size": { "w": 1, "h": 1 },
     "color": 10185235
+  },
+  {
+    "id": "building.workshop",
+    "type": "crafter",
+    "name": "Workshop",
+    "icon": "FlaskConical",
+    "size": { "w": 1, "h": 1 },
+    "color": 3705462,
+    "craftingCategories": ["research"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.lab",
+    "type": "building",
+    "name": "Lab",
+    "icon": "Microscope",
+    "size": { "w": 2, "h": 2 },
+    "color": 2851507,
+    "accepts": ["item.research_pack"],
+    "storage": 200,
+    "researchLab": true
   }
 ]

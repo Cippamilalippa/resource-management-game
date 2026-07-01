@@ -1,6 +1,7 @@
 import { entityCount } from '@factory/engine/core'
 import { hashState } from '@factory/engine/persistence'
 import { bootstrapSim } from './bootstrap.ts'
+import { serializeGameState } from './gameLogic.ts'
 
 /**
  * Sim-only runner (no Pixi, no Electron). Boots the sim with a seed, runs N ticks
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
   const seed = parseArg(process.argv[2], 1)
   const ticks = parseArg(process.argv[3], 1000)
 
-  const { world, scheduler, load } = await bootstrapSim(seed)
+  const { world, scheduler, load, state } = await bootstrapSim(seed)
   scheduler.runTicks(world, ticks)
 
   const result = {
@@ -31,7 +32,9 @@ async function main(): Promise<void> {
     entityCount: entityCount(world),
     systemRuns: world.stats.systemRuns,
     rngState: world.rng.getState(),
-    stateHash: hashState(world),
+    // Fold the base mod's out-of-ECS state (stockpiles, research, villages) into the hash so the
+    // reproducibility gate covers the whole sim, not just entities.
+    stateHash: hashState(world, { base: serializeGameState(state) }),
   }
 
   console.log('=== headless sim run ===')
