@@ -11,6 +11,8 @@
     "dev": "pnpm --filter @factory/game dev",
     "build": "pnpm --filter @factory/game build",
     "headless": "pnpm --filter @factory/headless start",
+    "balance": "pnpm --filter @factory/balance start",
+    "balance:aero": "pnpm --filter @factory/balance start --data apps/balance/sandbox/aerospace",
     "test": "vitest run",
     "test:watch": "vitest",
     "bench": "vitest bench --run",

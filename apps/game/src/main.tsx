@@ -1,13 +1,17 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Renderer } from '@factory/engine/render'
-import { entityCount } from '@factory/engine/core'
+import { entityCount, type GameWorld, type Scheduler } from '@factory/engine/core'
+import { SNAPSHOT_VERSION, type WorldSnapshot } from '@factory/engine/persistence'
 import { App } from './App.tsx'
 import { statsStore } from './statsStore.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
 import { installPlacement } from './placement.ts'
-import { createSim, type ClientPrototype } from './sim.ts'
-import type { DiscoveredModInfo } from '../electron/preload.ts'
+import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
+import { saveStore, type SaveController } from './saveStore.ts'
+import type { InspectRegistry } from './inspect.ts'
+import type { GameState } from './gameLogic.ts'
+import type { DiscoveredModInfo, SaveMeta } from '../electron/preload.ts'
 import {
   beltMoveAlpha,
   buildableSet,
@@ -117,12 +121,17 @@ function recipeItems(
 interface TechMeta {
   readonly id: string
   readonly int: number
-  readonly cost: number
+  /** Per-pack research cost as the sim consumes it: { pack colour, amount }. */
+  readonly cost: readonly { color: number; amount: number }[]
   readonly prereqs: readonly string[]
 }
 
-/** Read every technology's { int id, pack cost, prerequisites } from the loaded prototypes. */
+/** Read every technology's { int id, per-pack cost, prerequisites } from the loaded prototypes. */
 function techMetas(prototypes: readonly ClientPrototype[]): TechMeta[] {
+  // The sim works in item colours, not ids; resolve each cost entry's item to its colour.
+  const itemColors = new Map<string, number>()
+  for (const p of prototypes) if (p.type === 'item') itemColors.set(p.id, num(p, 'color', 0xffffff))
+
   const metas: TechMeta[] = []
   for (const p of prototypes) {
     if (p.type !== 'technology') continue
@@ -130,8 +139,12 @@ function techMetas(prototypes: readonly ClientPrototype[]): TechMeta[] {
       (x): x is string => typeof x === 'string',
     )
     const costList = Array.isArray(p.cost) ? (p.cost as RecipeFlow[]) : []
-    let cost = 0
-    for (const c of costList) if (c && typeof c.amount === 'number') cost += c.amount
+    const cost: { color: number; amount: number }[] = []
+    for (const c of costList) {
+      if (c && typeof c.item === 'string' && typeof c.amount === 'number') {
+        cost.push({ color: itemColors.get(c.item) ?? 0xffffff, amount: c.amount })
+      }
+    }
     metas.push({ id: p.id, int: techTypeOf(p.id), cost, prereqs })
   }
   return metas
@@ -207,16 +220,26 @@ async function boot(): Promise<void> {
   )
 
   const { prototypes, discovered, mods } = await loadContent()
-  const { world, scheduler, state, registry } = await createSim(prototypes, discovered)
 
-  // Live research → buildable set. The sim tracks completed technologies by opaque integer id
-  // (it never sees a tech string); the host owns the string↔int map and the authored costs. Root
-  // techs (no prerequisites) are researched from the start; the rest are earned by feeding a lab
-  // research packs. As the sim completes techs, `researchedIds` grows and the build bar re-derives.
+  // Session-invariant derived data (recomputed once, shared across new-game/load).
+  // The sim tracks completed technologies by opaque integer id (it never sees a tech string); the
+  // host owns the string↔int map and the authored costs. Root techs (no prerequisites) are
+  // researched from the start; the rest are earned by feeding a lab research packs.
   const techs = techMetas(prototypes)
   const techIdByInt = new Map(techs.map((t) => [t.int, t.id] as const))
-  const researchedIds = new Set(techs.filter((t) => t.prereqs.length === 0).map((t) => t.id))
+  const rootTechIds = techs.filter((t) => t.prereqs.length === 0).map((t) => t.id)
   const allBuildItems = toBuildItems(prototypes)
+
+  // Derive the researched-string set from a research store's completed integer ids plus the always-
+  // available root techs. Called when a session starts so a loaded save unlocks exactly what it had.
+  const researchedFrom = (completed: readonly number[]): Set<string> => {
+    const ids = new Set(rootTechIds)
+    for (let i = 0; i < completed.length; i++) {
+      const id = techIdByInt.get(completed[i]!)
+      if (id !== undefined) ids.add(id)
+    }
+    return ids
+  }
 
   // Install the resource registry (colour → icon + name) and rasterize a glyph per resource
   // colour. Resources don't change with research, so this is built once and merged with the
@@ -229,10 +252,33 @@ async function boot(): Promise<void> {
     width: globalThis.innerWidth,
     height: globalThis.innerHeight,
   })
-  // Re-derive the build bar (and its glyphs) from the current researched set. Called at boot and
-  // again whenever research completes a tech and unlocks new buildings/recipes.
+  globalThis.addEventListener('resize', () => {
+    renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
+  })
+
+  /**
+   * The live sim the render loop drives. Swapped wholesale on new-game/load: a fresh
+   * {@link createSim} builds a new world/scheduler/state, and placement is re-pointed at it (the
+   * renderer keeps its callback slots, so re-installing just overwrites them — no double-binding).
+   * The renderer reconciles the entity set each frame, so pointing it at a new world Just Works.
+   */
+  interface Session {
+    world: GameWorld
+    scheduler: Scheduler
+    state: GameState
+    registry: InspectRegistry
+    inspect: { refresh: () => void }
+    /** Researched tech ids for this session (grows as research completes). */
+    researchedIds: Set<string>
+    serialize: () => WorldSnapshot
+  }
+  let session: Session | null = null
+
+  // Re-derive the build bar (and its glyphs) from the current session's researched set. Called when
+  // a session starts and whenever research completes a tech and unlocks new buildings/recipes.
   const refreshBuildBar = async (): Promise<void> => {
-    const buildable = buildableSet(prototypes, researchedIds)
+    if (!session) return
+    const buildable = buildableSet(prototypes, session.researchedIds)
     const items = allBuildItems.filter((i) => buildable.has(i.id))
     buildStore.setItems(items)
     // Stamp the build-bar glyph onto placed buildings/producers (keyed by their tile colour), and
@@ -240,11 +286,161 @@ async function boot(): Promise<void> {
     // last so a building colour wins over an item colour in the unlikely event the two collide.
     renderer.setIcons(new Map([...resourceTextures, ...(await buildIconTextures(items))]))
   }
-  await refreshBuildBar()
-  globalThis.addEventListener('resize', () => {
-    renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
+
+  /** Build a fresh sim from an origin (new game or restored save) and make it the live session. */
+  const startSession = async (origin: SimOrigin): Promise<void> => {
+    const sim = await createSim(prototypes, discovered, origin)
+    const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry)
+    session = {
+      world: sim.world,
+      scheduler: sim.scheduler,
+      state: sim.state,
+      registry: sim.registry,
+      inspect,
+      researchedIds: researchedFrom(sim.state.research.completed),
+      serialize: sim.serialize,
+    }
+    await refreshBuildBar()
+  }
+
+  await startSession({ kind: 'new' })
+
+  // ── Save/load controller ─────────────────────────────────────────────────────────────────────
+  // The menu (React) drives this; every disk op reports progress back through saveStore. The bridge
+  // is absent in a plain browser (no Electron) — the menu then shows an unavailable state.
+  const bridge = window.factory
+  let toastTimer: ReturnType<typeof setTimeout> | undefined
+  const flashToast = (msg: string): void => {
+    saveStore.set({ toast: msg })
+    if (toastTimer) clearTimeout(toastTimer)
+    toastTimer = setTimeout(() => saveStore.set({ toast: null }), 2200)
+  }
+  /** Run a disk op with the busy flag set, surfacing any failure as a sticky error. */
+  const withBusy = async (fn: () => Promise<void>): Promise<void> => {
+    saveStore.set({ busy: true, error: null })
+    try {
+      await fn()
+    } catch (err) {
+      saveStore.set({ error: err instanceof Error ? err.message : String(err) })
+    } finally {
+      saveStore.set({ busy: false })
+    }
+  }
+  const refreshSaves = async (): Promise<void> => {
+    if (!bridge) return
+    saveStore.set({ saves: await bridge.listSaves() })
+  }
+  /** Restore a slot into a freshly built session and mark it active. */
+  const loadMeta = async (meta: SaveMeta): Promise<void> => {
+    if (!bridge) return
+    // Reject a save from an incompatible engine version rather than crashing the restore.
+    if (meta.snapshotVersion !== SNAPSHOT_VERSION) {
+      throw new Error(
+        `Save "${meta.name}" is version ${meta.snapshotVersion}; this build reads version ${SNAPSHOT_VERSION}.`,
+      )
+    }
+    const payload = await bridge.loadGame(meta.id)
+    await startSession({ kind: 'load', snapshot: payload.snapshot as WorldSnapshot })
+    saveStore.set({ open: false, activeId: meta.id })
+    flashToast(`Loaded "${meta.name}"`)
+  }
+
+  const controller: SaveController = {
+    open: () => {
+      saveStore.set({ open: true, error: null })
+      void withBusy(refreshSaves)
+    },
+    close: () => saveStore.set({ open: false }),
+    refresh: () => withBusy(refreshSaves),
+    quickSave: () =>
+      withBusy(async () => {
+        if (!bridge || !session) return
+        await bridge.saveGame({ kind: 'quick', snapshot: session.serialize() })
+        await refreshSaves()
+        flashToast('Quicksaved')
+      }),
+    quickLoad: () =>
+      withBusy(async () => {
+        if (!bridge) return
+        const saves = await bridge.listSaves()
+        const quick = saves.find((s) => s.kind === 'quick')
+        if (!quick) {
+          flashToast('No quicksave')
+          return
+        }
+        await loadMeta(quick)
+      }),
+    saveNew: (name: string) =>
+      withBusy(async () => {
+        if (!bridge || !session) return
+        const meta = await bridge.saveGame({ kind: 'manual', name, snapshot: session.serialize() })
+        await refreshSaves()
+        saveStore.set({ activeId: meta.id })
+        flashToast(`Saved "${meta.name}"`)
+      }),
+    overwrite: (meta: SaveMeta) =>
+      withBusy(async () => {
+        if (!bridge || !session) return
+        await bridge.saveGame({
+          kind: 'manual',
+          id: meta.id,
+          name: meta.name,
+          snapshot: session.serialize(),
+        })
+        await refreshSaves()
+        saveStore.set({ activeId: meta.id })
+        flashToast(`Overwrote "${meta.name}"`)
+      }),
+    load: (meta: SaveMeta) => withBusy(() => loadMeta(meta)),
+    remove: (meta: SaveMeta) =>
+      withBusy(async () => {
+        if (!bridge) return
+        await bridge.deleteSave(meta.id)
+        await refreshSaves()
+        if (saveStore.get().activeId === meta.id) saveStore.set({ activeId: null })
+      }),
+    newGame: () =>
+      withBusy(async () => {
+        await startSession({ kind: 'new' })
+        saveStore.set({ open: false, activeId: null })
+        flashToast('New game')
+      }),
+  }
+  saveStore.setController(controller)
+
+  // Autosave on a cadence, and best-effort on quit. Rotates through a small ring of `auto` slots
+  // (the main process prunes older ones). Skipped while the menu is open (nothing is advancing).
+  const AUTOSAVE_MS = 3 * 60 * 1000
+  const autosave = async (): Promise<void> => {
+    if (!bridge || !session) return
+    await bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
+    await refreshSaves()
+  }
+  setInterval(() => {
+    if (!saveStore.get().open) void autosave()
+  }, AUTOSAVE_MS)
+  globalThis.addEventListener('beforeunload', () => {
+    // Fire-and-forget: the page is going away, so we can't await the IPC round-trip.
+    if (bridge && session) void bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
   })
-  const inspect = installPlacement(renderer, world, state, registry)
+
+  // Global hotkeys: F5 quicksave, F9 quickload, Esc toggles the menu. Ignored while typing in a
+  // field (e.g. the save-name input) so the keys reach the input instead.
+  globalThis.addEventListener('keydown', (e) => {
+    const target = e.target as HTMLElement | null
+    const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
+    if (e.key === 'F5') {
+      e.preventDefault()
+      void controller.quickSave()
+    } else if (e.key === 'F9') {
+      e.preventDefault()
+      void controller.quickLoad()
+    } else if (e.key === 'Escape' && !typing) {
+      e.preventDefault()
+      if (saveStore.get().open) controller.close()
+      else controller.open()
+    }
+  })
 
   // Fixed-tick sim driven by real frame time; render interpolates with `alpha`.
   // Render is capped to 60fps; the sim stays decoupled via the scheduler.
@@ -256,6 +452,7 @@ async function boot(): Promise<void> {
   let last = performance.now()
   let lastFrameAt = last
   let lastStatsAt = 0
+  let lastAlpha = 0
   let frames = 0
   let fps = 0
 
@@ -271,10 +468,23 @@ async function boot(): Promise<void> {
     last = now
     frames += 1
 
-    // Belts step a whole tile per move-cycle; interpolate across the cycle (not the tick)
-    // so items glide one tile at a time instead of teleporting on the move tick.
-    const subTickAlpha = scheduler.advance(world, deltaMs)
-    renderer.render(world, beltMoveAlpha(state, subTickAlpha))
+    const sess = session
+    if (!sess) {
+      requestAnimationFrame(frame)
+      return
+    }
+
+    // The menu pauses the sim: we stop advancing but keep drawing a frozen frame so the paused
+    // world stays on screen (and resetting `last` above avoids a huge delta jump on resume).
+    if (saveStore.get().open) {
+      renderer.render(sess.world, lastAlpha)
+    } else {
+      // Belts step a whole tile per move-cycle; interpolate across the cycle (not the tick)
+      // so items glide one tile at a time instead of teleporting on the move tick.
+      const subTickAlpha = sess.scheduler.advance(sess.world, deltaMs)
+      lastAlpha = beltMoveAlpha(sess.state, subTickAlpha)
+      renderer.render(sess.world, lastAlpha)
+    }
 
     // Throttle React updates to ~4 Hz so the overlay never gates the frame rate.
     if (now - lastStatsAt > 250) {
@@ -286,25 +496,25 @@ async function boot(): Promise<void> {
       // them back to strings, and when research is idle auto-select the next tech whose
       // prerequisites are met (deterministic prototype order). Replaced by the M4 research UI.
       let grew = false
-      for (let i = 0; i < state.research.completed.length; i++) {
-        const id = techIdByInt.get(state.research.completed[i]!)
-        if (id !== undefined && !researchedIds.has(id)) {
-          researchedIds.add(id)
+      for (let i = 0; i < sess.state.research.completed.length; i++) {
+        const id = techIdByInt.get(sess.state.research.completed[i]!)
+        if (id !== undefined && !sess.researchedIds.has(id)) {
+          sess.researchedIds.add(id)
           grew = true
         }
       }
       if (grew) void refreshBuildBar()
-      if (state.research.activeTech === RESEARCH_NONE) {
+      if (sess.state.research.activeTech === RESEARCH_NONE) {
         const next = techs.find(
-          (t) => !researchedIds.has(t.id) && t.prereqs.every((p) => researchedIds.has(p)),
+          (t) => !sess.researchedIds.has(t.id) && t.prereqs.every((p) => sess.researchedIds.has(p)),
         )
-        if (next) enqueueSetActiveResearch(world, { tech: next.int, cost: next.cost })
+        if (next) enqueueSetActiveResearch(sess.world, { tech: next.int, cost: next.cost })
       }
       // Refresh the inspector so a pinned/hovered object's live numbers stay current.
-      inspect.refresh()
+      sess.inspect.refresh()
       statsStore.set({
-        tick: world.tick,
-        entities: entityCount(world),
+        tick: sess.world.tick,
+        entities: entityCount(sess.world),
         prototypes: prototypes.length,
         mods,
         fps,

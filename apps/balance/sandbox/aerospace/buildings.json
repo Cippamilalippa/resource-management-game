@@ -1,0 +1,265 @@
+[
+  {
+    "id": "building.mining_drill_mk1",
+    "type": "crafter",
+    "name": "Mining Drill Mk1",
+    "craftingCategories": ["mining"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.mining_drill_mk2",
+    "type": "crafter",
+    "name": "Mining Drill Mk2",
+    "craftingCategories": ["mining"],
+    "speed": 1
+  },
+  {
+    "id": "building.mining_drill_mk3",
+    "type": "crafter",
+    "name": "Mining Drill Mk3",
+    "craftingCategories": ["mining"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.oil_derrick_mk1",
+    "type": "crafter",
+    "name": "Oil Derrick Mk1",
+    "craftingCategories": ["drilling"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.oil_derrick_mk2",
+    "type": "crafter",
+    "name": "Oil Derrick Mk2",
+    "craftingCategories": ["drilling"],
+    "speed": 1
+  },
+  {
+    "id": "building.oil_derrick_mk3",
+    "type": "crafter",
+    "name": "Oil Derrick Mk3",
+    "craftingCategories": ["drilling"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.refinery_mk1",
+    "type": "crafter",
+    "name": "Refinery Mk1",
+    "craftingCategories": ["refining"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.refinery_mk2",
+    "type": "crafter",
+    "name": "Refinery Mk2",
+    "craftingCategories": ["refining"],
+    "speed": 1
+  },
+  {
+    "id": "building.refinery_mk3",
+    "type": "crafter",
+    "name": "Refinery Mk3",
+    "craftingCategories": ["refining"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.smelter_mk1",
+    "type": "crafter",
+    "name": "Smelter Mk1",
+    "craftingCategories": ["smelting"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.smelter_mk2",
+    "type": "crafter",
+    "name": "Smelter Mk2",
+    "craftingCategories": ["smelting"],
+    "speed": 1
+  },
+  {
+    "id": "building.smelter_mk3",
+    "type": "crafter",
+    "name": "Smelter Mk3",
+    "craftingCategories": ["smelting"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.chemical_plant_mk1",
+    "type": "crafter",
+    "name": "Chemical Plant Mk1",
+    "craftingCategories": ["chemistry"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.chemical_plant_mk2",
+    "type": "crafter",
+    "name": "Chemical Plant Mk2",
+    "craftingCategories": ["chemistry"],
+    "speed": 1
+  },
+  {
+    "id": "building.chemical_plant_mk3",
+    "type": "crafter",
+    "name": "Chemical Plant Mk3",
+    "craftingCategories": ["chemistry"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.composites_press_mk1",
+    "type": "crafter",
+    "name": "Composites Press Mk1",
+    "craftingCategories": ["composites"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.composites_press_mk2",
+    "type": "crafter",
+    "name": "Composites Press Mk2",
+    "craftingCategories": ["composites"],
+    "speed": 1
+  },
+  {
+    "id": "building.composites_press_mk3",
+    "type": "crafter",
+    "name": "Composites Press Mk3",
+    "craftingCategories": ["composites"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.rolling_mill_mk1",
+    "type": "crafter",
+    "name": "Rolling Mill Mk1",
+    "craftingCategories": ["metalworking"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.rolling_mill_mk2",
+    "type": "crafter",
+    "name": "Rolling Mill Mk2",
+    "craftingCategories": ["metalworking"],
+    "speed": 1
+  },
+  {
+    "id": "building.rolling_mill_mk3",
+    "type": "crafter",
+    "name": "Rolling Mill Mk3",
+    "craftingCategories": ["metalworking"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.electronics_bench_mk1",
+    "type": "crafter",
+    "name": "Electronics Bench Mk1",
+    "craftingCategories": ["electronics"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.electronics_bench_mk2",
+    "type": "crafter",
+    "name": "Electronics Bench Mk2",
+    "craftingCategories": ["electronics"],
+    "speed": 1
+  },
+  {
+    "id": "building.electronics_bench_mk3",
+    "type": "crafter",
+    "name": "Electronics Bench Mk3",
+    "craftingCategories": ["electronics"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.machine_shop_mk1",
+    "type": "crafter",
+    "name": "Machine Shop Mk1",
+    "craftingCategories": ["machining"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.machine_shop_mk2",
+    "type": "crafter",
+    "name": "Machine Shop Mk2",
+    "craftingCategories": ["machining"],
+    "speed": 1
+  },
+  {
+    "id": "building.machine_shop_mk3",
+    "type": "crafter",
+    "name": "Machine Shop Mk3",
+    "craftingCategories": ["machining"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.fabricator_mk1",
+    "type": "crafter",
+    "name": "Fabricator Mk1",
+    "craftingCategories": ["fabrication"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.fabricator_mk2",
+    "type": "crafter",
+    "name": "Fabricator Mk2",
+    "craftingCategories": ["fabrication"],
+    "speed": 1
+  },
+  {
+    "id": "building.fabricator_mk3",
+    "type": "crafter",
+    "name": "Fabricator Mk3",
+    "craftingCategories": ["fabrication"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.assembly_hall_mk1",
+    "type": "crafter",
+    "name": "Assembly Hall Mk1",
+    "craftingCategories": ["assembly"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.assembly_hall_mk2",
+    "type": "crafter",
+    "name": "Assembly Hall Mk2",
+    "craftingCategories": ["assembly"],
+    "speed": 1
+  },
+  {
+    "id": "building.assembly_hall_mk3",
+    "type": "crafter",
+    "name": "Assembly Hall Mk3",
+    "craftingCategories": ["assembly"],
+    "speed": 2
+  },
+
+  {
+    "id": "building.science_press_mk1",
+    "type": "crafter",
+    "name": "Science Press Mk1",
+    "craftingCategories": ["science"],
+    "speed": 0.5
+  },
+  {
+    "id": "building.science_press_mk2",
+    "type": "crafter",
+    "name": "Science Press Mk2",
+    "craftingCategories": ["science"],
+    "speed": 1
+  },
+  {
+    "id": "building.science_press_mk3",
+    "type": "crafter",
+    "name": "Science Press Mk3",
+    "craftingCategories": ["science"],
+    "speed": 2
+  }
+]

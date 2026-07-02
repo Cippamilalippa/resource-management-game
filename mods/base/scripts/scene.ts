@@ -6,8 +6,8 @@
  * Layout (integer tile grid; the renderer centers the camera on the origin):
  *   - one 2x2 "village" centered on the origin,
  *   - a 6x6 orchard of apple trees with its corner at (+50, +50), and
- *   - four terrain patches (fertile soil, forest, iron + copper deposits) that gate which
- *     resource producers can be built on top of them.
+ *   - six terrain patches (bauxite, silica, coal, titanium, rare-earth, oil deposits) that gate
+ *     which resource producers can be built on top of them.
  *
  * Reads color/size from the loaded prototypes when present, falling back to sane defaults so
  * the scene still builds if a prototype is missing. Pure setup work (runs once at init) — no
@@ -54,10 +54,12 @@ const TERRAIN_PATCHES: ReadonlyArray<{
   h: number
   fallback: number
 }> = [
-  { id: 'terrain.fertile_soil', x: 8, y: -3, w: 5, h: 5, fallback: 0xc8e6a0 },
-  { id: 'terrain.forest', x: 8, y: 6, w: 5, h: 5, fallback: 0xa5c88a },
-  { id: 'terrain.iron_deposit', x: -13, y: -3, w: 4, h: 4, fallback: 0xcbd2da },
-  { id: 'terrain.copper_deposit', x: -13, y: 6, w: 4, h: 4, fallback: 0xe2b48c },
+  { id: 'terrain.bauxite_deposit', x: 8, y: -3, w: 4, h: 4, fallback: 0xb08d57 },
+  { id: 'terrain.silica_quarry', x: 8, y: 4, w: 4, h: 4, fallback: 0xe8d9a0 },
+  { id: 'terrain.coal_seam', x: 8, y: 11, w: 4, h: 4, fallback: 0x3c3c44 },
+  { id: 'terrain.titanium_deposit', x: -13, y: -3, w: 4, h: 4, fallback: 0x9aa7b0 },
+  { id: 'terrain.rare_earth_deposit', x: -13, y: 4, w: 4, h: 4, fallback: 0xa86fb8 },
+  { id: 'terrain.oil_field', x: -13, y: 11, w: 4, h: 4, fallback: 0x2a2a38 },
 ]
 
 function colorOf(proto: SceneProto | undefined, fallback: number): number {

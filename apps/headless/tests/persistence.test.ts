@@ -74,7 +74,7 @@ function buildFactory(sim: Sim): void {
   sim.scheduler.runTicks(sim.world, 1) // apply the placements
   const lab = buildingAt(sim.state.buildings, 40, 40)
   sim.state.buildings.slotCount[lab * MAX_SLOTS] = 200
-  enqueueSetActiveResearch(sim.world, { tech: SMELTING, cost: 40 })
+  enqueueSetActiveResearch(sim.world, { tech: SMELTING, cost: [{ color: PACK, amount: 40 }] })
 }
 
 describe('full-sim save/load round-trip', () => {

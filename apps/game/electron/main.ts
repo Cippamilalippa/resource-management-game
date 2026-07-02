@@ -3,6 +3,8 @@ import { basename, join, resolve } from 'node:path'
 import { PrototypeRegistry } from '@factory/engine/data'
 import { readManifest, loadMods } from '@factory/engine/modloader'
 import { discoverModSources } from '@factory/engine/modloader/node'
+import { listSaves, saveGame, loadGame, deleteSave, renameSave } from './saves.ts'
+import type { SaveRequest } from './saveTypes.ts'
 
 // The Electron main is bundled to CommonJS (dist-electron/main.cjs), so __dirname
 // is available natively — no import.meta.url (which would be empty under CJS).
@@ -41,6 +43,15 @@ ipcMain.handle('factory:loadContent', async () => {
     prototypes: registry.list(),
   }
 })
+
+// Save/load lives in the main process because the sandboxed renderer has no fs access. It
+// hands us an opaque engine snapshot to persist and asks us to enumerate/restore/delete slots;
+// see electron/saves.ts for the slot model (manual / quick / auto).
+ipcMain.handle('factory:listSaves', () => listSaves())
+ipcMain.handle('factory:saveGame', (_e, req: SaveRequest) => saveGame(req))
+ipcMain.handle('factory:loadGame', (_e, id: string) => loadGame(id))
+ipcMain.handle('factory:deleteSave', (_e, id: string) => deleteSave(id))
+ipcMain.handle('factory:renameSave', (_e, id: string, name: string) => renameSave(id, name))
 
 async function createWindow(): Promise<void> {
   const win = new BrowserWindow({

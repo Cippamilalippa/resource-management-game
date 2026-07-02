@@ -472,3 +472,255 @@ body {
   font-size: 11px;
   color: #6b7180;
 }
+
+/* ── Save / load menu ─────────────────────────────────────────────────────────── */
+
+/* Top-right button that opens the save menu (sits left of the inspector's usual spot). */
+.menu-button {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: rgba(20, 23, 33, 0.85);
+  border: 1px solid #2a2e3a;
+  border-radius: 8px;
+  padding: 8px 14px;
+  color: #e6e8ef;
+  font-size: 13px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.menu-button:hover {
+  border-color: #4a5168;
+  background: rgba(60, 66, 82, 0.7);
+}
+
+/* Full-screen dimmer behind the modal; click it to dismiss. */
+.save-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 16, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.save-modal {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(20, 23, 33, 0.97);
+  border: 1px solid #2a2e3a;
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+
+.save-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.save-modal-head h2 {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.save-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.save-new {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 180px;
+}
+
+.save-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(42, 46, 58, 0.6);
+  border: 1px solid #2a2e3a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #e6e8ef;
+  font-size: 13px;
+}
+
+.save-input:focus {
+  outline: none;
+  border-color: #4fa8ff;
+}
+
+.save-btn {
+  background: rgba(42, 46, 58, 0.7);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #e6e8ef;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s,
+    opacity 0.12s;
+}
+
+.save-btn:hover:not(:disabled) {
+  background: rgba(60, 66, 82, 0.85);
+}
+
+.save-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.save-btn-primary {
+  background: rgba(79, 168, 255, 0.9);
+  color: #0b0e16;
+  font-weight: 600;
+}
+
+.save-btn-primary:hover:not(:disabled) {
+  background: #4fa8ff;
+}
+
+.save-btn-danger {
+  color: #ff8a8a;
+}
+
+.save-btn-danger:hover:not(:disabled) {
+  background: rgba(255, 85, 85, 0.16);
+}
+
+.save-list {
+  list-style: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.save-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #2a2e3a;
+  border-radius: 8px;
+  background: rgba(42, 46, 58, 0.35);
+}
+
+.save-row.active {
+  border-color: #4fa8ff;
+  background: rgba(79, 168, 255, 0.12);
+}
+
+.save-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.save-badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #0b0e16;
+}
+
+.save-badge-manual {
+  background: #7fb3ff;
+}
+
+.save-badge-quick {
+  background: #7fe0a8;
+}
+
+.save-badge-auto {
+  background: #c9a6ff;
+}
+
+.save-row-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.save-row-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.save-row-meta {
+  font-size: 11px;
+  color: #8a90a2;
+  font-variant-numeric: tabular-nums;
+}
+
+.save-row-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.save-error {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 85, 85, 0.14);
+  border: 1px solid rgba(255, 85, 85, 0.4);
+  color: #ffb0b0;
+  font-size: 12px;
+}
+
+.save-empty,
+.save-unavailable {
+  color: #8a90a2;
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+/* Transient confirmation toast (bottom-centre), shown after quicksave/load. */
+.save-toast {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  pointer-events: none;
+  background: rgba(20, 23, 33, 0.95);
+  border: 1px solid #2a2e3a;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 13px;
+  color: #e6e8ef;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}

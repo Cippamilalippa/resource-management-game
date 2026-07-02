@@ -287,9 +287,9 @@ describe('removing objects', () => {
     expect(stockAt(sim, 29, 20)).toBeLessThan(stocked + 8)
   })
 
-  it('leaves passive terrain untouched (fertile soil cannot be deleted)', async () => {
+  it('leaves passive terrain untouched (a deposit cannot be deleted)', async () => {
     const sim = await bootstrapSim(1)
-    // (8, -3) is the corner of the fertile-soil patch spawned by the scene.
+    // (8, -3) is the corner of the bauxite-deposit patch spawned by the scene.
     const before = terrainTypeAt(sim.state.terrain, 8, -3)
     expect(before).not.toBe(0)
     enqueueRemove(sim.world, { x: 8, y: -3 })

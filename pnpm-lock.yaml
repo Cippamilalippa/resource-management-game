@@ -60,6 +60,8 @@ importers:
         specifier: 9.0.10
         version: 9.0.10
 
+  apps/balance: {}
+
   apps/game:
     dependencies:
       '@factory/engine':

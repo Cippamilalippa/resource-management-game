@@ -1,74 +1,434 @@
 [
   {
-    "id": "item.apple",
+    "id": "item.bauxite",
     "type": "item",
-    "name": "Apple",
+    "name": "Bauxite",
     "stackSize": 100,
-    "color": 14100029,
-    "icon": "Apple"
-  },
-  {
-    "id": "item.grain",
-    "type": "item",
-    "name": "Grain",
-    "stackSize": 100,
-    "color": 15255899,
-    "icon": "Wheat"
-  },
-  {
-    "id": "item.wood",
-    "type": "item",
-    "name": "Wood",
-    "stackSize": 100,
-    "color": 11106379,
-    "icon": "Trees"
-  },
-  {
-    "id": "item.iron_ore",
-    "type": "item",
-    "name": "Iron Ore",
-    "stackSize": 100,
-    "color": 12042444,
+    "color": 10506797,
     "icon": "Mountain"
   },
   {
-    "id": "item.copper_ore",
+    "id": "item.titanium_ore",
     "type": "item",
-    "name": "Copper Ore",
+    "name": "Titanium Ore",
     "stackSize": 100,
-    "color": 13135931,
+    "color": 9412272,
     "icon": "Gem"
   },
   {
-    "id": "item.iron_plate",
+    "id": "item.rare_earth_ore",
     "type": "item",
-    "name": "Iron Plate",
+    "name": "Rare-Earth Ore",
     "stackSize": 100,
-    "color": 11583173,
+    "color": 11557574,
+    "icon": "Diamond"
+  },
+  {
+    "id": "item.silica_sand",
+    "type": "item",
+    "name": "Silica Sand",
+    "stackSize": 100,
+    "color": 14732916,
+    "icon": "Hourglass"
+  },
+  {
+    "id": "item.coal",
+    "type": "item",
+    "name": "Coal",
+    "stackSize": 100,
+    "color": 3026478,
+    "icon": "Boxes"
+  },
+  {
+    "id": "item.crude_oil",
+    "type": "item",
+    "name": "Crude Oil",
+    "stackSize": 100,
+    "color": 1710618,
+    "icon": "Droplet"
+  },
+
+  {
+    "id": "item.alumina",
+    "type": "item",
+    "name": "Alumina",
+    "stackSize": 100,
+    "color": 14275781,
     "icon": "Layers"
   },
   {
-    "id": "item.gear",
+    "id": "item.coke",
     "type": "item",
-    "name": "Gear",
+    "name": "Coke",
     "stackSize": 100,
-    "color": 9479342,
-    "icon": "Cog"
+    "color": 3815488,
+    "icon": "Hexagon"
   },
   {
-    "id": "item.bread",
+    "id": "item.glass",
     "type": "item",
-    "name": "Bread",
+    "name": "Glass",
     "stackSize": 100,
-    "color": 13213795,
-    "icon": "Croissant"
+    "color": 10478565,
+    "icon": "Square"
   },
   {
-    "id": "item.research_pack",
+    "id": "item.silicon",
     "type": "item",
-    "name": "Research Pack",
+    "name": "Silicon",
     "stackSize": 100,
-    "color": 3062647,
+    "color": 7240587,
+    "icon": "Component"
+  },
+  {
+    "id": "item.rare_earth",
+    "type": "item",
+    "name": "Refined Rare Earth",
+    "stackSize": 100,
+    "color": 13073622,
+    "icon": "Sparkles"
+  },
+  {
+    "id": "item.naphtha",
+    "type": "item",
+    "name": "Naphtha",
+    "stackSize": 100,
+    "color": 13214795,
+    "icon": "Droplets"
+  },
+  {
+    "id": "item.kerosene",
+    "type": "item",
+    "name": "Kerosene",
+    "stackSize": 100,
+    "color": 14715452,
+    "icon": "Fuel"
+  },
+
+  {
+    "id": "item.aluminum",
+    "type": "item",
+    "name": "Aluminum",
+    "stackSize": 100,
+    "color": 12634828,
+    "icon": "SquareStack"
+  },
+  {
+    "id": "item.titanium",
+    "type": "item",
+    "name": "Titanium",
+    "stackSize": 100,
+    "color": 8292505,
+    "icon": "Shield"
+  },
+  {
+    "id": "item.resin",
+    "type": "item",
+    "name": "Resin",
+    "stackSize": 100,
+    "color": 9132075,
+    "icon": "Blend"
+  },
+  {
+    "id": "item.rocket_fuel",
+    "type": "item",
+    "name": "Rocket Fuel",
+    "stackSize": 100,
+    "color": 15879722,
+    "icon": "Flame"
+  },
+  {
+    "id": "item.microchip",
+    "type": "item",
+    "name": "Microchip",
+    "stackSize": 100,
+    "color": 3122767,
+    "icon": "Cpu"
+  },
+
+  {
+    "id": "item.aluminum_sheet",
+    "type": "item",
+    "name": "Aluminum Sheet",
+    "stackSize": 100,
+    "color": 13556953,
+    "icon": "RectangleHorizontal"
+  },
+  {
+    "id": "item.aluminum_wire",
+    "type": "item",
+    "name": "Aluminum Wire",
+    "stackSize": 100,
+    "color": 12560751,
+    "icon": "Cable"
+  },
+  {
+    "id": "item.titanium_alloy",
+    "type": "item",
+    "name": "Titanium Alloy",
+    "stackSize": 100,
+    "color": 6187642,
+    "icon": "ShieldHalf"
+  },
+  {
+    "id": "item.carbon_fiber",
+    "type": "item",
+    "name": "Carbon Fiber",
+    "stackSize": 100,
+    "color": 3355450,
+    "icon": "Grip"
+  },
+  {
+    "id": "item.rare_earth_magnet",
+    "type": "item",
+    "name": "Rare-Earth Magnet",
+    "stackSize": 100,
+    "color": 12730380,
+    "icon": "Magnet"
+  },
+
+  {
+    "id": "item.electric_motor",
+    "type": "item",
+    "name": "Electric Motor",
+    "stackSize": 100,
+    "color": 3899588,
+    "icon": "Fan"
+  },
+  {
+    "id": "item.airframe_panel",
+    "type": "item",
+    "name": "Airframe Panel",
+    "stackSize": 100,
+    "color": 12099527,
+    "icon": "Frame"
+  },
+  {
+    "id": "item.turbine_blade",
+    "type": "item",
+    "name": "Turbine Blade",
+    "stackSize": 100,
+    "color": 7252696,
+    "icon": "Wind"
+  },
+  {
+    "id": "item.combustion_chamber",
+    "type": "item",
+    "name": "Combustion Chamber",
+    "stackSize": 50,
+    "color": 10107694,
+    "icon": "Cylinder"
+  },
+  {
+    "id": "item.fuel_tank",
+    "type": "item",
+    "name": "Fuel Tank",
+    "stackSize": 50,
+    "color": 14257714,
+    "icon": "Container"
+  },
+  {
+    "id": "item.avionics",
+    "type": "item",
+    "name": "Avionics",
+    "stackSize": 100,
+    "color": 2072666,
+    "icon": "CircuitBoard"
+  },
+
+  {
+    "id": "item.jet_engine",
+    "type": "item",
+    "name": "Jet Engine",
+    "stackSize": 20,
+    "color": 4680586,
+    "icon": "Gauge"
+  },
+  {
+    "id": "item.rocket_engine",
+    "type": "item",
+    "name": "Rocket Engine",
+    "stackSize": 20,
+    "color": 11811364,
+    "icon": "Bolt"
+  },
+  {
+    "id": "item.fuselage",
+    "type": "item",
+    "name": "Fuselage",
+    "stackSize": 20,
+    "color": 11186877,
+    "icon": "Plane"
+  },
+  {
+    "id": "item.guidance_system",
+    "type": "item",
+    "name": "Guidance System",
+    "stackSize": 50,
+    "color": 3050874,
+    "icon": "Radar"
+  },
+
+  {
+    "id": "item.satellite",
+    "type": "item",
+    "name": "Satellite",
+    "stackSize": 10,
+    "color": 14729312,
+    "icon": "Satellite"
+  },
+  {
+    "id": "item.aircraft",
+    "type": "item",
+    "name": "Aircraft",
+    "stackSize": 5,
+    "color": 8951462,
+    "icon": "PlaneTakeoff"
+  },
+  {
+    "id": "item.rocket",
+    "type": "item",
+    "name": "Rocket",
+    "stackSize": 1,
+    "color": 14834990,
+    "icon": "Rocket"
+  },
+
+  {
+    "id": "item.mining_drill",
+    "type": "item",
+    "name": "Mining Drill",
+    "stackSize": 50,
+    "color": 9071419,
+    "icon": "Pickaxe"
+  },
+  {
+    "id": "item.oil_derrick",
+    "type": "item",
+    "name": "Oil Derrick",
+    "stackSize": 50,
+    "color": 7032366,
+    "icon": "Construction"
+  },
+  {
+    "id": "item.refinery",
+    "type": "item",
+    "name": "Refinery",
+    "stackSize": 50,
+    "color": 10250044,
+    "icon": "FlaskRound"
+  },
+  {
+    "id": "item.smelter",
+    "type": "item",
+    "name": "Smelter",
+    "stackSize": 50,
+    "color": 11884590,
+    "icon": "Factory"
+  },
+  {
+    "id": "item.chemical_plant",
+    "type": "item",
+    "name": "Chemical Plant",
+    "stackSize": 50,
+    "color": 3971947,
     "icon": "FlaskConical"
+  },
+  {
+    "id": "item.composites_press",
+    "type": "item",
+    "name": "Composites Press",
+    "stackSize": 50,
+    "color": 4868178,
+    "icon": "Combine"
+  },
+  {
+    "id": "item.rolling_mill",
+    "type": "item",
+    "name": "Rolling Mill",
+    "stackSize": 50,
+    "color": 10133674,
+    "icon": "Slice"
+  },
+  {
+    "id": "item.electronics_bench",
+    "type": "item",
+    "name": "Electronics Bench",
+    "stackSize": 50,
+    "color": 3116911,
+    "icon": "MemoryStick"
+  },
+  {
+    "id": "item.machine_shop",
+    "type": "item",
+    "name": "Machine Shop",
+    "stackSize": 50,
+    "color": 7370371,
+    "icon": "Wrench"
+  },
+  {
+    "id": "item.fabricator",
+    "type": "item",
+    "name": "Fabricator",
+    "stackSize": 50,
+    "color": 9074524,
+    "icon": "Hammer"
+  },
+  {
+    "id": "item.assembly_hall",
+    "type": "item",
+    "name": "Assembly Hall",
+    "stackSize": 50,
+    "color": 7239808,
+    "icon": "Warehouse"
+  },
+  {
+    "id": "item.science_press",
+    "type": "item",
+    "name": "Science Press",
+    "stackSize": 50,
+    "color": 3430340,
+    "icon": "Microscope"
+  },
+
+  {
+    "id": "item.science_materials",
+    "type": "item",
+    "name": "Materials Science Pack",
+    "stackSize": 200,
+    "color": 11583429,
+    "icon": "TestTube"
+  },
+  {
+    "id": "item.science_electronics",
+    "type": "item",
+    "name": "Electronics Science Pack",
+    "stackSize": 200,
+    "color": 4054404,
+    "icon": "TestTube2"
+  },
+  {
+    "id": "item.science_chemical",
+    "type": "item",
+    "name": "Chemical Science Pack",
+    "stackSize": 200,
+    "color": 4367861,
+    "icon": "Beaker"
+  },
+  {
+    "id": "item.science_propulsion",
+    "type": "item",
+    "name": "Propulsion Science Pack",
+    "stackSize": 200,
+    "color": 11224508,
+    "icon": "TestTubes"
+  },
+  {
+    "id": "item.science_aerospace",
+    "type": "item",
+    "name": "Aerospace Science Pack",
+    "stackSize": 200,
+    "color": 16763432,
+    "icon": "Atom"
   }
 ]

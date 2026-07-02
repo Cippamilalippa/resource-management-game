@@ -2,35 +2,43 @@
   {
     "id": "building.village",
     "type": "village",
-    "name": "Village",
-    "icon": "Home",
+    "name": "Spaceport",
+    "icon": "TowerControl",
     "size": { "w": 2, "h": 2 },
     "color": 11887901,
-    "accepts": ["item.grain", "item.wood", "item.bread", "item.gear"],
+    "accepts": ["item.rocket_fuel", "item.avionics", "item.aircraft", "item.rocket"],
     "storage": 500,
     "stages": [
       {
         "level": 1,
         "population": 50,
-        "demands": [{ "item": "item.grain", "ratePerMin": 30 }]
+        "demands": [{ "item": "item.rocket_fuel", "ratePerMin": 20 }]
       },
       {
         "level": 2,
         "population": 150,
         "demands": [
-          { "item": "item.grain", "ratePerMin": 30 },
-          { "item": "item.wood", "ratePerMin": 15 },
-          { "item": "item.bread", "ratePerMin": 10 }
+          { "item": "item.rocket_fuel", "ratePerMin": 20 },
+          { "item": "item.avionics", "ratePerMin": 6 }
         ]
       },
       {
         "level": 3,
         "population": 400,
         "demands": [
-          { "item": "item.grain", "ratePerMin": 30 },
-          { "item": "item.wood", "ratePerMin": 15 },
-          { "item": "item.bread", "ratePerMin": 10 },
-          { "item": "item.gear", "ratePerMin": 5 }
+          { "item": "item.rocket_fuel", "ratePerMin": 20 },
+          { "item": "item.avionics", "ratePerMin": 6 },
+          { "item": "item.aircraft", "ratePerMin": 2 }
+        ]
+      },
+      {
+        "level": 4,
+        "population": 1000,
+        "demands": [
+          { "item": "item.rocket_fuel", "ratePerMin": 20 },
+          { "item": "item.avionics", "ratePerMin": 6 },
+          { "item": "item.aircraft", "ratePerMin": 2 },
+          { "item": "item.rocket", "ratePerMin": 1 }
         ]
       }
     ]
@@ -80,83 +88,6 @@
     "color": 14501444
   },
   {
-    "id": "building.farm",
-    "type": "crafter",
-    "name": "Farm",
-    "icon": "Wheat",
-    "size": { "w": 1, "h": 1 },
-    "color": 8101979,
-    "craftingCategories": ["farming"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
-    "id": "building.woodcutter",
-    "type": "crafter",
-    "name": "Woodcutter",
-    "icon": "TreePine",
-    "size": { "w": 1, "h": 1 },
-    "color": 7232060,
-    "craftingCategories": ["forestry"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
-    "id": "building.iron_mine",
-    "type": "crafter",
-    "name": "Iron Mine",
-    "icon": "Pickaxe",
-    "size": { "w": 1, "h": 1 },
-    "color": 9081502,
-    "craftingCategories": ["iron_mining"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
-    "id": "building.copper_mine",
-    "type": "crafter",
-    "name": "Copper Mine",
-    "icon": "Gem",
-    "size": { "w": 1, "h": 1 },
-    "color": 11565642,
-    "craftingCategories": ["copper_mining"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
-    "id": "building.furnace",
-    "type": "crafter",
-    "name": "Furnace",
-    "icon": "Flame",
-    "size": { "w": 1, "h": 1 },
-    "color": 14380834,
-    "craftingCategories": ["smelting"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
-    "id": "building.assembler",
-    "type": "crafter",
-    "name": "Assembler",
-    "icon": "Cog",
-    "size": { "w": 1, "h": 1 },
-    "color": 5808268,
-    "craftingCategories": ["assembly"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
-    "id": "building.kitchen",
-    "type": "crafter",
-    "name": "Kitchen",
-    "icon": "CookingPot",
-    "size": { "w": 1, "h": 1 },
-    "color": 14257226,
-    "craftingCategories": ["cooking"],
-    "speed": 1,
-    "storage": 100
-  },
-  {
     "id": "building.splitter",
     "type": "splitter",
     "name": "Splitter",
@@ -165,13 +96,134 @@
     "color": 10185235
   },
   {
-    "id": "building.workshop",
+    "id": "building.mining_drill",
     "type": "crafter",
-    "name": "Workshop",
+    "name": "Mining Drill",
+    "icon": "Pickaxe",
+    "size": { "w": 1, "h": 1 },
+    "color": 9071419,
+    "craftingCategories": ["mining"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.oil_derrick",
+    "type": "crafter",
+    "name": "Oil Derrick",
+    "icon": "Construction",
+    "size": { "w": 1, "h": 1 },
+    "color": 7032366,
+    "craftingCategories": ["drilling"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.refinery",
+    "type": "crafter",
+    "name": "Refinery",
+    "icon": "FlaskRound",
+    "size": { "w": 1, "h": 1 },
+    "color": 10250044,
+    "craftingCategories": ["refining"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.smelter",
+    "type": "crafter",
+    "name": "Smelter",
+    "icon": "Factory",
+    "size": { "w": 1, "h": 1 },
+    "color": 11884590,
+    "craftingCategories": ["smelting"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.chemical_plant",
+    "type": "crafter",
+    "name": "Chemical Plant",
     "icon": "FlaskConical",
     "size": { "w": 1, "h": 1 },
-    "color": 3705462,
-    "craftingCategories": ["research"],
+    "color": 3971947,
+    "craftingCategories": ["chemistry"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.composites_press",
+    "type": "crafter",
+    "name": "Composites Press",
+    "icon": "Combine",
+    "size": { "w": 1, "h": 1 },
+    "color": 4868178,
+    "craftingCategories": ["composites"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.rolling_mill",
+    "type": "crafter",
+    "name": "Rolling Mill",
+    "icon": "Slice",
+    "size": { "w": 1, "h": 1 },
+    "color": 10133674,
+    "craftingCategories": ["metalworking"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.electronics_bench",
+    "type": "crafter",
+    "name": "Electronics Bench",
+    "icon": "MemoryStick",
+    "size": { "w": 1, "h": 1 },
+    "color": 3116911,
+    "craftingCategories": ["electronics"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.machine_shop",
+    "type": "crafter",
+    "name": "Machine Shop",
+    "icon": "Wrench",
+    "size": { "w": 1, "h": 1 },
+    "color": 7370371,
+    "craftingCategories": ["machining"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.fabricator",
+    "type": "crafter",
+    "name": "Fabricator",
+    "icon": "Hammer",
+    "size": { "w": 1, "h": 1 },
+    "color": 9074524,
+    "craftingCategories": ["fabrication"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.assembly_hall",
+    "type": "crafter",
+    "name": "Assembly Hall",
+    "icon": "Warehouse",
+    "size": { "w": 1, "h": 1 },
+    "color": 7239808,
+    "craftingCategories": ["assembly"],
+    "speed": 1,
+    "storage": 100
+  },
+  {
+    "id": "building.science_press",
+    "type": "crafter",
+    "name": "Science Press",
+    "icon": "Microscope",
+    "size": { "w": 1, "h": 1 },
+    "color": 3430340,
+    "craftingCategories": ["science"],
     "speed": 1,
     "storage": 100
   },
@@ -179,10 +231,16 @@
     "id": "building.lab",
     "type": "building",
     "name": "Lab",
-    "icon": "Microscope",
+    "icon": "Beaker",
     "size": { "w": 2, "h": 2 },
     "color": 2851507,
-    "accepts": ["item.research_pack"],
+    "accepts": [
+      "item.science_materials",
+      "item.science_electronics",
+      "item.science_chemical",
+      "item.science_propulsion",
+      "item.science_aerospace"
+    ],
     "storage": 200,
     "researchLab": true
   }

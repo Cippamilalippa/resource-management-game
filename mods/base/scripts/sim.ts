@@ -900,15 +900,23 @@ export const RESEARCH_CADENCE = 60
 export const RESEARCH_NONE = 0
 
 /**
+ * Max distinct research-pack types a single technology's `cost` can list (the science-pack
+ * palette). Fixed so the per-pack cost/progress live in flat typed arrays, allocation-free.
+ */
+export const MAX_RESEARCH_COST = 8
+
+/**
  * The live research progression, owned by the base game (not the engine). A single technology is
  * "active" at a time ({@link ResearchStore.activeTech}, an opaque integer id — see
  * {@link techTypeOf}); every {@link RESEARCH_CADENCE} ticks the {@link updateResearch} system
- * drains research packs from every registered *lab* (a store building holding packs) into
- * {@link ResearchStore.progress} until the active tech's `cost` is met, then records it complete
- * and goes idle. The sim knows nothing tech-specific: the host supplies the active tech's integer
- * id and its pack cost through the `set_active_research` command, and reads the completed integer
- * ids back to drive the buildable set. Labs are anchored by tile (re-resolved to a building id
- * each cadence) so the store survives building-store compaction, exactly like villages.
+ * drains research packs from every registered *lab* (a store building holding packs) toward the
+ * active tech's `cost`, then records it complete and goes idle. The cost is **per pack type**: a
+ * tech may require several distinct science packs (each an item colour + amount), and every one
+ * must be met — so a factory that makes only some of the packs stalls research the way Factorio's
+ * science tiers gate progress. The sim knows nothing tech-specific: the host supplies the active
+ * tech's integer id and its per-pack cost through the `set_active_research` command, and reads the
+ * completed integer ids back to drive the buildable set. Labs are anchored by tile (re-resolved to
+ * a building id each cadence) so the store survives building-store compaction, like villages.
  */
 export interface ResearchStore {
   /** Number of registered labs. */
@@ -918,10 +926,14 @@ export interface ResearchStore {
   ly: Int32Array
   /** Active technology integer id, or {@link RESEARCH_NONE} when idle. */
   activeTech: number
-  /** Research packs required to complete the active tech (its authored `cost`). */
-  activeCost: number
-  /** Packs accumulated toward the active tech so far. */
-  progress: number
+  /** Number of active per-pack cost entries (<= {@link MAX_RESEARCH_COST}). */
+  costN: number
+  /** Per-entry pack colour required by the active tech. */
+  costColor: Int32Array
+  /** Per-entry pack amount required. */
+  costAmount: Int32Array
+  /** Per-entry packs accumulated so far (parallel to {@link costColor}). */
+  progress: Int32Array
   /** Integer ids of technologies completed at runtime (in completion order). */
   completed: number[]
   /** Shared cadence countdown (ticks since the last evaluation). */
@@ -935,8 +947,10 @@ export function createResearchStore(): ResearchStore {
     lx: new Int32Array(cap),
     ly: new Int32Array(cap),
     activeTech: RESEARCH_NONE,
-    activeCost: 0,
-    progress: 0,
+    costN: 0,
+    costColor: new Int32Array(MAX_RESEARCH_COST),
+    costAmount: new Int32Array(MAX_RESEARCH_COST),
+    progress: new Int32Array(MAX_RESEARCH_COST),
     completed: [],
     timer: 0,
   }
@@ -964,17 +978,19 @@ export function researchCompleted(r: ResearchStore, tech: number): boolean {
 }
 
 /**
- * Drain up to `max` research packs out of building `b`'s drainable slots, returning the amount
- * removed. A lab only stocks packs, so this empties its pack slots (fixed slot order) toward the
- * active tech without ever exceeding what is still needed. Integer math, allocation-free.
+ * Drain up to `max` packs of colour `color` out of building `b`'s drainable slots, returning the
+ * amount removed. A lab holds each pack type in its own slot, so this pulls only the matching
+ * colour (fixed slot order) toward the active tech without ever exceeding what is still needed.
+ * Integer math, allocation-free.
  */
-function drainResearchPacks(store: BuildingStore, b: number, max: number): number {
+function drainResearchPacks(store: BuildingStore, b: number, color: number, max: number): number {
   if (max <= 0) return 0
   const n = store.slotN[b]!
   let taken = 0
   for (let k = 0; k < n && taken < max; k++) {
     const i = b * MAX_SLOTS + k
     if (!(store.slotRole[i]! & ROLE_DRAIN)) continue
+    if (store.slotColor[i]! !== color) continue
     const want = max - taken
     const have = store.slotCount[i]!
     const pull = have < want ? have : want
@@ -986,10 +1002,10 @@ function drainResearchPacks(store: BuildingStore, b: number, max: number): numbe
 
 /**
  * Advance research once per {@link RESEARCH_CADENCE} ticks: while a technology is active, drain
- * research packs from every registered lab into {@link ResearchStore.progress} (never past the
- * active tech's `cost` — leftover packs stay in the lab for the next tech). When the cost is met,
- * record the tech complete and go idle (single-active model — the host selects the next tech).
- * Integer math, no RNG; runs off the per-tick hot path.
+ * each required pack type from every registered lab toward its per-pack target (never past it —
+ * leftover packs stay in the lab). When **every** pack cost is met, record the tech complete and
+ * go idle (single-active model — the host selects the next tech). A tech with no cost completes on
+ * the next evaluation. Integer math, no RNG; runs off the per-tick hot path.
  */
 function updateResearch(state: GameState): void {
   const r = state.research
@@ -997,16 +1013,24 @@ function updateResearch(state: GameState): void {
   if (++r.timer < RESEARCH_CADENCE) return
   r.timer = 0
   const store = state.buildings
-  for (let i = 0; i < r.labCount && r.progress < r.activeCost; i++) {
-    const b = buildingAt(store, r.lx[i]!, r.ly[i]!)
-    if (b === NONE) continue // the lab building was removed — leave the anchor inert.
-    r.progress += drainResearchPacks(store, b, r.activeCost - r.progress)
+  let complete = true
+  for (let c = 0; c < r.costN; c++) {
+    const need = r.costAmount[c]! - r.progress[c]!
+    if (need <= 0) continue
+    const color = r.costColor[c]!
+    let got = 0
+    for (let i = 0; i < r.labCount && got < need; i++) {
+      const b = buildingAt(store, r.lx[i]!, r.ly[i]!)
+      if (b === NONE) continue // the lab building was removed — leave the anchor inert.
+      got += drainResearchPacks(store, b, color, need - got)
+    }
+    r.progress[c] = r.progress[c]! + got
+    if (r.progress[c]! < r.costAmount[c]!) complete = false
   }
-  if (r.progress >= r.activeCost) {
+  if (complete) {
     r.completed.push(r.activeTech)
     r.activeTech = RESEARCH_NONE
-    r.activeCost = 0
-    r.progress = 0
+    r.costN = 0
   }
 }
 
@@ -1014,8 +1038,12 @@ function updateResearch(state: GameState): void {
 export interface ResearchSnapshot {
   readonly labs: readonly { readonly x: number; readonly y: number }[]
   readonly activeTech: number
-  readonly activeCost: number
-  readonly progress: number
+  /** Active per-pack cost: colour, required amount, and packs accumulated so far. */
+  readonly cost: readonly {
+    readonly color: number
+    readonly amount: number
+    readonly progress: number
+  }[]
   readonly completed: readonly number[]
   readonly timer: number
 }
@@ -1024,25 +1052,32 @@ export interface ResearchSnapshot {
 export function serializeResearch(r: ResearchStore): ResearchSnapshot {
   const labs: { x: number; y: number }[] = []
   for (let i = 0; i < r.labCount; i++) labs.push({ x: r.lx[i]!, y: r.ly[i]! })
-  return {
-    labs,
-    activeTech: r.activeTech,
-    activeCost: r.activeCost,
-    progress: r.progress,
-    completed: r.completed.slice(),
-    timer: r.timer,
+  const cost: { color: number; amount: number; progress: number }[] = []
+  for (let c = 0; c < r.costN; c++) {
+    cost.push({ color: r.costColor[c]!, amount: r.costAmount[c]!, progress: r.progress[c]! })
   }
+  return { labs, activeTech: r.activeTech, cost, completed: r.completed.slice(), timer: r.timer }
+}
+
+/** Load a research snapshot into an existing store in place (systems close over the store). */
+export function loadResearchSnapshot(r: ResearchStore, snap: ResearchSnapshot): void {
+  r.labCount = 0
+  for (const lab of snap.labs) registerResearchLab(r, lab.x, lab.y)
+  r.activeTech = snap.activeTech
+  r.costN = Math.min(snap.cost.length, MAX_RESEARCH_COST)
+  for (let c = 0; c < r.costN; c++) {
+    r.costColor[c] = snap.cost[c]!.color
+    r.costAmount[c] = snap.cost[c]!.amount
+    r.progress[c] = snap.cost[c]!.progress
+  }
+  r.completed = snap.completed.slice()
+  r.timer = snap.timer
 }
 
 /** Rebuild a research store from a snapshot. Inverse of {@link serializeResearch}. */
 export function deserializeResearch(snap: ResearchSnapshot): ResearchStore {
   const r = createResearchStore()
-  for (const lab of snap.labs) registerResearchLab(r, lab.x, lab.y)
-  r.activeTech = snap.activeTech
-  r.activeCost = snap.activeCost
-  r.progress = snap.progress
-  r.completed = snap.completed.slice()
-  r.timer = snap.timer
+  loadResearchSnapshot(r, snap)
   return r
 }
 
@@ -1568,15 +1603,7 @@ export function loadGameState(
   v.timer = snap.villages.timer
 
   // Research: mutate the existing store in place (systems close over it).
-  const r = state.research
-  const rs = snap.research
-  r.labCount = 0
-  for (const lab of rs.labs) registerResearchLab(r, lab.x, lab.y)
-  r.activeTech = rs.activeTech
-  r.activeCost = rs.activeCost
-  r.progress = rs.progress
-  r.completed = rs.completed.slice()
-  r.timer = rs.timer
+  loadResearchSnapshot(state.research, snap.research)
 }
 
 /**
@@ -1712,14 +1739,15 @@ export interface RemoveCommand {
 /**
  * Select the technology research works toward. Single-active: the {@link updateResearch} system
  * drains packs into this tech until its `cost` is met, then goes idle until the next selection.
- * `tech` is the opaque integer id ({@link techTypeOf}) and `cost` its authored pack requirement —
- * both supplied by the host, which owns the tech string↔int mapping. A tech already completed is
- * ignored.
+ * `tech` is the opaque integer id ({@link techTypeOf}) and `cost` its authored per-pack
+ * requirement — a list of `{ color, amount }` pairs (one per science pack the tech needs), all
+ * supplied by the host, which owns the tech string↔int and item→colour mappings. A tech already
+ * completed is ignored.
  */
 export interface SetActiveResearchCommand {
   readonly type: 'set_active_research'
   readonly tech: number
-  readonly cost: number
+  readonly cost: readonly { readonly color: number; readonly amount: number }[]
 }
 
 export type GameCommand =
@@ -1949,8 +1977,12 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       const r = state.research
       if (researchCompleted(r, cmd.tech)) return
       r.activeTech = cmd.tech
-      r.activeCost = Math.max(1, cmd.cost)
-      r.progress = 0
+      r.costN = Math.min(cmd.cost.length, MAX_RESEARCH_COST)
+      for (let c = 0; c < r.costN; c++) {
+        r.costColor[c] = cmd.cost[c]!.color
+        r.costAmount[c] = Math.max(1, cmd.cost[c]!.amount)
+        r.progress[c] = 0
+      }
       return
     }
     case 'remove': {

@@ -345,3 +345,39 @@ determinism check when the sim changes).
    [`sim.ts`](../../mods/base/scripts/sim.ts), running on a slow cadence over a `VillageStore`.
    Determinism + grow/decline scenario tests read village stage/timers directly (building
    inventories are not in engine `hashState`); the perf guard stays green.
+
+## 8. Balancing instrument — `apps/balance`
+
+Before authoring a deep production graph (roadmap M3, and the KPI tuning in M7), the cost
+curve has to be understood **statically** — you should be able to see what a top-tier good
+truly costs without playing a full session. That is what
+[`apps/balance`](../../apps/balance/README.md) is for. Run it with **`pnpm balance`**.
+
+It is a **read-only, game-agnostic analyzer** — it never touches the sim and never mutates
+prototypes. By default it reads the real `mods/base/prototypes/*.json`, so it doubles as the
+authoring pipeline (the numbers you balance are the numbers you ship); point `--data <dir>`
+at an experimental dir with the same JSON shape to design a tree before wiring it into the
+game.
+
+For every item, memoized over a topological order, it computes:
+
+- **Raw-cost vector** — the bag of raw (leaf) resources embodied in one unit (unfolding the
+  DAG down to terrain-extracted materials). The honest cost of a good.
+- **Embodied labor** — total machine-seconds across the whole sub-tree per unit.
+- **Composite** — a single scalar `Σ raw · weight` (per-raw weights configurable); the axis
+  the cost curve is plotted on.
+- **Tier** — longest path to a raw leaf.
+- **Machine bill** — crafters per step to sustain a target units/sec, shared intermediates
+  rolled up (the throughput-ratio answer, e.g. "2.67 iron mines per gear/sec").
+
+The **cost curve by tier** flags any tier whose median composite, over the previous tier's,
+leaves the intended growth band, plus per-tier outliers — the "is the long-run economy
+escalating smoothly?" check. Knobs (tick rate, raw weights, growth band, spike threshold,
+canonical-recipe overrides for multi-producer items) live in
+[`config.ts`](../../apps/balance/config.ts); the cost math is covered by
+`apps/balance/tests/model.test.ts` (a hand-checked chain + a real-prototype smoke test).
+
+This complements the **headless runner** (§5, `pnpm headless`), which is the _dynamic_
+instrument — it plays out a seeded run so M7 can read realized KPIs (time-to-first-research,
+village growth). `balance` answers the static question ("is the graph well-shaped?");
+`headless` answers the dynamic one ("does it play out that way?").

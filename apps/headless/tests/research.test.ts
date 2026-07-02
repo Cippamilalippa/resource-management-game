@@ -58,7 +58,7 @@ describe('research loop', () => {
     const sim = await bootstrapSim(1)
     placeLab(sim, 20, 20)
     setPacks(sim, 20, 20, 100)
-    enqueueSetActiveResearch(sim.world, { tech: SMELTING, cost: 20 })
+    enqueueSetActiveResearch(sim.world, { tech: SMELTING, cost: [{ color: PACK, amount: 20 }] })
     sim.scheduler.runTicks(sim.world, 300)
     // The 20-pack cost is met and the tech recorded; research returns to idle (single-active).
     expect(sim.state.research.completed).toContain(SMELTING)
@@ -82,7 +82,7 @@ describe('research loop', () => {
       const sim = await bootstrapSim(3)
       placeLab(sim, 20, 20)
       setPacks(sim, 20, 20, 15) // below the 20-pack cost — research stays in progress
-      enqueueSetActiveResearch(sim.world, { tech: SMELTING, cost: 20 })
+      enqueueSetActiveResearch(sim.world, { tech: SMELTING, cost: [{ color: PACK, amount: 20 }] })
       sim.scheduler.runTicks(sim.world, 300)
       return sim
     }
@@ -90,21 +90,74 @@ describe('research loop', () => {
     const b = await run()
     // Still researching (15 < 20), and both runs agree exactly on the accumulated progress.
     expect(a.state.research.activeTech).toBe(SMELTING)
-    expect(a.state.research.progress).toBe(15)
-    expect(a.state.research.progress).toBe(b.state.research.progress)
+    expect(a.state.research.progress[0]).toBe(15)
+    expect(a.state.research.progress[0]).toBe(b.state.research.progress[0])
     expect(a.state.research.completed).toEqual(b.state.research.completed)
     expect(hashState(a.world)).toBe(hashState(b.world))
   })
 })
 
+describe('multi-pack research (science-tier gating)', () => {
+  const PACK_A = PACK
+  const PACK_B = 0x445566
+
+  it('completes only when every required pack type is met — one missing stalls it', async () => {
+    const sim = await bootstrapSim(5)
+    // A lab that stocks two pack types (one slot each).
+    enqueuePlaceBuilding(sim.world, {
+      x: 20,
+      y: 20,
+      w: 2,
+      h: 2,
+      color: 0x2b7573,
+      accepts: [
+        { color: PACK_A, cap: 1000 },
+        { color: PACK_B, cap: 1000 },
+      ],
+      researchLab: true,
+    })
+    sim.scheduler.runTicks(sim.world, 1)
+    const b = buildingAt(sim.state.buildings, 20, 20)
+    // Plenty of A, zero B — the tech needs both.
+    sim.state.buildings.slotCount[b * MAX_SLOTS] = 100 // slot 0 = PACK_A
+    sim.state.buildings.slotCount[b * MAX_SLOTS + 1] = 0 // slot 1 = PACK_B
+    enqueueSetActiveResearch(sim.world, {
+      tech: SMELTING,
+      cost: [
+        { color: PACK_A, amount: 20 },
+        { color: PACK_B, amount: 10 },
+      ],
+    })
+    sim.scheduler.runTicks(sim.world, 300)
+
+    // B is unavailable, so the tech stays active: A is drained to its target, B stuck at 0.
+    expect(sim.state.research.completed).not.toContain(SMELTING)
+    expect(sim.state.research.activeTech).toBe(SMELTING)
+    expect(sim.state.research.progress[0]).toBe(20)
+    expect(sim.state.research.progress[1]).toBe(0)
+    expect(sim.state.buildings.slotCount[b * MAX_SLOTS]).toBe(80)
+
+    // Deliver B; the second pack cost is now met and the tech completes.
+    sim.state.buildings.slotCount[b * MAX_SLOTS + 1] = 10
+    sim.scheduler.runTicks(sim.world, 120)
+    expect(sim.state.research.completed).toContain(SMELTING)
+    expect(sim.state.research.activeTech).toBe(RESEARCH_NONE)
+  })
+})
+
 describe('research store serialization', () => {
-  it('round-trips every field (labs, active tech, progress, completed, timer)', () => {
+  it('round-trips every field (labs, active tech, per-pack cost+progress, completed, timer)', () => {
     const r = createResearchStore()
     registerResearchLab(r, 3, 4)
     registerResearchLab(r, -2, 7)
     r.activeTech = SMELTING
-    r.activeCost = 20
-    r.progress = 5
+    r.costN = 2
+    r.costColor[0] = PACK
+    r.costAmount[0] = 20
+    r.progress[0] = 5
+    r.costColor[1] = 0x123456
+    r.costAmount[1] = 8
+    r.progress[1] = 3
     r.completed = [techTypeOf('tech.mining'), techTypeOf('tech.farming')]
     r.timer = 12
 
@@ -115,8 +168,15 @@ describe('research store serialization', () => {
     expect(serializeResearch(restored)).toEqual(snap)
     expect(restored.labCount).toBe(2)
     expect(restored.activeTech).toBe(SMELTING)
-    expect(restored.activeCost).toBe(20)
-    expect(restored.progress).toBe(5)
+    expect(restored.costN).toBe(2)
+    expect([restored.costColor[0], restored.costAmount[0], restored.progress[0]]).toEqual([
+      PACK,
+      20,
+      5,
+    ])
+    expect([restored.costColor[1], restored.costAmount[1], restored.progress[1]]).toEqual([
+      0x123456, 8, 3,
+    ])
     expect(restored.completed).toEqual(r.completed)
     expect(restored.timer).toBe(12)
     expect([restored.lx[0], restored.ly[0]]).toEqual([3, 4])

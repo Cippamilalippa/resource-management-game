@@ -62,17 +62,27 @@ auto-selects the next researchable tech until the M4 research screen lands.
 
 _Engine can (de)serialize + hash, but no app flow exists. A slice must persist a session._
 
-- [ ] Decide save transport for Electron (main-process `fs` write of the `WorldSnapshot`
-      JSON over IPC; renderer is sandboxed).
+- [x] **Settled:** save transport is a main-process `fs` write of the `WorldSnapshot` JSON to
+      `userData/saves/<id>.factorysave` (a `{ fileVersion, meta, snapshot }` envelope), driven by
+      the sandboxed renderer over IPC. The main process owns the slot model; the renderer holds no
+      disk access. See [saves.ts](../../apps/game/electron/saves.ts).
 - [x] Include mod-side stores (belts, buildings, terrain, village, research) in the snapshot
       via an opaque per-mod `modState` hook (`WorldSnapshot.modState`, hashed by the engine
       but never interpreted). The base mod owns its `serializeGameState`/`loadGameState`; load
       re-spawns entities from the snapshot and links stores by tile, so nothing sim-critical is
       dropped. `init` now publishes new-game/load closures so a load never doubles the scene.
-- [ ] IPC: `save-game(slot)` / `load-game(slot)` / `list-saves` in Electron main + preload.
-- [ ] Autosave on a cadence + on quit; keep last N slots.
-- [ ] Save/load UI (menu list, slot metadata: tick count, timestamp, version).
-- [ ] `SNAPSHOT_VERSION` migration path (reject/upgrade older versions gracefully).
+- [x] IPC: `listSaves` / `saveGame` / `loadGame` / `deleteSave` / `renameSave` in Electron main +
+      preload ([main.ts](../../apps/game/electron/main.ts), [preload.ts](../../apps/game/electron/preload.ts)).
+      The renderer's `createSim` is origin-aware (`new` | `load`) and exposes `serialize()`; a load
+      swaps the running session in place (placement re-points, the renderer reconciles entities).
+- [x] Autosave on a cadence (3 min) + best-effort on quit; keeps the last N `auto` slots (the main
+      process prunes older ones on each write). See the boot loop in [main.tsx](../../apps/game/src/main.tsx).
+- [x] Save/load UI ([SaveMenu.tsx](../../apps/game/src/SaveMenu.tsx)): a modal slot list with
+      metadata (name, kind badge, tick, timestamp, version), quicksave/quickload (F5/F9), named
+      manual saves, overwrite/delete, new-game, and a corner toast. The sim pauses while it is open.
+- [~] `SNAPSHOT_VERSION` migration: incompatible saves are now **rejected gracefully** (flagged in
+  the list, load blocked with a message). An upgrade/migration seam for older versions is still
+  to come.
 - [x] **Test:** full round-trip incl. mod stores preserves `hashState`; continuing a
       loaded save for N ticks matches a never-saved run (headless).
       _(`apps/headless/tests/persistence.test.ts`; `pnpm headless` now hashes mod state too.)_
@@ -117,7 +127,9 @@ _BuildBar + InfoSidebar + inspect exist; research, village, and alerts are unrep
 
 ## M7 — Balancing & playtest harness (gates the slice)
 
-_Use the headless runner as the balancing instrument it was built to be._
+_Two instruments: [`apps/balance`](../../apps/balance/README.md) (`pnpm balance`) for the
+**static** economy shape — raw costs, cost curve, machine ratios — and the headless runner
+for the **dynamic** KPIs of a played-out seed. See [economy.md §8](./economy.md)._
 
 - [ ] Headless scenario runner that reports economy KPIs (time-to-first-research,
       village growth curve, bottlenecks) for a seed set.

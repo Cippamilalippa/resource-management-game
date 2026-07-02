@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from 'react'
 import { statsStore } from './statsStore.ts'
+import { saveStore } from './saveStore.ts'
 import { BuildBar } from './BuildBar.tsx'
 import { InfoSidebar } from './InfoSidebar.tsx'
+import { SaveMenu } from './SaveMenu.tsx'
 
 /** DOM overlay panel: live tick + entity counts read from the sim each frame. */
 export function App(): React.JSX.Element {
@@ -33,11 +35,15 @@ export function App(): React.JSX.Element {
         </div>
       </div>
       <div className="hint">
-        WASD to pan · scroll to zoom · R to rotate a port · hover to inspect · click to select ·
-        pick a tool to build
+        WASD to pan · scroll to zoom · R to rotate a port · hover to inspect · click to select · Esc
+        for saves · F5 quicksave · F9 quickload
       </div>
+      <button className="menu-button" onClick={() => saveStore.getController()?.open()}>
+        ☰ Saves
+      </button>
       <BuildBar />
       <InfoSidebar />
+      <SaveMenu />
     </>
   )
 }

@@ -3,11 +3,11 @@ import { hashState } from '@factory/engine/persistence'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
 import { buildingAt, enqueuePlaceProducer, terrainTypeOf, type GameState } from '../gameLogic.ts'
 
-/** The fertile-soil patch the starting scene paints (corner 8,-3, 5x5). */
+/** The bauxite-deposit patch the starting scene paints (corner 8,-3, 4x4). */
 const FERTILE_X = 8
 const FERTILE_Y = -3
-const FERTILE = terrainTypeOf('terrain.fertile_soil')
-const FOREST = terrainTypeOf('terrain.forest')
+const FERTILE = terrainTypeOf('terrain.bauxite_deposit')
+const FOREST = terrainTypeOf('terrain.titanium_deposit')
 
 /** Whether a registered crafter building (one that runs a recipe) sits at (x, y). */
 function isProducer(state: GameState, x: number, y: number): boolean {

@@ -1,0 +1,63 @@
+[
+  { "id": "item.bauxite", "type": "item", "name": "Bauxite" },
+  { "id": "item.titanium_ore", "type": "item", "name": "Titanium Ore" },
+  { "id": "item.rare_earth_ore", "type": "item", "name": "Rare-Earth Ore" },
+  { "id": "item.silica_sand", "type": "item", "name": "Silica Sand" },
+  { "id": "item.coal", "type": "item", "name": "Coal" },
+  { "id": "item.crude_oil", "type": "item", "name": "Crude Oil" },
+
+  { "id": "item.alumina", "type": "item", "name": "Alumina" },
+  { "id": "item.coke", "type": "item", "name": "Coke" },
+  { "id": "item.glass", "type": "item", "name": "Glass" },
+  { "id": "item.silicon", "type": "item", "name": "Silicon" },
+  { "id": "item.rare_earth", "type": "item", "name": "Refined Rare Earth" },
+  { "id": "item.naphtha", "type": "item", "name": "Naphtha" },
+  { "id": "item.kerosene", "type": "item", "name": "Kerosene" },
+
+  { "id": "item.aluminum", "type": "item", "name": "Aluminum" },
+  { "id": "item.titanium", "type": "item", "name": "Titanium" },
+  { "id": "item.resin", "type": "item", "name": "Resin" },
+  { "id": "item.rocket_fuel", "type": "item", "name": "Rocket Fuel" },
+  { "id": "item.microchip", "type": "item", "name": "Microchip" },
+
+  { "id": "item.aluminum_sheet", "type": "item", "name": "Aluminum Sheet" },
+  { "id": "item.aluminum_wire", "type": "item", "name": "Aluminum Wire" },
+  { "id": "item.titanium_alloy", "type": "item", "name": "Titanium Alloy" },
+  { "id": "item.carbon_fiber", "type": "item", "name": "Carbon Fiber" },
+  { "id": "item.rare_earth_magnet", "type": "item", "name": "Rare-Earth Magnet" },
+
+  { "id": "item.electric_motor", "type": "item", "name": "Electric Motor" },
+  { "id": "item.airframe_panel", "type": "item", "name": "Airframe Panel" },
+  { "id": "item.turbine_blade", "type": "item", "name": "Turbine Blade" },
+  { "id": "item.combustion_chamber", "type": "item", "name": "Combustion Chamber" },
+  { "id": "item.fuel_tank", "type": "item", "name": "Fuel Tank" },
+  { "id": "item.avionics", "type": "item", "name": "Avionics" },
+
+  { "id": "item.jet_engine", "type": "item", "name": "Jet Engine" },
+  { "id": "item.rocket_engine", "type": "item", "name": "Rocket Engine" },
+  { "id": "item.fuselage", "type": "item", "name": "Fuselage" },
+  { "id": "item.guidance_system", "type": "item", "name": "Guidance System" },
+
+  { "id": "item.satellite", "type": "item", "name": "Satellite" },
+  { "id": "item.aircraft", "type": "item", "name": "Aircraft" },
+  { "id": "item.rocket", "type": "item", "name": "Rocket" },
+
+  { "id": "item.mining_drill", "type": "item", "name": "Mining Drill" },
+  { "id": "item.oil_derrick", "type": "item", "name": "Oil Derrick" },
+  { "id": "item.refinery", "type": "item", "name": "Refinery" },
+  { "id": "item.smelter", "type": "item", "name": "Smelter" },
+  { "id": "item.chemical_plant", "type": "item", "name": "Chemical Plant" },
+  { "id": "item.composites_press", "type": "item", "name": "Composites Press" },
+  { "id": "item.rolling_mill", "type": "item", "name": "Rolling Mill" },
+  { "id": "item.electronics_bench", "type": "item", "name": "Electronics Bench" },
+  { "id": "item.machine_shop", "type": "item", "name": "Machine Shop" },
+  { "id": "item.fabricator", "type": "item", "name": "Fabricator" },
+  { "id": "item.assembly_hall", "type": "item", "name": "Assembly Hall" },
+  { "id": "item.science_press", "type": "item", "name": "Science Press" },
+
+  { "id": "item.science_materials", "type": "item", "name": "Materials Science Pack" },
+  { "id": "item.science_electronics", "type": "item", "name": "Electronics Science Pack" },
+  { "id": "item.science_chemical", "type": "item", "name": "Chemical Science Pack" },
+  { "id": "item.science_propulsion", "type": "item", "name": "Propulsion Science Pack" },
+  { "id": "item.science_aerospace", "type": "item", "name": "Aerospace Science Pack" }
+]

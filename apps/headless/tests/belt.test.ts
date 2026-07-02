@@ -11,8 +11,8 @@ import {
   MAX_SLOTS,
 } from '../gameLogic.ts'
 
-/** village + 4 terrain patches (82 tiles) + 6x6 orchard, before anything is placed. */
-const BASELINE = 119
+/** spaceport + 6 terrain patches (96 tiles) + 6x6 orchard, before anything is placed. */
+const BASELINE = 133
 /** A horizontal belt of 9 tiles, from (2,0) to (10,0) — clear of the origin village. */
 const BELT_LEN = 9
 /** Resource colour the test source produces and the test sink accepts. */

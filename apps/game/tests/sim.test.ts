@@ -50,8 +50,8 @@ describe('createSim (Electron/renderer mod-script wiring)', () => {
 
   it('assembles a deterministic sim (same seed + ticks -> identical hash)', async () => {
     const { prototypes, discovered } = await loadBaseContent()
-    const a = await createSim(prototypes, discovered, 7)
-    const b = await createSim(prototypes, discovered, 7)
+    const a = await createSim(prototypes, discovered, { kind: 'new' }, 7)
+    const b = await createSim(prototypes, discovered, { kind: 'new' }, 7)
     a.scheduler.runTicks(a.world, 500)
     b.scheduler.runTicks(b.world, 500)
     expect(hashState(a.world)).toBe(hashState(b.world))

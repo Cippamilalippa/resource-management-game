@@ -13,8 +13,8 @@ import {
   enqueuePlaceSplitter,
 } from '../gameLogic.ts'
 
-/** village + 4 terrain patches (82 tiles) + 6x6 orchard, before anything is placed (see scene.test.ts). */
-const BASELINE = 119
+/** spaceport + 6 terrain patches (96 tiles) + 6x6 orchard, before anything is placed (see scene.test.ts). */
+const BASELINE = 133
 /** Production cadence the base-game farm/orchard use: 1 item / 30 ticks = 2 items/sec at 60 tps. */
 const PRODUCE_EVERY = 30
 /** Per-resource stockpile cap the base-game producers use. */

@@ -12,6 +12,7 @@ command handling through the same stable mod API a third-party mod would use.
 pnpm install        # install workspace deps
 pnpm dev            # launch the Electron window (Pixi canvas + React overlay)
 pnpm headless       # run a deterministic N-tick sim, print a reproducible hash
+pnpm balance        # analyze the production-graph economy (raw costs, curve, ratios)
 pnpm test           # run the Vitest suite
 pnpm typecheck      # strict TS check across every package
 pnpm lint           # ESLint (incl. the no-Date.now/Math.random sim rule)
@@ -41,6 +42,8 @@ mods/          ALL game content (each a workspace package), discovered by scanni
 apps/
   game/        Electron + Pixi + React shell wiring everything together
   headless/    sim-only runner for tests / balancing (no render)
+  balance/     read-only economy analyzer: unfolds recipes to raw cost, flags the
+               cost curve, sizes machine ratios (see apps/balance/README.md)
 ```
 
 ### The engine / content boundary (non-negotiable)

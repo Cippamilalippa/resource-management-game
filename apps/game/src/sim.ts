@@ -13,8 +13,9 @@ import {
   type ScriptModule,
   type ScriptResolver,
 } from '@factory/engine/modloader'
+import { serialize, type WorldSnapshot } from '@factory/engine/persistence'
 import type { DiscoveredModInfo } from '../electron/preload.ts'
-import { validateContent, type GameState } from './gameLogic.ts'
+import { validateContent, serializeGameState, type GameState } from './gameLogic.ts'
 import { InspectRegistry } from './inspect.ts'
 
 /** A prototype as delivered by the preload bridge. */
@@ -31,6 +32,23 @@ export interface ClientSim {
   state: GameState
   /** Tile→name memory for the read-only inspector, pre-seeded with the starting scene. */
   registry: InspectRegistry
+  /** Snapshot the whole sim (engine entities + the base mod's out-of-ECS state) for a save. */
+  serialize(): WorldSnapshot
+}
+
+/**
+ * Where a freshly built sim starts from: a clean starting scene (`new`), or a restored save
+ * (`load`, carrying the engine `WorldSnapshot`). Mirrors the headless bootstrap's origin choice
+ * (`startScene` + `restore`) so both hosts drive the base mod's new-game/load closures identically.
+ */
+export type SimOrigin =
+  { readonly kind: 'new' } | { readonly kind: 'load'; snapshot: WorldSnapshot }
+
+/** The subset of the base mod's `base:ready` handle the host drives (typed loosely, as elsewhere). */
+interface BaseReadyHandle {
+  state: GameState
+  newGame: () => void
+  load: (snapshot: WorldSnapshot) => void
 }
 
 /**
@@ -102,23 +120,35 @@ const resolveBundledScript: ScriptResolver = async (source, path): Promise<Scrip
 export async function createSim(
   prototypes: readonly ClientPrototype[],
   discovered: readonly DiscoveredModInfo[] = [],
+  origin: SimOrigin = { kind: 'new' },
   seed = 1,
 ): Promise<ClientSim> {
-  const world = createGameWorld(seed)
+  // A loaded save recreates its recorded seed so the RNG stream continues identically; a new
+  // game uses the caller's seed. `restore` below then fast-forwards the clock/RNG to match.
+  const world = createGameWorld(origin.kind === 'load' ? origin.snapshot.seed : seed)
 
   const byId = new Map(prototypes.map((p) => [p.id, p]))
   const registry = new InspectRegistry()
 
   // The base mod owns the game state; subscribe before running it. `base:ready` hands us the
   // read handle (render interpolation, inspector, placement ghosts) plus the new-game/load
-  // closures; we start a clean scene here (save/load wiring lands in a later M2 pass).
+  // closures. We pick the world's origin here — a clean scene, or a restored snapshot — mirroring
+  // the headless bootstrap so both hosts stay byte-for-byte consistent.
   // `base:spawn` lets us name each scene tile for the read-only inspector from the prototypes we
   // already hold — a non-sim side effect that never mutates the world.
   let state: GameState | undefined
   world.events.on('base:ready', (r) => {
-    const ready = r as { state: GameState; newGame: () => void }
+    const ready = r as BaseReadyHandle
     state = ready.state
-    ready.newGame()
+    if (origin.kind === 'load') {
+      // Fast-forward the engine clock/RNG (the hash covers both), then hand the mod its state —
+      // the same two-step `restore` the headless bootstrap performs.
+      world.tick = origin.snapshot.tick
+      world.rng.setState(origin.snapshot.rngState)
+      ready.load(origin.snapshot)
+    } else {
+      ready.newGame()
+    }
   })
   world.events.on('base:spawn', (payload) => {
     const { protoId, x, y } = payload as { protoId: string; x: number; y: number }
@@ -153,5 +183,14 @@ export async function createSim(
   if (!state) throw new Error('base mod did not publish game state (base:ready)')
 
   const scheduler = new Scheduler([counterSystem, ...modSystems])
-  return { world, scheduler, state, registry }
+  const liveState = state
+  return {
+    world,
+    scheduler,
+    state: liveState,
+    registry,
+    // Snapshot the engine entities plus the base mod's out-of-ECS state under its own `modState`
+    // key — the exact shape the headless bootstrap saves, so a save round-trips between hosts.
+    serialize: () => serialize(world, { base: serializeGameState(liveState) }),
+  }
 }

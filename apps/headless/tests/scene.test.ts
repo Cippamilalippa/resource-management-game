@@ -4,13 +4,13 @@ import { serialize } from '@factory/engine/persistence'
 import { TERRAIN_SPRITE, terrainTypeOf, tileKey } from '../gameLogic.ts'
 import { bootstrapSim } from '../bootstrap.ts'
 
-/** Total terrain tiles the starting scene paints (two 5x5 + two 4x4 patches). */
-const TERRAIN_TILES = 5 * 5 + 5 * 5 + 4 * 4 + 4 * 4
+/** Total terrain tiles the starting scene paints (six 4x4 deposit patches). */
+const TERRAIN_TILES = 4 * 4 * 6
 
 describe('starting scene', () => {
-  it('spawns the village + terrain patches + a 6x6 apple orchard', async () => {
+  it('spawns the spaceport + terrain patches + a 6x6 apple orchard', async () => {
     const { world } = await bootstrapSim(1)
-    // 1 village + 82 terrain tiles + 6*6 apple trees.
+    // 1 spaceport + 96 terrain tiles + 6*6 apple trees.
     expect(entityCount(world)).toBe(1 + TERRAIN_TILES + 36)
   })
 
@@ -40,7 +40,7 @@ describe('starting scene', () => {
     expect(cells.size).toBe(36)
   })
 
-  it('paints the four terrain patches as flat-fill tiles and records them in the terrain grid', async () => {
+  it('paints the six terrain patches as flat-fill tiles and records them in the terrain grid', async () => {
     const { world, state } = await bootstrapSim(1)
     const { entities } = serialize(world)
     const terrain = entities.filter((e) => e.sprite === TERRAIN_SPRITE)
@@ -48,9 +48,9 @@ describe('starting scene', () => {
     // The terrain grid is populated for every painted tile (so producer placement can read it).
     expect(state.terrain.size).toBe(TERRAIN_TILES)
 
-    // Spot-check that the fertile-soil patch (corner 8,-3) carries the right terrain type.
-    const fertile = terrainTypeOf('terrain.fertile_soil')
-    expect(state.terrain.get(tileKey(8, -3))).toBe(fertile)
-    expect(state.terrain.get(tileKey(12, 1))).toBe(fertile)
+    // Spot-check that the bauxite patch (4x4 at corner 8,-3) carries the right terrain type.
+    const bauxite = terrainTypeOf('terrain.bauxite_deposit')
+    expect(state.terrain.get(tileKey(8, -3))).toBe(bauxite)
+    expect(state.terrain.get(tileKey(11, 0))).toBe(bauxite)
   })
 })

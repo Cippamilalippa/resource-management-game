@@ -1,34 +1,50 @@
 [
   {
-    "id": "terrain.fertile_soil",
+    "id": "terrain.bauxite_deposit",
     "type": "terrain",
-    "name": "Fertile Soil",
+    "name": "Bauxite Deposit",
     "size": { "w": 1, "h": 1 },
-    "color": 13166240,
-    "info": "Plant grain here — build a Farm on top."
+    "color": 11570007,
+    "info": "Aluminum-bearing ore — build a Mining Drill on top."
   },
   {
-    "id": "terrain.forest",
+    "id": "terrain.titanium_deposit",
     "type": "terrain",
-    "name": "Forest",
+    "name": "Titanium Deposit",
     "size": { "w": 1, "h": 1 },
-    "color": 10864778,
-    "info": "Stands of trees — build a Woodcutter on top."
+    "color": 10135472,
+    "info": "Titanium-rich rock — build a Mining Drill on top."
   },
   {
-    "id": "terrain.iron_deposit",
+    "id": "terrain.rare_earth_deposit",
     "type": "terrain",
-    "name": "Iron Deposit",
+    "name": "Rare-Earth Deposit",
     "size": { "w": 1, "h": 1 },
-    "color": 13357786,
-    "info": "Iron-rich ground — build an Iron Mine on top."
+    "color": 11038648,
+    "info": "Rare-earth ore — build a Mining Drill on top."
   },
   {
-    "id": "terrain.copper_deposit",
+    "id": "terrain.silica_quarry",
     "type": "terrain",
-    "name": "Copper Deposit",
+    "name": "Silica Quarry",
     "size": { "w": 1, "h": 1 },
-    "color": 14857356,
-    "info": "Copper-rich ground — build a Copper Mine on top."
+    "color": 15260576,
+    "info": "Silica sand — build a Mining Drill on top."
+  },
+  {
+    "id": "terrain.coal_seam",
+    "type": "terrain",
+    "name": "Coal Seam",
+    "size": { "w": 1, "h": 1 },
+    "color": 3947588,
+    "info": "Coal seam — build a Mining Drill on top."
+  },
+  {
+    "id": "terrain.oil_field",
+    "type": "terrain",
+    "name": "Oil Field",
+    "size": { "w": 1, "h": 1 },
+    "color": 2763320,
+    "info": "Crude oil reservoir — build an Oil Derrick on top."
   }
 ]

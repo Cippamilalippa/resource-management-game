@@ -1,40 +1,151 @@
 [
   {
-    "id": "tech.farming",
+    "id": "tech.industrial_foundry",
     "type": "technology",
     "prerequisites": [],
     "unlocks": [
-      "recipe.grain",
-      "recipe.wood",
-      "building.farm",
-      "building.woodcutter",
-      "recipe.bread",
-      "building.kitchen"
+      "recipe.bauxite",
+      "recipe.silica_sand",
+      "recipe.coal",
+      "building.mining_drill",
+      "recipe.mining_drill",
+      "recipe.alumina",
+      "recipe.coke",
+      "recipe.glass",
+      "building.refinery",
+      "recipe.refinery",
+      "building.smelter",
+      "recipe.smelter",
+      "recipe.aluminum",
+      "recipe.aluminum_sheet",
+      "building.rolling_mill",
+      "recipe.rolling_mill",
+      "building.fabricator",
+      "recipe.fabricator",
+      "building.science_press",
+      "recipe.science_press",
+      "recipe.science_materials",
+      "building.lab"
     ]
   },
   {
-    "id": "tech.mining",
+    "id": "tech.oil_refining",
     "type": "technology",
-    "prerequisites": [],
+    "prerequisites": ["tech.industrial_foundry"],
+    "cost": [{ "item": "item.science_materials", "amount": 30 }],
     "unlocks": [
-      "recipe.iron_ore",
-      "recipe.copper_ore",
-      "building.iron_mine",
-      "building.copper_mine"
+      "recipe.crude_oil",
+      "building.oil_derrick",
+      "recipe.oil_derrick",
+      "recipe.distillation",
+      "building.chemical_plant",
+      "recipe.chemical_plant",
+      "recipe.resin",
+      "recipe.rocket_fuel",
+      "recipe.science_chemical"
     ]
   },
   {
-    "id": "tech.basic_smelting",
+    "id": "tech.electronics",
     "type": "technology",
-    "prerequisites": ["tech.mining"],
-    "cost": [{ "item": "item.research_pack", "amount": 20 }],
-    "unlocks": ["recipe.iron_plate", "building.furnace"]
+    "prerequisites": ["tech.industrial_foundry"],
+    "cost": [{ "item": "item.science_materials", "amount": 40 }],
+    "unlocks": [
+      "recipe.rare_earth_ore",
+      "recipe.silicon",
+      "recipe.rare_earth",
+      "recipe.aluminum_wire",
+      "building.electronics_bench",
+      "recipe.electronics_bench",
+      "recipe.microchip",
+      "recipe.science_electronics"
+    ]
   },
   {
-    "id": "tech.assembly",
+    "id": "tech.metallurgy",
     "type": "technology",
-    "prerequisites": ["tech.basic_smelting"],
-    "cost": [{ "item": "item.research_pack", "amount": 40 }],
-    "unlocks": ["recipe.gear", "building.assembler"]
+    "prerequisites": ["tech.industrial_foundry"],
+    "cost": [{ "item": "item.science_materials", "amount": 40 }],
+    "unlocks": [
+      "recipe.titanium_ore",
+      "recipe.titanium",
+      "recipe.titanium_alloy",
+      "building.machine_shop",
+      "recipe.machine_shop"
+    ]
+  },
+  {
+    "id": "tech.composite_materials",
+    "type": "technology",
+    "prerequisites": ["tech.oil_refining", "tech.metallurgy"],
+    "cost": [
+      { "item": "item.science_materials", "amount": 40 },
+      { "item": "item.science_chemical", "amount": 30 }
+    ],
+    "unlocks": [
+      "recipe.carbon_fiber",
+      "building.composites_press",
+      "recipe.composites_press",
+      "recipe.airframe_panel",
+      "recipe.fuel_tank"
+    ]
+  },
+  {
+    "id": "tech.avionics",
+    "type": "technology",
+    "prerequisites": ["tech.electronics"],
+    "cost": [{ "item": "item.science_electronics", "amount": 50 }],
+    "unlocks": [
+      "recipe.avionics",
+      "recipe.rare_earth_magnet",
+      "recipe.electric_motor",
+      "recipe.guidance_system"
+    ]
+  },
+  {
+    "id": "tech.propulsion",
+    "type": "technology",
+    "prerequisites": ["tech.metallurgy", "tech.composite_materials"],
+    "cost": [
+      { "item": "item.science_materials", "amount": 40 },
+      { "item": "item.science_chemical", "amount": 40 }
+    ],
+    "unlocks": [
+      "recipe.turbine_blade",
+      "recipe.combustion_chamber",
+      "building.assembly_hall",
+      "recipe.assembly_hall",
+      "recipe.science_propulsion"
+    ]
+  },
+  {
+    "id": "tech.jet_propulsion",
+    "type": "technology",
+    "prerequisites": ["tech.propulsion", "tech.avionics"],
+    "cost": [
+      { "item": "item.science_propulsion", "amount": 40 },
+      { "item": "item.science_electronics", "amount": 40 }
+    ],
+    "unlocks": ["recipe.jet_engine", "recipe.fuselage", "recipe.aircraft"]
+  },
+  {
+    "id": "tech.rocketry",
+    "type": "technology",
+    "prerequisites": ["tech.propulsion", "tech.avionics"],
+    "cost": [
+      { "item": "item.science_propulsion", "amount": 50 },
+      { "item": "item.science_chemical", "amount": 40 }
+    ],
+    "unlocks": ["recipe.rocket_engine", "recipe.satellite", "recipe.science_aerospace"]
+  },
+  {
+    "id": "tech.orbital_launch",
+    "type": "technology",
+    "prerequisites": ["tech.rocketry", "tech.jet_propulsion"],
+    "cost": [
+      { "item": "item.science_propulsion", "amount": 60 },
+      { "item": "item.science_aerospace", "amount": 40 }
+    ],
+    "unlocks": ["recipe.rocket"]
   }
 ]
