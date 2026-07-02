@@ -724,3 +724,387 @@ body {
   color: #e6e8ef;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
+
+/* ── Build bar: locked (un-researched) tools ─────────────────────────────── */
+.buildbar .tool.locked {
+  opacity: 0.4;
+  cursor: default;
+  filter: grayscale(0.6);
+}
+.buildbar .tool.locked:hover {
+  background: rgba(42, 46, 58, 0.6);
+}
+.buildbar .tool .tool-lock {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  color: #cfd3df;
+  background: rgba(20, 23, 33, 0.9);
+  border-radius: 50%;
+  padding: 1px;
+  line-height: 0;
+}
+
+/* ── Sim playback controls (in the debug panel) ──────────────────────────── */
+.simctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #2a2e3a;
+}
+.simctl-btn,
+.simctl-speed {
+  pointer-events: auto;
+  background: rgba(42, 46, 58, 0.6);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #e6e8ef;
+  cursor: pointer;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.simctl-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 7px;
+}
+.simctl-speeds {
+  display: flex;
+  gap: 4px;
+}
+.simctl-speed {
+  padding: 4px 7px;
+}
+.simctl-btn:hover,
+.simctl-speed:hover {
+  background: rgba(60, 66, 82, 0.7);
+}
+.simctl-btn.active,
+.simctl-speed.active {
+  border-color: #4fa8ff;
+  background: rgba(79, 168, 255, 0.18);
+  color: #4fa8ff;
+}
+
+/* ── Alerts (top-right stack) ────────────────────────────────────────────── */
+.alerts {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 260px;
+}
+.alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: rgba(20, 23, 33, 0.9);
+  border: 1px solid #2a2e3a;
+  backdrop-filter: blur(6px);
+}
+.alert-warn {
+  border-color: #6b5a24;
+  color: #ffd479;
+}
+.alert-bad {
+  border-color: #7a2e2e;
+  color: #ff9b9b;
+}
+.alert-text {
+  flex: 1;
+}
+.alert-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+/* ── HUD rail + panels (right side) ──────────────────────────────────────── */
+.hud-rail-wrap {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.hud-rail {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(20, 23, 33, 0.85);
+  border: 1px solid #2a2e3a;
+  border-radius: 10px;
+  padding: 6px;
+  backdrop-filter: blur(6px);
+}
+.hud-rail-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: rgba(42, 46, 58, 0.6);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #e6e8ef;
+  cursor: pointer;
+}
+.hud-rail-btn:hover {
+  background: rgba(60, 66, 82, 0.7);
+}
+.hud-rail-btn.active {
+  border-color: #4fa8ff;
+  background: rgba(79, 168, 255, 0.18);
+  color: #4fa8ff;
+}
+.hud-panel {
+  pointer-events: auto;
+  width: 288px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: rgba(20, 23, 33, 0.9);
+  border: 1px solid #2a2e3a;
+  border-radius: 10px;
+  padding: 14px;
+  backdrop-filter: blur(6px);
+  font-size: 13px;
+}
+.hud-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #cfd3df;
+  margin-bottom: 10px;
+}
+.hud-sub {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #8a90a2;
+}
+.hud-section-head .hud-sub {
+  margin-left: 8px;
+}
+.hud-section {
+  padding: 8px 0;
+  border-top: 1px solid #23262f;
+}
+.hud-section:first-of-type {
+  border-top: none;
+}
+.hud-section-head {
+  display: flex;
+  align-items: center;
+  color: #8a90a2;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.hud-active {
+  color: #4fa8ff;
+  margin-bottom: 8px;
+}
+.hud-idle {
+  color: #8a90a2;
+}
+.hud-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+}
+.hud-progress-num {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: #cfd3df;
+  font-size: 12px;
+}
+.hud-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.hud-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #4fa8ff;
+  border-radius: 3px;
+}
+.hud-bar-fill.good {
+  background: #52c07a;
+}
+.hud-bar-fill.warn {
+  background: #e0b64a;
+}
+.hud-bar-fill.bad {
+  background: #e06a6a;
+}
+.good {
+  color: #79d19b;
+}
+.bad {
+  color: #ff9b9b;
+}
+.hud-trend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+}
+/* Technology rows in the research tree. */
+.hud-tech {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  margin: 3px 0;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: rgba(42, 46, 58, 0.5);
+  color: #e6e8ef;
+  font-size: 13px;
+}
+.hud-tech-avail {
+  cursor: pointer;
+}
+.hud-tech-avail:hover {
+  border-color: #4fa8ff;
+  background: rgba(79, 168, 255, 0.16);
+}
+.hud-tech-locked {
+  opacity: 0.55;
+  color: #8a90a2;
+}
+.hud-tech-name {
+  flex: 1;
+}
+.hud-tech-cost {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hud-tech-costitem {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.hud-done-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.hud-done-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(82, 192, 122, 0.14);
+  color: #79d19b;
+  font-size: 11px;
+}
+/* Production stats grid: resource | make | use. */
+.hud-prod-grid {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 5px 14px;
+  align-items: center;
+}
+.hud-prod-h {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a90a2;
+  text-align: right;
+}
+.hud-prod-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: #cfd3df;
+  font-size: 12px;
+}
+
+/* ── Recipe picker (inside the inspector sidebar) ────────────────────────── */
+.recipe-picker {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #2a2e3a;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.recipe-head {
+  color: #8a90a2;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.recipe-empty {
+  color: #8a90a2;
+  font-size: 12px;
+}
+.recipe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: rgba(42, 46, 58, 0.5);
+  color: #e6e8ef;
+  font-size: 13px;
+  cursor: pointer;
+}
+.recipe-row:hover {
+  border-color: #4fa8ff;
+  background: rgba(79, 168, 255, 0.16);
+}
+.recipe-row.active {
+  border-color: #52c07a;
+  background: rgba(82, 192, 122, 0.14);
+  cursor: default;
+}
+.recipe-name {
+  flex: 1;
+}
+.recipe-flows {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #cfd3df;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.recipe-flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}

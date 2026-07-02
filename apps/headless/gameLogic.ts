@@ -8,3 +8,4 @@
 export * from '../../mods/base/scripts/sim.ts'
 export * from '../../mods/base/scripts/commands.ts'
 export * from '../../mods/base/scripts/content.ts'
+export * from '../../mods/base/scripts/hud.ts'

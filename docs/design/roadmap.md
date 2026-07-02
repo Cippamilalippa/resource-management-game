@@ -89,27 +89,53 @@ _Engine can (de)serialize + hash, but no app flow exists. A slice must persist a
 
 ## M3 — Content depth (chains, tech, village ladder)
 
-_Content is thin: 7 recipes, 4 techs. A satisfying slice needs a real progression curve._
+_An aerospace progression is now authored: 53 items / 52 recipes across 7 tiers (raw ores →
+refining/smelting → intermediates → avionics/propulsion → jet_engine / satellite / aircraft /
+rocket), gated by a 10-node tech tree, with the balance tool ([`pnpm balance`](../../apps/balance/README.md))
+tracking the cost curve._
 
-- [ ] Expand the production graph: 2–3 more tiers of intermediate + final goods
-      ([recipes.json](../../mods/base/prototypes/recipes.json)), staying a strict DAG.
-- [ ] Grow the tech tree to gate those tiers meaningfully
-      ([technologies.json](../../mods/base/prototypes/technologies.json)).
-- [ ] Wire the village demand ladder to the new goods so higher stages pull higher tiers.
-- [ ] Author starting-scenario resources/terrain so the early game has a clear first goal.
-- [ ] **Test:** `validateContent` still passes (shapes, references, acyclic recipe + tech graphs).
+- [x] Expand the production graph: 2–3 more tiers of intermediate + final goods
+      ([recipes.json](../../mods/base/prototypes/recipes.json)), staying a strict DAG. _(52 recipes,
+      strict DAG — the balance tool unfolds every good to raw and reports a smooth curve bar the
+      tier-5/6 spikes left for M7 tuning.)_
+- [x] Grow the tech tree to gate those tiers meaningfully
+      ([technologies.json](../../mods/base/prototypes/technologies.json)). _(10 techs, root→orbital_launch.)_
+- [x] Wire the village demand ladder to the new goods so higher stages pull higher tiers
+      ([buildings.json](../../mods/base/prototypes/buildings.json) `demands`).
+- [x] Author starting-scenario resources/terrain so the early game has a clear first goal
+      ([scene.ts](../../mods/base/scripts/scene.ts): village + orchard + six gated deposit patches).
+- [x] **Test:** `validateContent` still passes (shapes, references, acyclic recipe + tech graphs).
+      _([apps/headless/tests/content.test.ts](../../apps/headless/tests/content.test.ts) covers
+      missing refs, orphan categories, tech + recipe-graph cycles, village-demand validation,
+      and `buildableSet` tech-gating.)_
 
 ## M4 — Core-loop UI/UX
 
-_BuildBar + InfoSidebar + inspect exist; research, village, and alerts are unrepresented._
+_The read-only HUD selectors live in [hud.ts](../../mods/base/scripts/hud.ts) (surfaced through the
+`gameLogic` barrels, covered by [hud.test.ts](../../apps/headless/tests/hud.test.ts)); the boot loop
+assembles a `HudState` each throttled refresh and pushes it to the app-side `hudStore`, which the
+React panels read. Research is now player-driven — the host-side auto-select stopgap from M1 is gone._
 
-- [ ] Research screen: tech tree view, active/queued tech, pack throughput, unlock preview.
-- [ ] Village panel: current stage, satisfied/unmet demands, decline timer, buffer state.
-- [ ] Alerts/notifications: stalled crafter, missing input, village declining.
-- [ ] Build affordances: show recipe I/O + terrain requirement before placement; grey out
-      un-researched buildings.
-- [ ] Production stats / throughput readouts (extend `statsStore`).
-- [ ] Pause / sim-speed controls surfaced in UI (scheduler already fixed-timestep).
+- [x] Research screen: tech tree view (available / locked / researched), active tech + per-pack
+      progress, lab count, cost preview, click-to-select. See [HudPanels.tsx](../../apps/game/src/HudPanels.tsx).
+- [x] Village panel: level/stage, per-demand satisfied/unmet bars vs. buffer, population, and a
+      growth/decline trend bar ([HudPanels.tsx](../../apps/game/src/HudPanels.tsx) `VillagePanel`).
+- [x] Alerts/notifications: starved crafter (missing input), backed-up output, declining village —
+      aggregated with counts ([Alerts.tsx](../../apps/game/src/Alerts.tsx)).
+- [x] Build affordances: tech-gated, un-researched tools stay on the bar greyed/locked and
+      unselectable ([BuildBar.tsx](../../apps/game/src/BuildBar.tsx)).
+- [x] **Factorio-style machines**: the build bar shows one tool per crafter _building_ (12), not
+      one per recipe (52). A machine places empty and its recipe is chosen in the sidebar recipe
+      picker; extraction machines (mines/derricks) auto-adopt the recipe matching the terrain they
+      sit on. The chosen recipe is a new `set_recipe` command + a persisted `recipe` id on the
+      building. See [machines.ts](../../apps/game/src/machines.ts),
+      [RecipePanel.tsx](../../apps/game/src/RecipePanel.tsx), and
+      [recipe.test.ts](../../apps/headless/tests/recipe.test.ts).
+- [x] Production stats / throughput readouts: installed per-resource make/use rates
+      ([HudPanels.tsx](../../apps/game/src/HudPanels.tsx) `ProductionPanel`, `productionFlows`).
+- [x] Pause / sim-speed controls surfaced in UI: pause (Space) + 0.5/1/2/4× speed (`[` / `]`),
+      scaling the frame delta into the fixed-timestep scheduler so the sim stays deterministic
+      ([SimControls.tsx](../../apps/game/src/SimControls.tsx), [simControlStore.ts](../../apps/game/src/simControlStore.ts)).
 
 ## M5 — New-game & onboarding flow
 

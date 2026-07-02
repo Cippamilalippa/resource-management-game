@@ -16,6 +16,7 @@ import type {
   PlacePortCommand,
   PlaceSplitterCommand,
   PlaceCrafterCommand,
+  SetRecipeCommand,
   SetActiveResearchCommand,
   RemoveCommand,
 } from './sim.ts'
@@ -43,6 +44,11 @@ export function enqueuePlaceSplitter(gw: GameWorld, cmd: Omit<PlaceSplitterComma
 /** Queue a crafter placement (applied next tick) — the general recipe-driven form. */
 export function enqueuePlaceCrafter(gw: GameWorld, cmd: Omit<PlaceCrafterCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'place_crafter', ...cmd })
+}
+
+/** Queue a recipe (re)assignment for the crafter at (x, y) (applied next tick). */
+export function enqueueSetRecipe(gw: GameWorld, cmd: Omit<SetRecipeCommand, 'type'>): void {
+  enqueueCommand(gw, { type: 'set_recipe', ...cmd })
 }
 
 /**

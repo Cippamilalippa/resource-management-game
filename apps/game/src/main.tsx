@@ -1,7 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Renderer } from '@factory/engine/render'
-import { entityCount, type GameWorld, type Scheduler } from '@factory/engine/core'
+import {
+  DEFAULT_TICK_RATE,
+  entityCount,
+  type GameWorld,
+  type Scheduler,
+} from '@factory/engine/core'
 import { SNAPSHOT_VERSION, type WorldSnapshot } from '@factory/engine/persistence'
 import { App } from './App.tsx'
 import { statsStore } from './statsStore.ts'
@@ -9,6 +14,9 @@ import { buildStore, type BuildItem } from './buildStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
 import { saveStore, type SaveController } from './saveStore.ts'
+import { simControlStore } from './simControlStore.ts'
+import { hudStore, type HudController, type HudResearch, type HudTech } from './hudStore.ts'
+import { buildMachineIndex, type MachineIndex } from './machines.ts'
 import type { InspectRegistry } from './inspect.ts'
 import type { GameState } from './gameLogic.ts'
 import type { DiscoveredModInfo, SaveMeta } from '../electron/preload.ts'
@@ -17,7 +25,10 @@ import {
   buildableSet,
   techTypeOf,
   enqueueSetActiveResearch,
-  RESEARCH_NONE,
+  villageStatuses,
+  researchProgress,
+  collectAlerts,
+  productionFlows,
 } from './gameLogic.ts'
 import { buildIconTextures, resourceIconTextures } from './iconTextures.ts'
 import { setResources } from './resources.ts'
@@ -56,58 +67,28 @@ interface RecipeFlow {
 }
 
 /**
- * Synthesize a 'producer'-kind build tool per recipe, paired with the first crafter building
- * whose `craftingCategories` include the recipe's `category` (the recipe owns the output,
- * timing and terrain gate; the building owns the footprint, colour, icon and speed). This is
- * how a recipe becomes placeable: selecting it drops a crafter of the matching category.
+ * One 'producer'-kind build tool per crafter *building* (Factorio-style: one machine, its recipe
+ * chosen after placement — not one tool per recipe). The tool carries the building's footprint,
+ * colour and icon; `produceEvery` is only a placeholder cadence for the empty machine (a real
+ * recipe overrides it via `set_recipe`). The recipe catalogue lives in {@link MachineIndex}.
  */
-function recipeItems(
-  prototypes: readonly ClientPrototype[],
-  colorOfItem: (id: unknown) => number,
-): BuildItem[] {
-  // category -> first crafter building that provides it.
-  const crafterFor = new Map<string, ClientPrototype>()
-  for (const p of prototypes) {
-    if (p.type !== 'crafter') continue
-    const cats = Array.isArray(p.craftingCategories) ? p.craftingCategories : []
-    for (const c of cats) if (typeof c === 'string' && !crafterFor.has(c)) crafterFor.set(c, p)
-  }
-
+function machineItems(machines: MachineIndex): BuildItem[] {
   const items: BuildItem[] = []
-  for (const r of prototypes) {
-    if (r.type !== 'recipe') continue
-    const category = typeof r.category === 'string' ? r.category : ''
-    const building = crafterFor.get(category)
-    if (!building) continue // no crafter provides this category — not buildable
-    const results = Array.isArray(r.results) ? (r.results as RecipeFlow[]) : []
-    const ingredients = Array.isArray(r.ingredients) ? (r.ingredients as RecipeFlow[]) : []
-    const first = results[0]
-    if (!first || typeof first.item !== 'string') continue
-    const toFlows = (list: RecipeFlow[]): { color: number; amount: number }[] =>
-      list
-        .filter((f): f is { item: string; amount?: number } => typeof f.item === 'string')
-        .map((f) => ({
-          color: colorOfItem(f.item),
-          amount: typeof f.amount === 'number' ? f.amount : 1,
-        }))
-    const size = (building.size ?? {}) as { w?: number; h?: number }
+  for (const def of machines.defs) {
     items.push({
-      id: r.id,
-      name: typeof building.name === 'string' ? building.name : building.id,
+      id: def.id,
+      name: def.name,
       kind: 'producer',
-      ...(typeof building.icon === 'string' ? { icon: building.icon } : {}),
-      w: typeof size.w === 'number' ? size.w : 1,
-      h: typeof size.h === 'number' ? size.h : 1,
-      color: num(building, 'color', 0xffffff),
-      itemColor: colorOfItem(first.item),
-      craftInputs: toFlows(ingredients),
-      craftOutputs: toFlows(results),
+      ...(def.icon ? { icon: def.icon } : {}),
+      w: def.w,
+      h: def.h,
+      color: def.color,
+      itemColor: def.color,
       accepts: [],
       spawnEvery: 20,
       moveEvery: 1,
-      produceEvery: num(r, 'time', 30),
-      storage: num(building, 'storage', 100),
-      ...(typeof r.requiresTerrain === 'string' ? { requiresTerrain: r.requiresTerrain } : {}),
+      produceEvery: def.recipes[0]?.craftEvery ?? 30,
+      storage: def.storage,
     })
   }
   return items
@@ -120,13 +101,24 @@ function recipeItems(
  */
 interface TechMeta {
   readonly id: string
+  /** Human display name, derived from the id (no `name` is authored on the prototype). */
+  readonly name: string
   readonly int: number
   /** Per-pack research cost as the sim consumes it: { pack colour, amount }. */
   readonly cost: readonly { color: number; amount: number }[]
   readonly prereqs: readonly string[]
 }
 
-/** Read every technology's { int id, per-pack cost, prerequisites } from the loaded prototypes. */
+/** Prettify a technology id (`tech.jet_propulsion`) into a title-cased label ("Jet Propulsion"). */
+function techLabel(id: string): string {
+  return id
+    .replace(/^tech\./, '')
+    .split('_')
+    .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
+    .join(' ')
+}
+
+/** Read every technology's { int id, display name, per-pack cost, prerequisites } from the prototypes. */
 function techMetas(prototypes: readonly ClientPrototype[]): TechMeta[] {
   // The sim works in item colours, not ids; resolve each cost entry's item to its colour.
   const itemColors = new Map<string, number>()
@@ -145,16 +137,15 @@ function techMetas(prototypes: readonly ClientPrototype[]): TechMeta[] {
         cost.push({ color: itemColors.get(c.item) ?? 0xffffff, amount: c.amount })
       }
     }
-    metas.push({ id: p.id, int: techTypeOf(p.id), cost, prereqs })
+    metas.push({ id: p.id, name: techLabel(p.id), int: techTypeOf(p.id), cost, prereqs })
   }
   return metas
 }
 
-/** Map the placeable prototypes (buildings, belts, ports) and recipes to build-bar tools. */
-function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
+/** Map the placeable prototypes (buildings, belts, ports) and crafter machines to build-bar tools. */
+function toBuildItems(prototypes: readonly ClientPrototype[], machines: MachineIndex): BuildItem[] {
   // Resource identity is the item's colour; build an id->colour lookup so a building's
-  // `accepts` and a recipe's `results` (lists of item ids) resolve to the colours the sim
-  // works in.
+  // `accepts` (a list of item ids) resolves to the colours the sim works in.
   const itemColors = new Map<string, number>()
   for (const p of prototypes) if (p.type === 'item') itemColors.set(p.id, num(p, 'color', 0xffffff))
   const colorOfItem = (id: unknown): number =>
@@ -185,8 +176,8 @@ function toBuildItems(prototypes: readonly ClientPrototype[]): BuildItem[] {
       ...(typeof p.requiresTerrain === 'string' ? { requiresTerrain: p.requiresTerrain } : {}),
     })
   }
-  // Recipes become 'producer' tools, paired with a crafter building of a matching category.
-  items.push(...recipeItems(prototypes, colorOfItem))
+  // One 'producer' tool per crafter building (its recipe is chosen after placement).
+  items.push(...machineItems(machines))
   return items
 }
 
@@ -228,7 +219,10 @@ async function boot(): Promise<void> {
   const techs = techMetas(prototypes)
   const techIdByInt = new Map(techs.map((t) => [t.int, t.id] as const))
   const rootTechIds = techs.filter((t) => t.prereqs.length === 0).map((t) => t.id)
-  const allBuildItems = toBuildItems(prototypes)
+  // The machine catalogue (crafter buildings + the recipes each can run). Drives the build bar
+  // (one tool per machine) and the sidebar recipe picker (via placement.ts).
+  const machines = buildMachineIndex(prototypes)
+  const allBuildItems = toBuildItems(prototypes, machines)
 
   // Derive the researched-string set from a research store's completed integer ids plus the always-
   // available root techs. Called when a session starts so a loaded save unlocks exactly what it had.
@@ -279,7 +273,9 @@ async function boot(): Promise<void> {
   const refreshBuildBar = async (): Promise<void> => {
     if (!session) return
     const buildable = buildableSet(prototypes, session.researchedIds)
-    const items = allBuildItems.filter((i) => buildable.has(i.id))
+    // Keep every tool on the bar; mark the tech-gated, not-yet-researched ones locked (greyed and
+    // unselectable) so the tech tree's payoff is visible before it's earned (M4 build affordances).
+    const items = allBuildItems.map((i) => (buildable.has(i.id) ? i : { ...i, locked: true }))
     buildStore.setItems(items)
     // Stamp the build-bar glyph onto placed buildings/producers (keyed by their tile colour), and
     // the resource glyph onto every item riding a belt (keyed by its identity colour). Buildings go
@@ -290,7 +286,7 @@ async function boot(): Promise<void> {
   /** Build a fresh sim from an origin (new game or restored save) and make it the live session. */
   const startSession = async (origin: SimOrigin): Promise<void> => {
     const sim = await createSim(prototypes, discovered, origin)
-    const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry)
+    const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry, machines)
     session = {
       world: sim.world,
       scheduler: sim.scheduler,
@@ -304,6 +300,50 @@ async function boot(): Promise<void> {
   }
 
   await startSession({ kind: 'new' })
+
+  // ── HUD (research / village / alerts / production) ───────────────────────────────────────────
+  // Assemble the research view-model: the sim tracks only integer tech ids, so enrich each with its
+  // display name and status (researched / active / available) against the session's researched set.
+  const techNameById = new Map(techs.map((t) => [t.id, t.name] as const))
+  const buildResearchHud = (sess: Session): HudResearch => {
+    const prog = researchProgress(sess.state)
+    const activeMeta = prog.idle ? undefined : techs.find((t) => t.int === prog.activeTech)
+    const techsVm: HudTech[] = techs.map((t) => {
+      const researched = sess.researchedIds.has(t.id)
+      const active = !prog.idle && t.int === prog.activeTech
+      const available = !researched && !active && t.prereqs.every((p) => sess.researchedIds.has(p))
+      return {
+        id: t.id,
+        name: t.name,
+        researched,
+        active,
+        available,
+        cost: t.cost.map((c) => ({ color: c.color, amount: c.amount })),
+        prereqs: t.prereqs.map((p) => techNameById.get(p) ?? p),
+      }
+    })
+    return {
+      activeId: activeMeta?.id ?? null,
+      activeName: activeMeta?.name ?? null,
+      labCount: prog.labCount,
+      progress: prog.cost.map((c) => ({ color: c.color, amount: c.amount, progress: c.progress })),
+      techs: techsVm,
+    }
+  }
+
+  // The research screen drives tech selection through here (only the boot loop can touch the world).
+  const hudController: HudController = {
+    selectResearch: (id) => {
+      if (!session) return
+      const meta = techs.find((t) => t.id === id)
+      if (!meta) return
+      if (session.researchedIds.has(id)) return // already researched
+      if (session.state.research.activeTech === meta.int) return // already active — don't reset progress
+      if (!meta.prereqs.every((p) => session!.researchedIds.has(p))) return // prerequisites unmet
+      enqueueSetActiveResearch(session.world, { tech: meta.int, cost: meta.cost })
+    },
+  }
+  hudStore.setController(hudController)
 
   // ── Save/load controller ─────────────────────────────────────────────────────────────────────
   // The menu (React) drives this; every disk op reports progress back through saveStore. The bridge
@@ -474,14 +514,17 @@ async function boot(): Promise<void> {
       return
     }
 
-    // The menu pauses the sim: we stop advancing but keep drawing a frozen frame so the paused
-    // world stays on screen (and resetting `last` above avoids a huge delta jump on resume).
-    if (saveStore.get().open) {
+    // The sim pauses while the save menu is open OR the player paused playback; we stop advancing
+    // but keep drawing a frozen frame so the paused world stays on screen (and resetting `last`
+    // above avoids a huge delta jump on resume). Otherwise the speed multiplier scales real frame
+    // time before it reaches the fixed-timestep scheduler — the sim stays deterministic, it just
+    // runs more or fewer fixed ticks per real second.
+    if (saveStore.get().open || simControlStore.get().paused) {
       renderer.render(sess.world, lastAlpha)
     } else {
       // Belts step a whole tile per move-cycle; interpolate across the cycle (not the tick)
       // so items glide one tile at a time instead of teleporting on the move tick.
-      const subTickAlpha = sess.scheduler.advance(sess.world, deltaMs)
+      const subTickAlpha = sess.scheduler.advance(sess.world, deltaMs * simControlStore.get().speed)
       lastAlpha = beltMoveAlpha(sess.state, subTickAlpha)
       renderer.render(sess.world, lastAlpha)
     }
@@ -491,10 +534,9 @@ async function boot(): Promise<void> {
       fps = Math.round((frames * 1000) / (now - lastStatsAt))
       frames = 0
       lastStatsAt = now
-      // Pull runtime tech completions into the researched set, and keep research self-driving
-      // until the M4 research screen lands. The sim records completed techs as integer ids; map
-      // them back to strings, and when research is idle auto-select the next tech whose
-      // prerequisites are met (deterministic prototype order). Replaced by the M4 research UI.
+      // Pull runtime tech completions into the researched set (the sim records completed techs as
+      // integer ids; map them back to strings). Research is now player-driven through the M4
+      // research screen — the host no longer auto-selects the next tech.
       let grew = false
       for (let i = 0; i < sess.state.research.completed.length; i++) {
         const id = techIdByInt.get(sess.state.research.completed[i]!)
@@ -504,12 +546,17 @@ async function boot(): Promise<void> {
         }
       }
       if (grew) void refreshBuildBar()
-      if (sess.state.research.activeTech === RESEARCH_NONE) {
-        const next = techs.find(
-          (t) => !sess.researchedIds.has(t.id) && t.prereqs.every((p) => sess.researchedIds.has(p)),
-        )
-        if (next) enqueueSetActiveResearch(sess.world, { tech: next.int, cost: next.cost })
-      }
+      // Push a fresh HUD snapshot for the M4 panels (research / villages / alerts / production).
+      hudStore.set({
+        research: buildResearchHud(sess),
+        villages: villageStatuses(sess.state),
+        alerts: collectAlerts(sess.state),
+        production: productionFlows(sess.state).map((f) => ({
+          color: f.color,
+          producedPerSec: f.produced * DEFAULT_TICK_RATE,
+          consumedPerSec: f.consumed * DEFAULT_TICK_RATE,
+        })),
+      })
       // Refresh the inspector so a pinned/hovered object's live numbers stay current.
       sess.inspect.refresh()
       statsStore.set({

@@ -7,7 +7,7 @@ import { ResourceLabel } from './ResourceLabel.tsx'
 /** Display labels for each tool kind; unknown kinds fall back to the raw kind string. */
 const GROUP_LABEL: Record<string, string> = {
   belt: 'Belts',
-  producer: 'Producers',
+  producer: 'Machines',
   building: 'Buildings',
   splitter: 'Splitters',
   port: 'Ports',
@@ -16,7 +16,7 @@ const GROUP_LABEL: Record<string, string> = {
 /** Singular label for a single item's kind in its detail panel. */
 const KIND_LABEL: Record<string, string> = {
   belt: 'Belt',
-  producer: 'Producer',
+  producer: 'Machine',
   building: 'Building',
   splitter: 'Splitter',
   port: 'Port',
@@ -77,11 +77,6 @@ function slotForKey(key: string): number {
   return -1
 }
 
-/** Prettify a terrain prototype id (`terrain.fertile_soil`) into a readable label. */
-function terrainLabel(id: string): string {
-  return id.replace(/^terrain\./, '').replace(/_/g, ' ')
-}
-
 interface DetailRow {
   readonly label: string
   readonly value: string
@@ -94,16 +89,12 @@ function itemRows(item: BuildItem): DetailRow[] {
   switch (item.kind) {
     case 'belt':
       return [{ label: 'Speed', value: `1 tile / ${item.moveEvery} ticks` }]
-    case 'producer': {
-      const rows: DetailRow[] = [
-        { label: 'Produces', value: '', swatches: [item.itemColor] },
-        { label: 'Rate', value: `1 / ${item.produceEvery} ticks` },
+    case 'producer':
+      // A machine is placed empty; its recipe (and thus I/O) is chosen afterward in the sidebar.
+      return [
         { label: 'Storage', value: String(item.storage) },
+        { label: 'Recipe', value: 'Choose after placing' },
       ]
-      if (item.requiresTerrain)
-        rows.push({ label: 'Terrain', value: terrainLabel(item.requiresTerrain) })
-      return rows
-    }
     case 'building':
       return [
         ...(item.accepts.length > 0
@@ -150,7 +141,10 @@ function DetailPanel({ hover }: { hover: Hover }): React.JSX.Element {
         <Icon name={name} badge={badge} size={22} />
         <div className="buildbar-detail-titles">
           <span className="buildbar-detail-title">{item.name}</span>
-          <span className="buildbar-detail-sub">{KIND_LABEL[item.kind] ?? item.kind}</span>
+          <span className="buildbar-detail-sub">
+            {KIND_LABEL[item.kind] ?? item.kind}
+            {item.locked && ' · 🔒 Research to unlock'}
+          </span>
         </div>
       </div>
       <div className="buildbar-detail-rows">
@@ -222,7 +216,7 @@ export function BuildBar(): React.JSX.Element | null {
         if (group) setOpenKey(group.key)
       } else {
         const item = openGroup?.items[slot]
-        if (item) buildStore.toggle(item.id)
+        if (item && !item.locked) buildStore.toggle(item.id)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -241,18 +235,24 @@ export function BuildBar(): React.JSX.Element | null {
             return (
               <button
                 key={item.id}
-                className={`tool${state.selected === item.id ? ' selected' : ''}`}
-                onClick={() => buildStore.toggle(item.id)}
+                className={`tool${state.selected === item.id ? ' selected' : ''}${item.locked ? ' locked' : ''}`}
+                onClick={() => !item.locked && buildStore.toggle(item.id)}
                 onMouseEnter={() => setHover({ kind: 'item', item })}
                 onMouseLeave={() =>
                   setHover((h) => (h?.kind === 'item' && h.item === item ? null : h))
                 }
                 onFocus={() => setHover({ kind: 'item', item })}
                 onBlur={() => setHover((h) => (h?.kind === 'item' && h.item === item ? null : h))}
-                title={item.name}
+                title={item.locked ? `${item.name} — locked (research to unlock)` : item.name}
                 aria-label={item.name}
+                aria-disabled={item.locked ? true : undefined}
               >
                 <Icon name={name} badge={badge} size={22} />
+                {item.locked && (
+                  <span className="tool-lock">
+                    <Icon name="Lock" size={11} />
+                  </span>
+                )}
                 {shortcutLabel(i) && <span className="tool-key">{shortcutLabel(i)}</span>}
               </button>
             )

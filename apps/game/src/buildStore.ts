@@ -28,6 +28,8 @@ export interface BuildItem {
   readonly accepts: readonly number[]
   /** Building tool only: register the placed store as a research lab (its packs drive research). */
   readonly researchLab?: boolean
+  /** True when the unlocking technology is not yet researched — shown greyed and not selectable. */
+  readonly locked?: boolean
   /** Ticks between drains for an output port. */
   readonly spawnEvery: number
   /** Ticks between item advances for a belt. */

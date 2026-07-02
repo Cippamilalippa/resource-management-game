@@ -7,6 +7,7 @@ import {
   enqueuePlacePort,
   enqueuePlaceCrafter,
   enqueuePlaceSplitter,
+  enqueueSetRecipe,
   enqueueRemove,
   projectBelt,
   terrainTypeOf,
@@ -18,6 +19,8 @@ import {
 import { buildStore, type BuildItem } from './buildStore.ts'
 import { resolveInspect, type InspectInfo, type InspectRegistry } from './inspect.ts'
 import { inspectStore } from './inspectStore.ts'
+import { recipeStore } from './recipeStore.ts'
+import type { MachineIndex, RecipeChoice } from './machines.ts'
 
 /** Whether two footprints describe the same object (same anchor and size). */
 function sameFootprint(a: InspectInfo['footprint'], b: InspectInfo['footprint']): boolean {
@@ -43,8 +46,58 @@ export function installPlacement(
   world: GameWorld,
   state: GameState,
   registry: InspectRegistry,
+  machines: MachineIndex,
 ): { refresh: () => void } {
   const grid = state.grid
+
+  // The recipe picker (sidebar) drives recipe changes on the pinned crafter through here — only the
+  // host owns the world, so the store just carries intent and this enqueues the command.
+  recipeStore.setController({
+    choose: (recipe: RecipeChoice) => {
+      const sel = recipeStore.get()
+      if (!sel) return
+      enqueueSetRecipe(world, {
+        x: sel.x,
+        y: sel.y,
+        recipe: recipe.int,
+        inputs: recipe.inputs,
+        outputs: recipe.outputs,
+        craftEvery: recipe.craftEvery,
+        storageCap: recipe.storageCap,
+      })
+    },
+  })
+
+  /**
+   * Publish (or clear) the recipe picker for the object described by `info`. A crafter (a building
+   * whose footprint colour maps to a {@link MachineDef}) exposes its recipe options; an extraction
+   * machine's options are filtered to the recipe matching the terrain it sits on. Anything else
+   * clears the picker.
+   */
+  const publishRecipe = (info: InspectInfo | null): void => {
+    if (!info) {
+      recipeStore.set(null)
+      return
+    }
+    const { x, y } = info.footprint
+    const b = buildingAt(state.buildings, x, y)
+    const def = b >= 0 ? machines.byColor.get(info.color) : undefined
+    if (b < 0 || !def || !state.buildings.crafts[b]) {
+      recipeStore.set(null)
+      return
+    }
+    const options = def.extraction
+      ? def.recipes.filter((r) => r.requiresTerrainType === terrainTypeAt(state.terrain, x, y))
+      : def.recipes
+    recipeStore.set({
+      x,
+      y,
+      machineName: def.name,
+      extraction: def.extraction,
+      currentInt: state.buildings.recipe[b]!,
+      options,
+    })
+  }
   // Ghost tint for a placement the sim would reject (off-belt or wrong terrain), and the
   // tint the delete tool paints the object it would remove.
   const INVALID_COLOR = 0xff5555
@@ -125,6 +178,7 @@ export function installPlacement(
       if (info) {
         inspectStore.set({ info, pinned: true })
         renderer.setHighlight({ ...info.footprint, color: info.color, selected: true })
+        publishRecipe(info) // recipe picker follows the pinned crafter
         return
       }
       pinned = null // the pinned object vanished — fall through to hover.
@@ -142,6 +196,7 @@ export function installPlacement(
       : null
     inspectStore.set({ info, pinned: false })
     renderer.setHighlight(info ? { ...info.footprint, color: info.color, selected: false } : null)
+    publishRecipe(null) // nothing pinned → no recipe picker
   }
 
   /** Clear all inspect state (entering build mode, or nothing under the cursor). */
@@ -150,6 +205,7 @@ export function installPlacement(
     hoverTile = null
     inspectStore.set({ info: null, pinned: false })
     renderer.setHighlight(null)
+    recipeStore.set(null)
   }
 
   /** A click in inspect mode: pin the object under the cursor, or unpin (toggle / empty). */
@@ -316,23 +372,26 @@ export function installPlacement(
       registry.record(tile.x, tile.y, { name: item.name, type: 'splitter' })
       return
     }
-    // Crafter (farm/mine/furnace/assembler…): an off-belt building running a recipe. Terrain-
-    // gated extraction crafters are valid only on matching terrain; the sim re-checks and drops
-    // a bad placement. The recipe's inputs/outputs ride on the build item.
+    // Machine (mine/furnace/assembler…): an off-belt crafter placed EMPTY — the player picks its
+    // recipe afterward in the sidebar (Factorio-style). Extraction machines (mines/derricks) are
+    // the exception: they auto-adopt the recipe matching the terrain they're dropped on, so a drill
+    // on a coal seam immediately mines coal. Off a matching deposit it places idle until moved.
     if (item.kind === 'producer') {
+      const def = machines.byColor.get(item.color)
+      const recipe = def?.extraction
+        ? def.recipes.find(
+            (r) => r.requiresTerrainType === terrainTypeAt(state.terrain, tile.x, tile.y),
+          )
+        : undefined
       enqueuePlaceCrafter(world, {
         x: tile.x,
         y: tile.y,
         w: item.w,
         h: item.h,
         color: item.color,
-        inputs: item.craftInputs ?? [],
-        outputs: item.craftOutputs ?? [{ color: item.itemColor, amount: 1 }],
-        craftEvery: item.produceEvery,
+        craftEvery: recipe?.craftEvery ?? item.produceEvery,
         storageCap: item.storage,
-        ...(item.requiresTerrain
-          ? { requiresTerrainType: terrainTypeOf(item.requiresTerrain) }
-          : {}),
+        ...(recipe ? { recipe: recipe.int, inputs: recipe.inputs, outputs: recipe.outputs } : {}),
       })
       registry.record(tile.x, tile.y, { name: item.name, type: 'producer' })
       return

@@ -139,6 +139,22 @@ export function techTypeOf(id: string): number {
 }
 
 /**
+ * Map a recipe id string to a stable opaque integer the sim can store on a crafter (see
+ * {@link BuildingStore.recipe}). Same FNV-1a hash as {@link techTypeOf}; the host owns the
+ * string↔int map, the sim only ever tracks the integer. `|| 1` keeps 0 reserved for "no recipe".
+ */
+export function recipeTypeOf(id: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  // Mask to 31 bits so it is always a positive Int32 — the recipe id lives in an Int32Array on the
+  // building store, and a value above 2^31 would wrap to a negative on write and mismatch the host.
+  return h & 0x7fffffff || 1
+}
+
+/**
  * The whole base-game belt network as flat parallel arrays indexed by a dense belt-tile
  * id. `index` maps a packed tile coordinate to that id. Capacity grows (doubling) only
  * when tiles are placed; the per-tick hot path reads these arrays by index and never
@@ -519,6 +535,12 @@ export interface BuildingStore {
   bh: Int32Array
   /** 1 if this building runs a recipe (a crafter), 0 for a pure store. */
   crafts: Int8Array
+  /**
+   * The recipe a crafter is currently set to, as an opaque integer id (see {@link recipeTypeOf}),
+   * or 0 for an empty crafter with no recipe yet. Drives no sim logic (the slots do) — it is kept
+   * so the UI can show/highlight the chosen recipe and so it survives save/load.
+   */
+  recipe: Int32Array
   /** Crafter cadence: attempt one craft every N ticks (recipe `time` / building `speed`). */
   craftEvery: Int32Array
   /** Ticks since this crafter last attempted/completed a craft. */
@@ -548,6 +570,7 @@ export function createBuildingStore(): BuildingStore {
     bw: new Int32Array(cap),
     bh: new Int32Array(cap),
     crafts: new Int8Array(cap),
+    recipe: new Int32Array(cap),
     craftEvery: new Int32Array(cap).fill(1),
     craftTimer: new Int32Array(cap),
     slotN: new Int32Array(cap),
@@ -571,6 +594,7 @@ function ensureBuildingCapacity(s: BuildingStore, need: number): void {
   s.bw = grow(s.bw, next, 0)
   s.bh = grow(s.bh, next, 0)
   s.crafts = grow8(s.crafts, next, 0)
+  s.recipe = grow(s.recipe, next, 0)
   s.craftEvery = grow(s.craftEvery, next, 1)
   s.craftTimer = grow(s.craftTimer, next, 0)
   s.slotN = grow(s.slotN, next, 0)
@@ -639,6 +663,7 @@ export function registerBuilding(
   store.bw[b] = w
   store.bh[b] = h
   store.crafts[b] = crafts ? 1 : 0
+  store.recipe[b] = 0
   store.craftEvery[b] = Math.max(1, craftEvery)
   store.craftTimer[b] = 0
   let n = 0
@@ -664,6 +689,52 @@ export function registerBuilding(
 export function buildingAt(store: BuildingStore, x: number, y: number): number {
   const b = store.tileIndex.get(tileKey(x, y))
   return b === undefined ? NONE : b
+}
+
+/**
+ * Re-arm an existing crafter `b` with a recipe: replace its stockpile slots (inputs deposit-only,
+ * outputs drain-only — same layout {@link registerBuilding} builds for a crafter), set its cadence
+ * and recipe id, mark it a crafter, and reset the craft timer. Any held stock is dropped because the
+ * slot resource types change with the recipe. `recipe === 0` clears it back to an empty machine.
+ * Off the hot path (player recipe change only).
+ */
+export function setBuildingRecipe(
+  store: BuildingStore,
+  b: number,
+  recipe: number,
+  inputs: readonly CraftFlow[],
+  outputs: readonly CraftFlow[],
+  craftEvery: number,
+  storageCap: number,
+): void {
+  const base = b * MAX_SLOTS
+  let n = 0
+  const push = (color: number, amt: number, role: number): void => {
+    if (n >= MAX_SLOTS) return
+    const i = base + n
+    store.slotColor[i] = color
+    store.slotCount[i] = 0
+    store.slotCap[i] = Math.max(0, storageCap)
+    store.slotRole[i] = role
+    store.slotAmt[i] = Math.max(0, amt)
+    n++
+  }
+  for (let i = 0; i < inputs.length; i++) push(inputs[i]!.color, inputs[i]!.amount, ROLE_DEPOSIT)
+  for (let i = 0; i < outputs.length; i++) push(outputs[i]!.color, outputs[i]!.amount, ROLE_DRAIN)
+  // Zero any leftover slots beyond the new recipe's set so stale stock can't linger.
+  for (let k = n; k < store.slotN[b]!; k++) {
+    const i = base + k
+    store.slotColor[i] = 0
+    store.slotCount[i] = 0
+    store.slotCap[i] = 0
+    store.slotRole[i] = 0
+    store.slotAmt[i] = 0
+  }
+  store.slotN[b] = n
+  store.crafts[b] = 1
+  store.recipe[b] = recipe
+  store.craftEvery[b] = Math.max(1, craftEvery)
+  store.craftTimer[b] = 0
 }
 
 /**
@@ -740,9 +811,9 @@ export const VILLAGE_CADENCE = 60
 /** Ticks per in-game minute at 60 tps — used to convert a demand's `ratePerMin` to per-cadence units. */
 export const VILLAGE_TICKS_PER_MIN = 3600
 /** Sustained cadences of full satisfaction before a village grows a stage (10s at 60 tps). */
-const VILLAGE_GROWTH_AFTER = 600
+export const VILLAGE_GROWTH_AFTER = 600
 /** Sustained cadences of unmet demand before a village drops a stage (10s at 60 tps). */
-const VILLAGE_DECLINE_AFTER = 600
+export const VILLAGE_DECLINE_AFTER = 600
 
 /** Convert a demand's `ratePerMin` into the integer amount consumed per {@link VILLAGE_CADENCE}. */
 export function villageDemandNeed(ratePerMin: number): number {
@@ -1368,6 +1439,8 @@ export interface BuildingSnapshot {
   readonly bw: number
   readonly bh: number
   readonly crafts: number
+  /** The crafter's recipe id (0 = empty machine). Absent in pre-recipe saves → treated as 0. */
+  readonly recipe?: number
   readonly craftEvery: number
   readonly craftTimer: number
   readonly slots: readonly SlotSnapshot[]
@@ -1444,6 +1517,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       bw: store.bw[b]!,
       bh: store.bh[b]!,
       crafts: store.crafts[b]!,
+      recipe: store.recipe[b]!,
       craftEvery: store.craftEvery[b]!,
       craftTimer: store.craftTimer[b]!,
       slots,
@@ -1552,6 +1626,7 @@ export function loadGameState(
     store.bw[b] = bldg.bw
     store.bh[b] = bldg.bh
     store.crafts[b] = bldg.crafts
+    store.recipe[b] = bldg.recipe ?? 0
     store.craftEvery[b] = bldg.craftEvery
     store.craftTimer[b] = bldg.craftTimer
     store.slotN[b] = bldg.slots.length
@@ -1708,10 +1783,15 @@ export interface PlaceCrafterCommand {
   readonly h: number
   /** Color of the crafter building's footprint. */
   readonly color: number
-  /** Recipe inputs (resource colour + amount consumed per craft); empty for extraction. */
-  readonly inputs: readonly CraftFlow[]
-  /** Recipe outputs (resource colour + amount produced per craft). */
-  readonly outputs: readonly CraftFlow[]
+  /**
+   * Recipe inputs (resource colour + amount consumed per craft); empty for extraction, and omitted
+   * entirely for an empty machine placed with no recipe yet (the player sets it via `set_recipe`).
+   */
+  readonly inputs?: readonly CraftFlow[]
+  /** Recipe outputs (resource colour + amount produced per craft); omitted for an empty machine. */
+  readonly outputs?: readonly CraftFlow[]
+  /** The recipe's opaque integer id ({@link recipeTypeOf}); omitted/0 for an empty machine. */
+  readonly recipe?: number
   /** Attempt one craft every N ticks (recipe `time` / building `speed`). */
   readonly craftEvery: number
   /** Maximum units each stockpile slot can hold. */
@@ -1721,6 +1801,26 @@ export interface PlaceCrafterCommand {
    * {@link TERRAIN_NONE}/omitted for a crafter that may sit anywhere.
    */
   readonly requiresTerrainType?: number
+}
+
+/**
+ * Set (or change) the recipe of the crafter whose footprint covers (x, y). Rebuilds the crafter's
+ * stockpile slots from the recipe's `inputs`/`outputs`, resets its progress, and records the
+ * recipe id — the Factorio-style "one machine, pick its recipe" flow. Ignored if no crafter sits
+ * there. `recipe === 0` with empty flows clears it back to an idle empty machine.
+ */
+export interface SetRecipeCommand {
+  readonly type: 'set_recipe'
+  readonly x: number
+  readonly y: number
+  /** The recipe's opaque integer id ({@link recipeTypeOf}); 0 clears the machine.  */
+  readonly recipe: number
+  readonly inputs: readonly CraftFlow[]
+  readonly outputs: readonly CraftFlow[]
+  /** Attempt one craft every N ticks (recipe `time` / building `speed`). */
+  readonly craftEvery: number
+  /** Maximum units each stockpile slot can hold. */
+  readonly storageCap: number
 }
 
 /**
@@ -1756,6 +1856,7 @@ export type GameCommand =
   | PlacePortCommand
   | PlaceSplitterCommand
   | PlaceCrafterCommand
+  | SetRecipeCommand
   | SetActiveResearchCommand
   | RemoveCommand
 
@@ -1806,6 +1907,7 @@ function copyBuilding(s: BuildingStore, src: number, dst: number): void {
   s.bw[dst] = s.bw[src]!
   s.bh[dst] = s.bh[src]!
   s.crafts[dst] = s.crafts[src]!
+  s.recipe[dst] = s.recipe[src]!
   s.craftEvery[dst] = s.craftEvery[src]!
   s.craftTimer[dst] = s.craftTimer[src]!
   s.slotN[dst] = s.slotN[src]!
@@ -1950,25 +2052,54 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       })
       // Build the crafter's slots from its recipe: inputs are deposit-only (fed by input
       // ports, consumed each craft), outputs drain-only (produced each craft, pulled by
-      // output ports). Slot order is inputs then outputs.
+      // output ports). Slot order is inputs then outputs. A machine placed with no recipe yet
+      // (empty inputs+outputs) registers as an idle crafter until `set_recipe` arms it.
+      const inputs = cmd.inputs ?? []
+      const outputs = cmd.outputs ?? []
       const slots: BuildingSlot[] = []
-      for (let i = 0; i < cmd.inputs.length; i++) {
+      for (let i = 0; i < inputs.length; i++) {
         slots.push({
-          color: cmd.inputs[i]!.color,
+          color: inputs[i]!.color,
           cap: cmd.storageCap,
           role: ROLE_DEPOSIT,
-          amt: cmd.inputs[i]!.amount,
+          amt: inputs[i]!.amount,
         })
       }
-      for (let i = 0; i < cmd.outputs.length; i++) {
+      for (let i = 0; i < outputs.length; i++) {
         slots.push({
-          color: cmd.outputs[i]!.color,
+          color: outputs[i]!.color,
           cap: cmd.storageCap,
           role: ROLE_DRAIN,
-          amt: cmd.outputs[i]!.amount,
+          amt: outputs[i]!.amount,
         })
       }
-      registerBuilding(state.buildings, eid, cmd.x, cmd.y, cmd.w, cmd.h, 1, cmd.craftEvery, slots)
+      const b = registerBuilding(
+        state.buildings,
+        eid,
+        cmd.x,
+        cmd.y,
+        cmd.w,
+        cmd.h,
+        1,
+        cmd.craftEvery,
+        slots,
+      )
+      state.buildings.recipe[b] = cmd.recipe ?? 0
+      relinkUnlinkedPorts(g, state.buildings)
+      return
+    }
+    case 'set_recipe': {
+      const b = buildingAt(state.buildings, cmd.x, cmd.y)
+      if (b === NONE || !state.buildings.crafts[b]) return // nothing craftable there
+      setBuildingRecipe(
+        state.buildings,
+        b,
+        cmd.recipe,
+        cmd.inputs,
+        cmd.outputs,
+        cmd.craftEvery,
+        cmd.storageCap,
+      )
       relinkUnlinkedPorts(g, state.buildings)
       return
     }
