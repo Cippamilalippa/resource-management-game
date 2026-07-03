@@ -1,0 +1,36 @@
+[
+  {
+    "id": "scenario.abundant",
+    "type": "scenario",
+    "name": "Abundant Frontier",
+    "info": "Rich, tightly-clustered deposits and a stocked spaceport buffer — a gentle first run.",
+    "deposits": [
+      "terrain.bauxite_deposit",
+      "terrain.silica_quarry",
+      "terrain.coal_seam",
+      "terrain.titanium_deposit",
+      "terrain.rare_earth_deposit",
+      "terrain.oil_field"
+    ],
+    "patchSize": { "min": 4, "max": 5 },
+    "spread": { "min": 6, "max": 18 },
+    "startingKit": [{ "item": "item.rocket_fuel", "amount": 40 }]
+  },
+  {
+    "id": "scenario.sparse",
+    "type": "scenario",
+    "name": "Sparse Wastes",
+    "info": "Small deposits scattered far and wide, with no starting buffer — a harder setup.",
+    "deposits": [
+      "terrain.bauxite_deposit",
+      "terrain.silica_quarry",
+      "terrain.coal_seam",
+      "terrain.titanium_deposit",
+      "terrain.rare_earth_deposit",
+      "terrain.oil_field"
+    ],
+    "patchSize": { "min": 2, "max": 3 },
+    "spread": { "min": 14, "max": 30 },
+    "startingKit": []
+  }
+]

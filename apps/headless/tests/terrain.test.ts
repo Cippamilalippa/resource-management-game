@@ -1,13 +1,31 @@
 import { describe, it, expect } from 'vitest'
 import { hashState } from '@factory/engine/persistence'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
-import { buildingAt, enqueuePlaceProducer, terrainTypeOf, type GameState } from '../gameLogic.ts'
+import {
+  buildingAt,
+  enqueuePlaceProducer,
+  terrainTypeAt,
+  terrainTypeOf,
+  type GameState,
+} from '../gameLogic.ts'
 
-/** The bauxite-deposit patch the starting scene paints (corner 8,-3, 4x4). */
-const FERTILE_X = 8
-const FERTILE_Y = -3
 const FERTILE = terrainTypeOf('terrain.bauxite_deposit')
 const FOREST = terrainTypeOf('terrain.titanium_deposit')
+
+/**
+ * Find the first tile of a given terrain type in the (deterministic, seed-scattered) starting
+ * scene, scanning a bounded window around the origin. The procedural scene keeps every patch within
+ * the scenario's spread band, so this window covers them all; the scan order is fixed, so the tile
+ * it returns is stable for a given seed.
+ */
+function findTerrain(sim: Sim, type: number): { x: number; y: number } {
+  for (let y = -40; y <= 40; y++) {
+    for (let x = -40; x <= 40; x++) {
+      if (terrainTypeAt(sim.state.terrain, x, y) === type) return { x, y }
+    }
+  }
+  throw new Error(`no terrain of type ${type} in the scene`)
+}
 
 /** Whether a registered crafter building (one that runs a recipe) sits at (x, y). */
 function isProducer(state: GameState, x: number, y: number): boolean {
@@ -34,15 +52,17 @@ function placeFarm(sim: Sim, x: number, y: number, requiresTerrain: number): voi
 describe('terrain gating', () => {
   it('places a producer on matching terrain', async () => {
     const sim = await bootstrapSim(1)
-    placeFarm(sim, FERTILE_X, FERTILE_Y, FERTILE)
-    expect(isProducer(sim.state, FERTILE_X, FERTILE_Y)).toBe(true)
+    const { x, y } = findTerrain(sim, FERTILE)
+    placeFarm(sim, x, y, FERTILE)
+    expect(isProducer(sim.state, x, y)).toBe(true)
   })
 
   it('drops a producer whose required terrain does not match the ground', async () => {
     const sim = await bootstrapSim(1)
-    // The tile is fertile soil, but this producer demands forest — it must be rejected.
-    placeFarm(sim, FERTILE_X, FERTILE_Y, FOREST)
-    expect(isProducer(sim.state, FERTILE_X, FERTILE_Y)).toBe(false)
+    // The tile is a bauxite deposit, but this producer demands titanium — it must be rejected.
+    const { x, y } = findTerrain(sim, FERTILE)
+    placeFarm(sim, x, y, FOREST)
+    expect(isProducer(sim.state, x, y)).toBe(false)
   })
 
   it('drops a terrain-gated producer placed on bare ground (no terrain at all)', async () => {
@@ -72,7 +92,8 @@ describe('terrain gating', () => {
   it('is deterministic: same seed + same placements + ticks -> identical hash', async () => {
     const run = async (): Promise<string> => {
       const sim = await bootstrapSim(5)
-      placeFarm(sim, FERTILE_X, FERTILE_Y, FERTILE)
+      const { x, y } = findTerrain(sim, FERTILE)
+      placeFarm(sim, x, y, FERTILE)
       sim.scheduler.runTicks(sim.world, 300)
       return hashState(sim.world)
     }

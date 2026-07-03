@@ -13,8 +13,12 @@ import {
   enqueuePlaceSplitter,
 } from '../gameLogic.ts'
 
-/** spaceport + 6 terrain patches (96 tiles) + 6x6 orchard, before anything is placed (see scene.test.ts). */
-const BASELINE = 133
+/**
+ * These tests place their own producers on bare ground and assert exact entity counts, so they boot
+ * with an EMPTY world (`startScene: false`): the procedural starting scene is irrelevant here and
+ * its seed-varied entity count would make a fixed baseline meaningless. Baseline is therefore 0.
+ */
+const BASELINE = 0
 /** Production cadence the base-game farm/orchard use: 1 item / 30 ticks = 2 items/sec at 60 tps. */
 const PRODUCE_EVERY = 30
 /** Per-resource stockpile cap the base-game producers use. */
@@ -40,7 +44,7 @@ describe('production building', () => {
     // A lone producer with no adjacent output: every produced unit stays in the store, which
     // saturates at the cap and discards the overflow. 30 ticks/item, cap 100 -> full long
     // before 4000 ticks.
-    const sim = await bootstrapSim(1)
+    const sim = await bootstrapSim(1, { startScene: false })
     enqueuePlaceProducer(sim.world, {
       x: 20,
       y: 20,
@@ -61,7 +65,7 @@ describe('production building', () => {
   it('an adjacent output drains the store, but a belt that cannot drain backs it up to the cap', async () => {
     // A single belt tile carries the output; the emitted item has nowhere to advance, so after
     // the first emit the output tile stays occupied and the store backs up to the cap.
-    const sim = await bootstrapSim(1)
+    const sim = await bootstrapSim(1, { startScene: false })
     enqueuePlaceBelt(sim.world, { ax: 21, ay: 20, bx: 21, by: 20, color: 0x404040, moveEvery: 1 })
     enqueuePlaceProducer(sim.world, {
       x: 20,
@@ -87,7 +91,7 @@ describe('production building', () => {
     // A fast belt with an output draining the producer and an input feeding a sink at the far
     // end clears the output tile every tick, so a freshly produced unit leaves at once and the
     // store never accumulates (production runs before the drain in the same tick).
-    const sim = await bootstrapSim(1)
+    const sim = await bootstrapSim(1, { startScene: false })
     enqueuePlaceBelt(sim.world, { ax: 21, ay: 20, bx: 29, by: 20, color: 0x404040, moveEvery: 1 })
     enqueuePlaceProducer(sim.world, {
       x: 20,
@@ -124,7 +128,7 @@ describe('production building', () => {
 
   it('is deterministic: same seed + commands -> identical state hash', async () => {
     const boot = async (): Promise<Sim> => {
-      const sim = await bootstrapSim(11)
+      const sim = await bootstrapSim(11, { startScene: false })
       enqueuePlaceBelt(sim.world, {
         ax: 21,
         ay: 20,
@@ -203,7 +207,7 @@ describe('processing crafter (multi-input recipe)', () => {
   }
 
   it('consumes its inputs and accumulates its output', async () => {
-    const sim = await bootstrapSim(5)
+    const sim = await bootstrapSim(5, { startScene: false })
     bootSmelter(sim)
     sim.scheduler.runTicks(sim.world, 1000)
     const { ore, plate } = furnaceStock(sim)
@@ -216,7 +220,7 @@ describe('processing crafter (multi-input recipe)', () => {
 
   it('is deterministic: same seed + commands -> identical hash and furnace stock', async () => {
     const run = async (): Promise<Sim> => {
-      const sim = await bootstrapSim(17)
+      const sim = await bootstrapSim(17, { startScene: false })
       bootSmelter(sim)
       sim.scheduler.runTicks(sim.world, 800)
       return sim
@@ -228,7 +232,7 @@ describe('processing crafter (multi-input recipe)', () => {
   })
 
   it('a furnace with no ore delivered never crafts', async () => {
-    const sim = await bootstrapSim(5)
+    const sim = await bootstrapSim(5, { startScene: false })
     // A lone furnace, unfed: its output stays empty because inputs are never satisfied.
     enqueuePlaceCrafter(sim.world, {
       x: 26,
@@ -255,7 +259,7 @@ describe('processing crafter (multi-input recipe)', () => {
  * determinism and basic liveness of the combined systems.
  */
 async function bootKitchenSink(seed: number, ticks: number): Promise<Sim> {
-  const sim = await bootstrapSim(seed)
+  const sim = await bootstrapSim(seed, { startScene: false })
   const w = sim.world
 
   // Row 20 — producer -> output -> fast (mk3) belt -> input -> sink.

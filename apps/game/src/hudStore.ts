@@ -47,12 +47,21 @@ export interface HudProductionRow {
   readonly consumedPerSec: number
 }
 
+/** One onboarding objective, enriched with its display label (the sim only knows an opaque id). */
+export interface HudObjective {
+  readonly id: string
+  readonly label: string
+  readonly done: boolean
+}
+
 /** The full HUD snapshot the panels render. */
 export interface HudState {
   readonly research: HudResearch
   readonly villages: readonly VillageStatus[]
   readonly alerts: readonly Alert[]
   readonly production: readonly HudProductionRow[]
+  /** Guided first-objectives checklist; empty once every step is done (panel hides). */
+  readonly objectives: readonly HudObjective[]
 }
 
 /** The imperative surface the panels drive (implemented by the boot loop, which owns the world). */
@@ -66,6 +75,7 @@ const initial: HudState = {
   villages: [],
   alerts: [],
   production: [],
+  objectives: [],
 }
 
 let state: HudState = initial

@@ -38,6 +38,8 @@ const api = {
   /** Rename a manual slot in place. */
   renameSave: (id: string, name: string): Promise<SaveMeta> =>
     ipcRenderer.invoke('factory:renameSave', id, name),
+  /** Quit the application (from the main menu). */
+  quit: (): Promise<void> => ipcRenderer.invoke('factory:quit'),
 }
 
 contextBridge.exposeInMainWorld('factory', api)

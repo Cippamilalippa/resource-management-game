@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PrototypeRegistry } from '@factory/engine/data'
-import { validateContent, buildableSet, allTechIds } from '../gameLogic.ts'
+import { validateContent, buildableSet, allTechIds, scenarioList } from '../gameLogic.ts'
 
 /**
  * Register a minimal but complete, VALID content set: an item + terrain, one crafter that
@@ -190,6 +190,84 @@ describe('validateContent', () => {
       stages: [{ level: 1, population: 10, demands: [{ item: 'item.ore', ratePerMin: 0 }] }],
     })
     expect(() => validateContent(reg)).toThrow(/ratePerMin/)
+  })
+
+  it('accepts a well-formed scenario', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.default',
+      type: 'scenario',
+      name: 'Default',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      startingKit: [{ item: 'item.ore', amount: 20 }],
+    })
+    expect(() => validateContent(reg)).not.toThrow()
+  })
+
+  it('rejects a scenario deposit that references a missing terrain', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.bad',
+      type: 'scenario',
+      deposits: ['terrain.ghost'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+    })
+    expect(() => validateContent(reg)).toThrow(/terrain\.ghost/)
+  })
+
+  it('rejects a scenario with no deposits', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.empty',
+      type: 'scenario',
+      deposits: [],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+    })
+    expect(() => validateContent(reg)).toThrow(/deposits/)
+  })
+
+  it('rejects a scenario whose patchSize.min exceeds patchSize.max', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.inverted',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 6, max: 3 },
+      spread: { min: 6, max: 16 },
+    })
+    expect(() => validateContent(reg)).toThrow(/patchSize\.min/)
+  })
+
+  it('rejects a scenario starting-kit item that references a missing item', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.badkit',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      startingKit: [{ item: 'item.ghost', amount: 5 }],
+    })
+    expect(() => validateContent(reg)).toThrow(/item\.ghost/)
+  })
+})
+
+describe('scenarioList', () => {
+  it('projects scenario prototypes to { id, name, info }, ignoring other types', () => {
+    const protos = [
+      { id: 'item.x', type: 'item' },
+      { id: 'scenario.a', type: 'scenario', name: 'Alpha', info: 'first' },
+      { id: 'scenario.b', type: 'scenario' },
+    ]
+    expect(scenarioList(protos)).toEqual([
+      { id: 'scenario.a', name: 'Alpha', info: 'first' },
+      // Missing name/info fall back to the id / empty string.
+      { id: 'scenario.b', name: 'scenario.b', info: '' },
+    ])
   })
 })
 

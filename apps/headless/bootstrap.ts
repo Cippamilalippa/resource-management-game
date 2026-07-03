@@ -66,6 +66,11 @@ export interface BootstrapOptions {
    * origin a save is loaded into (see {@link Sim.restore}), so a load never doubles the scene.
    */
   readonly startScene?: boolean
+  /**
+   * Which starting scenario to lay out (a `scenario.*` id). Omitted → the base mod's default
+   * scenario. Only consulted when `startScene` is true.
+   */
+  readonly scenario?: string
 }
 
 /**
@@ -79,7 +84,7 @@ export interface BootstrapOptions {
  */
 export async function bootstrapSim(
   seed: number,
-  { tickRate = 60, startScene = true }: BootstrapOptions = {},
+  { tickRate = 60, startScene = true, scenario }: BootstrapOptions = {},
 ): Promise<Sim> {
   const registry = new PrototypeRegistry()
   const sources = await discoverModSources(modsDir())
@@ -107,7 +112,7 @@ export async function bootstrapSim(
     importScript,
   )
   if (!ready) throw new Error('base mod did not publish game state (base:ready)')
-  if (startScene) ready.newGame()
+  if (startScene) ready.newGame(scenario === undefined ? undefined : { scenario })
 
   const state = ready.state
   const scheduler = new Scheduler([counterSystem, ...modSystems], { tickRate })

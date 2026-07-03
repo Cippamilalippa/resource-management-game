@@ -24,7 +24,7 @@ import {
   type GameState,
   type GameStateSnapshot,
 } from './sim.ts'
-import { spawnScene } from './scene.ts'
+import { spawnScene, type SceneConfig } from './scene.ts'
 
 /**
  * The save shape the {@link BaseReady.load} closure consumes — structurally the engine's
@@ -46,8 +46,12 @@ export interface LoadableSnapshot {
  */
 export interface BaseReady {
   readonly state: GameState
-  /** Populate an empty state with the clean starting scene (village, orchard, terrain). */
-  readonly newGame: () => void
+  /**
+   * Populate an empty state with a starting scene (village, orchard, deposits). The optional
+   * config picks the scenario to lay out; omitting it uses the default scenario, so older callers
+   * (and the load path) keep working — the signature stays additively backwards-compatible.
+   */
+  readonly newGame: (config?: SceneConfig) => void
   /** Restore a saved state: re-spawn the snapshot's entities and rebuild the stores in place. */
   readonly load: (snapshot: LoadableSnapshot) => void
 }
@@ -59,7 +63,7 @@ export default function init(api: ModApi): void {
   // (a new game or a loaded save); `init` itself spawns nothing, so the sim starts empty.
   const ready: BaseReady = {
     state,
-    newGame: () => spawnScene(api, state),
+    newGame: (config) => spawnScene(api, state, config),
     load: (snapshot) => {
       const blob = snapshot.modState.base as GameStateSnapshot | undefined
       if (blob === undefined) throw new Error('save has no base-mod state to load')

@@ -136,6 +136,39 @@ function validateVillageShapes(registry: PrototypeRegistry): void {
   for (const village of registry.listByType('village')) villageDemands(village)
 }
 
+/** Read a `{ min, max }` positive-integer range off a scenario field (min <= max). */
+function intRange(proto: Prototype, field: string): { min: number; max: number } {
+  const raw = proto[field]
+  if (typeof raw !== 'object' || raw === null)
+    fail(`${proto.id}: "${field}" must be a { min, max }`)
+  const r = raw as Record<string, unknown>
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
+  if (!ok(r.min) || !ok(r.max)) fail(`${proto.id}: ${field}.min/max must be positive integers`)
+  if ((r.min as number) > (r.max as number))
+    fail(`${proto.id}: ${field}.min must be <= ${field}.max`)
+  return { min: r.min as number, max: r.max as number }
+}
+
+/** The `{ item, amount }[]` starting-kit stock a scenario grants the village at spawn. */
+function startingKit(proto: Prototype): { item: string; amount: number }[] {
+  return flows(proto, 'startingKit')
+}
+
+/**
+ * Validate every scenario prototype's shape: a non-empty terrain `deposits` list, positive-integer
+ * `patchSize`/`spread` ranges, and a well-formed `startingKit` flow list. The starting scene
+ * ({@link import('./scene.ts')}) reads these to lay out a seed-varied but reproducible world.
+ */
+function validateScenarioShapes(registry: PrototypeRegistry): void {
+  for (const s of registry.listByType('scenario')) {
+    const deposits = idList(s, 'deposits')
+    if (deposits.length === 0) fail(`${s.id}: scenario needs at least one "deposits" terrain id`)
+    intRange(s, 'patchSize')
+    intRange(s, 'spread')
+    startingKit(s)
+  }
+}
+
 // --- graph / reference rules ------------------------------------------------
 
 /** Every category some crafter advertises. */
@@ -188,6 +221,7 @@ export function validateContent(registry: PrototypeRegistry): void {
   validateTechShapes(registry)
   validateCrafterShapes(registry)
   validateVillageShapes(registry)
+  validateScenarioShapes(registry)
 
   validateReferences(registry, [
     {
@@ -228,6 +262,18 @@ export function validateContent(registry: PrototypeRegistry): void {
       select: (v) => villageDemands(v).map((d) => d.item),
       expectType: 'item',
       label: 'demand',
+    },
+    {
+      type: 'scenario',
+      select: (s) => idList(s, 'deposits'),
+      expectType: 'terrain',
+      label: 'deposit',
+    },
+    {
+      type: 'scenario',
+      select: (s) => startingKit(s).map((k) => k.item),
+      expectType: 'item',
+      label: 'startingKit',
     },
   ])
 
@@ -295,6 +341,33 @@ export function buildableSet(
     if (!gated.has(p.id) || unlocked.has(p.id)) buildable.add(p.id)
   }
   return buildable
+}
+
+/** One selectable starting scenario, as the new-game screen shows it (content → UI, one-way). */
+export interface ScenarioInfo {
+  readonly id: string
+  readonly name: string
+  readonly info: string
+}
+
+/**
+ * Every authored `scenario` prototype as a `{ id, name, info }` list for the new-game picker.
+ * Pure (works on a registry's `list()` or a UI-side prototype copy); the host passes the chosen
+ * id back into the base mod's new-game closure, which lays out the seed-varied scene from it.
+ */
+export function scenarioList(
+  prototypes: readonly { id: string; type: string; name?: unknown; info?: unknown }[],
+): ScenarioInfo[] {
+  const out: ScenarioInfo[] = []
+  for (const p of prototypes) {
+    if (p.type !== 'scenario') continue
+    out.push({
+      id: p.id,
+      name: typeof p.name === 'string' ? p.name : p.id,
+      info: typeof p.info === 'string' ? p.info : '',
+    })
+  }
+  return out
 }
 
 /** Every technology id in `prototypes` (the "everything researched" seed used until a research loop lands). */

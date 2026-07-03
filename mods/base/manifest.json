@@ -9,7 +9,8 @@
     "prototypes/recipes.json",
     "prototypes/technologies.json",
     "prototypes/resources.json",
-    "prototypes/terrains.json"
+    "prototypes/terrains.json",
+    "prototypes/scenarios.json"
   ],
   "scripts": ["scripts/main.ts"]
 }

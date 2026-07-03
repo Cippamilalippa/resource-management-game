@@ -246,9 +246,6 @@ export function HudPanels(): React.JSX.Element {
 
   return (
     <div className="hud-rail-wrap">
-      {open === 'research' && <ResearchPanel />}
-      {open === 'villages' && <VillagePanel />}
-      {open === 'production' && <ProductionPanel />}
       <div className="hud-rail">
         {TABS.map((t) => (
           <button
@@ -263,6 +260,9 @@ export function HudPanels(): React.JSX.Element {
           </button>
         ))}
       </div>
+      {open === 'research' && <ResearchPanel />}
+      {open === 'villages' && <VillagePanel />}
+      {open === 'production' && <ProductionPanel />}
     </div>
   )
 }

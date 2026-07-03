@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx index.ts",
+    "kpi": "tsx kpi-run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

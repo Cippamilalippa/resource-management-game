@@ -52,6 +52,8 @@ ipcMain.handle('factory:saveGame', (_e, req: SaveRequest) => saveGame(req))
 ipcMain.handle('factory:loadGame', (_e, id: string) => loadGame(id))
 ipcMain.handle('factory:deleteSave', (_e, id: string) => deleteSave(id))
 ipcMain.handle('factory:renameSave', (_e, id: string, name: string) => renameSave(id, name))
+// Quit from the main menu. Fire-and-forget on the renderer side; the app tears down here.
+ipcMain.handle('factory:quit', () => app.quit())
 
 async function createWindow(): Promise<void> {
   const win = new BrowserWindow({

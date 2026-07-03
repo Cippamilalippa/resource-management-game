@@ -11,8 +11,12 @@ import {
   MAX_SLOTS,
 } from '../gameLogic.ts'
 
-/** spaceport + 6 terrain patches (96 tiles) + 6x6 orchard, before anything is placed. */
-const BASELINE = 133
+/**
+ * These belt/splitter tests build their own network and assert exact entity counts, so they boot
+ * with an EMPTY world (`startScene: false`) — the procedural starting scene is irrelevant here and
+ * its seed-varied entity count would make a fixed baseline meaningless. Baseline is therefore 0.
+ */
+const BASELINE = 0
 /** A horizontal belt of 9 tiles, from (2,0) to (10,0) — clear of the origin village. */
 const BELT_LEN = 9
 /** Resource colour the test source produces and the test sink accepts. */
@@ -20,7 +24,7 @@ const SRC = 0xffaa00
 
 /** Boot a sim and lay one horizontal 9-tile belt at y=0 from x=2 (moves every tick). */
 async function bootWithBelt(seed: number): Promise<Sim> {
-  const sim = await bootstrapSim(seed)
+  const sim = await bootstrapSim(seed, { startScene: false })
   enqueuePlaceBelt(sim.world, { ax: 2, ay: 0, bx: 10, by: 0, color: 0x404040, moveEvery: 1 })
   return sim
 }
@@ -132,7 +136,7 @@ describe('belt', () => {
 
   it('carries items across the join of two separately-drawn collinear belts', async () => {
     // Two runs that meet at (6,0)/(7,0): items must cross the seam, not dead-end.
-    const sim = await bootstrapSim(1)
+    const sim = await bootstrapSim(1, { startScene: false })
     enqueuePlaceBelt(sim.world, { ax: 2, ay: 0, bx: 6, by: 0, color: 0x404040, moveEvery: 1 })
     enqueuePlaceBelt(sim.world, { ax: 7, ay: 0, bx: 10, by: 0, color: 0x404040, moveEvery: 1 })
     placeSource(sim, 2, 0)
@@ -165,7 +169,7 @@ describe('belt', () => {
  * inputs). 9 belt tiles total. With no drains, a working round-robin fills BOTH branches.
  */
 async function bootSplitter(seed: number, ticks: number): Promise<Sim> {
-  const sim = await bootstrapSim(seed)
+  const sim = await bootstrapSim(seed, { startScene: false })
   enqueuePlaceBelt(sim.world, { ax: 2, ay: 0, bx: 4, by: 0, color: 0x404040, moveEvery: 1 })
   enqueuePlaceBelt(sim.world, { ax: 4, ay: -1, bx: 4, by: -3, color: 0x404040, moveEvery: 1 })
   enqueuePlaceBelt(sim.world, { ax: 4, ay: 1, bx: 4, by: 3, color: 0x404040, moveEvery: 1 })

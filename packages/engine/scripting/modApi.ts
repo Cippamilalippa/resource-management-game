@@ -53,6 +53,19 @@ export interface ModApi {
 
   /** Namespaced logging so mod output is attributable. */
   log(...args: unknown[]): void
+
+  /**
+   * Next float in [0, 1) from the world's seeded RNG. The sanctioned source of randomness
+   * for a mod — a mod must never call `Math.random` (that would break determinism, and hence
+   * save/load). Advances the shared RNG stream, so it stays reproducible for a given seed.
+   */
+  random(): number
+
+  /**
+   * Integer in [min, max] inclusive from the world's seeded RNG (see {@link random}). Convenience
+   * over {@link random} for the common grid/layout case (e.g. jittering a scene's tile positions).
+   */
+  randomInt(min: number, max: number): number
 }
 
 /** Everything the host must supply to build a {@link ModApi} for a mod. */
@@ -78,5 +91,7 @@ export function createModApi(modId: string, host: ModApiHost): ModApi {
     on: (event, listener) => host.world.events.on(event, listener),
     emit: (event, payload) => host.world.events.emit(event, payload),
     log: (...args) => console.log(`[mod:${modId}]`, ...args),
+    random: () => host.world.rng.next(),
+    randomInt: (min, max) => host.world.rng.nextInt(min, max),
   }
 }

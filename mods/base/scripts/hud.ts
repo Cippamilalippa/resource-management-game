@@ -191,6 +191,44 @@ export function collectAlerts(state: GameState): Alert[] {
   return alerts
 }
 
+/** The ordered onboarding objectives that guide a new player through the core loop. */
+export type ObjectiveId = 'place_crafter' | 'place_belt' | 'place_lab' | 'select_research'
+
+/** One onboarding objective and whether the current world already satisfies it. */
+export interface ObjectiveStatus {
+  readonly id: ObjectiveId
+  readonly done: boolean
+}
+
+/**
+ * Evaluate the guided first-objectives checklist purely from {@link GameState} — no stored progress,
+ * so it always reflects the live world (a step un-ticks if the player deletes what satisfied it).
+ * The order mirrors the core loop the onboarding teaches: place a crafter → run a belt → build a lab
+ * → pick a technology to research. The host maps each id to its label/hint (the sim stays
+ * string-agnostic). Read-only and allocation-light; runs off the hot path like the other selectors.
+ */
+export function gameObjectives(state: GameState): ObjectiveStatus[] {
+  let hasCrafter = false
+  for (let b = 0; b < state.buildings.count; b++) {
+    if (state.buildings.crafts[b]) {
+      hasCrafter = true
+      break
+    }
+  }
+  const hasBelt = state.grid.count > 0
+  const hasLab = state.research.labCount > 0
+  // "Chose research" is satisfied by an active tech or any completed one (a fast research could
+  // finish before the panel next refreshes, so completion counts too).
+  const choseResearch =
+    state.research.activeTech !== RESEARCH_NONE || state.research.completed.length > 0
+  return [
+    { id: 'place_crafter', done: hasCrafter },
+    { id: 'place_belt', done: hasBelt },
+    { id: 'place_lab', done: hasLab },
+    { id: 'select_research', done: choseResearch },
+  ]
+}
+
 /** Installed production/consumption capacity for one resource colour, in units per tick. */
 export interface ProductionFlow {
   readonly color: number

@@ -139,10 +139,35 @@ React panels read. Research is now player-driven — the host-side auto-select s
 
 ## M5 — New-game & onboarding flow
 
-- [ ] Main menu (new game / continue / load / quit).
-- [ ] New-game setup (seed entry, starting scenario selection).
-- [ ] Deterministic starting scene from the chosen seed (spawn scene + starting kit).
-- [ ] Tutorial hints / guided first objectives (build first crafter → belt → lab → research).
+_The app now boots into a menu shell rather than straight into a game: an `appStore` phase
+(`menu` / `setup` / `playing`) gates the overlay, the frame loop only advances the sim while
+`playing`, and starting/loading a session flips it. The starting scene is now **procedural** —
+seed + scenario drive a reproducible layout via a new additive `ModApi.random`/`randomInt` (the
+world's seeded RNG), so mods keep their no-`Math.random` guarantee._
+
+- [x] Main menu ([MainMenu.tsx](../../apps/game/src/MainMenu.tsx)): new game / continue (loads the
+      most recent slot) / load (opens [SaveMenu.tsx](../../apps/game/src/SaveMenu.tsx) in a load-only
+      mode) / quit (a new `factory:quit` IPC). Continue/Load gate on save availability.
+- [x] New-game setup ([NewGameSetup.tsx](../../apps/game/src/NewGameSetup.tsx)): seed entry (+ a
+      randomize button) and starting-scenario selection, driven from a data-driven scenario registry
+      ([scenarios.json](../../mods/base/prototypes/scenarios.json), validated by `validateContent`;
+      the picker reads `scenarioList`).
+- [x] Deterministic starting scene from the chosen seed + scenario
+      ([scene.ts](../../mods/base/scripts/scene.ts)): deposits scattered within the scenario's
+      size/spread bands via the seeded RNG (kept clear of the village/orchard), plus an optional
+      per-scenario starting kit granted to the village. Threaded through `SimOrigin`/`createSim`
+      (renderer) and `BootstrapOptions.scenario` (headless), both via the base mod's `newGame(config)`
+      closure. Two scenarios authored (`scenario.abundant`, `scenario.sparse`).
+- [x] Guided first objectives ([Objectives.tsx](../../apps/game/src/Objectives.tsx)): an ordered,
+      self-hiding checklist (place a machine → belt → lab → choose research) derived read-only from
+      `GameState` (`gameObjectives` in [hud.ts](../../mods/base/scripts/hud.ts)) — stateless, so it
+      always reflects the live world and needs no persistence.
+- [x] **Test:** procedural-scene determinism (same seed + scenario → identical snapshot hash, before
+      and after ticks; varies with seed and scenario) in
+      [scene.test.ts](../../apps/headless/tests/scene.test.ts); scenario validation +
+      `scenarioList` in [content.test.ts](../../apps/headless/tests/content.test.ts); `gameObjectives`
+      in [hud.test.ts](../../apps/headless/tests/hud.test.ts); `ModApi.random`/`randomInt` contract in
+      [modApi.test.ts](../../packages/engine/tests/modApi.test.ts).
 
 ## M6 — Feedback & polish
 
@@ -157,8 +182,21 @@ _Two instruments: [`apps/balance`](../../apps/balance/README.md) (`pnpm balance`
 **static** economy shape — raw costs, cost curve, machine ratios — and the headless runner
 for the **dynamic** KPIs of a played-out seed. See [economy.md §8](./economy.md)._
 
-- [ ] Headless scenario runner that reports economy KPIs (time-to-first-research,
-      village growth curve, bottlenecks) for a seed set.
+- [~] Headless scenario runner that reports economy KPIs (time-to-first-research,
+  village growth curve, bottlenecks) for a seed set. _(The sampling/report harness is in —
+  [`pnpm kpi`](../../apps/headless/kpi-run.ts) boots a seed, runs it while sampling the
+  read-only HUD selectors at a fixed cadence, and folds the curve into a `KpiReport`
+  (time-to-first-research, peak/final village stage, recurring bottlenecks). Pure read-only
+  observer: chunked sampling is byte-identical to one long run — covered by
+  [kpi.test.ts](../../apps/headless/tests/kpi.test.ts). The **seed-set sweep** is now in too:
+  `pnpm kpi <s0,s1,…>` runs `runKpiSweep` across the seeds and folds the per-seed reports into a
+  `KpiSweepReport` — cross-seed min/max/mean of each KPI plus the bottlenecks shared across seeds,
+  ranked by how many seeds hit them. It's reproducible from the boot + seeds + cadence, and takes
+  an optional per-seed `drive` hook the authored playthrough will plug into. **Still to come:** an
+  authored played-out scenario so the numbers reflect a real factory, not the do-nothing baseline.
+  This needs a hand-routed full-chain factory (the Spaceport village demands `rocket_fuel` even at
+  stage 1, so there is no cheap sustaining chain — every KPI-moving factory sits behind research +
+  a multi-tier chain across the seed-scattered deposits), so it's its own focused build.)_
 - [ ] Tune recipe rates / tech costs / village demand against those KPIs.
 - [ ] Full playthrough of the slice; capture friction; iterate.
 - [ ] **Gate:** verification gate green + a clean end-to-end play session → slice shippable.

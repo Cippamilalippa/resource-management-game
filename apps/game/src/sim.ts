@@ -42,12 +42,13 @@ export interface ClientSim {
  * (`startScene` + `restore`) so both hosts drive the base mod's new-game/load closures identically.
  */
 export type SimOrigin =
-  { readonly kind: 'new' } | { readonly kind: 'load'; snapshot: WorldSnapshot }
+  | { readonly kind: 'new'; readonly seed: number; readonly scenario: string }
+  | { readonly kind: 'load'; snapshot: WorldSnapshot }
 
 /** The subset of the base mod's `base:ready` handle the host drives (typed loosely, as elsewhere). */
 interface BaseReadyHandle {
   state: GameState
-  newGame: () => void
+  newGame: (config?: { scenario?: string }) => void
   load: (snapshot: WorldSnapshot) => void
 }
 
@@ -120,12 +121,11 @@ const resolveBundledScript: ScriptResolver = async (source, path): Promise<Scrip
 export async function createSim(
   prototypes: readonly ClientPrototype[],
   discovered: readonly DiscoveredModInfo[] = [],
-  origin: SimOrigin = { kind: 'new' },
-  seed = 1,
+  origin: SimOrigin = { kind: 'new', seed: 1, scenario: 'scenario.abundant' },
 ): Promise<ClientSim> {
   // A loaded save recreates its recorded seed so the RNG stream continues identically; a new
-  // game uses the caller's seed. `restore` below then fast-forwards the clock/RNG to match.
-  const world = createGameWorld(origin.kind === 'load' ? origin.snapshot.seed : seed)
+  // game uses the caller's chosen seed. `restore` below then fast-forwards the clock/RNG to match.
+  const world = createGameWorld(origin.kind === 'load' ? origin.snapshot.seed : origin.seed)
 
   const byId = new Map(prototypes.map((p) => [p.id, p]))
   const registry = new InspectRegistry()
@@ -147,7 +147,7 @@ export async function createSim(
       world.rng.setState(origin.snapshot.rngState)
       ready.load(origin.snapshot)
     } else {
-      ready.newGame()
+      ready.newGame({ scenario: origin.scenario })
     }
   })
   world.events.on('base:spawn', (payload) => {

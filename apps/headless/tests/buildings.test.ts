@@ -289,14 +289,28 @@ describe('removing objects', () => {
 
   it('leaves passive terrain untouched (a deposit cannot be deleted)', async () => {
     const sim = await bootstrapSim(1)
-    // (8, -3) is the corner of the bauxite-deposit patch spawned by the scene.
-    const before = terrainTypeAt(sim.state.terrain, 8, -3)
+    // Find any deposit tile the (procedural) scene painted — its position varies with the seed, so
+    // scan for the first non-empty terrain tile rather than assuming a fixed patch corner.
+    let dx = 0
+    let dy = 0
+    let before = 0
+    outer: for (let y = -40; y <= 40; y++) {
+      for (let x = -40; x <= 40; x++) {
+        const t = terrainTypeAt(sim.state.terrain, x, y)
+        if (t !== 0) {
+          dx = x
+          dy = y
+          before = t
+          break outer
+        }
+      }
+    }
     expect(before).not.toBe(0)
-    enqueueRemove(sim.world, { x: 8, y: -3 })
+    enqueueRemove(sim.world, { x: dx, y: dy })
     sim.scheduler.runTicks(sim.world, 1)
     // Terrain is in neither store, so the remove is a no-op: the soil is still there.
-    expect(terrainTypeAt(sim.state.terrain, 8, -3)).toBe(before)
-    expect(buildingAt(sim.state.buildings, 8, -3)).toBe(-1)
+    expect(terrainTypeAt(sim.state.terrain, dx, dy)).toBe(before)
+    expect(buildingAt(sim.state.buildings, dx, dy)).toBe(-1)
   })
 
   it('is deterministic across a build-then-remove sequence', async () => {

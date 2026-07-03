@@ -31,7 +31,7 @@ packages/
   engine/      the generic engine — knows NOTHING game-specific
     core/        bitecs world, fixed-timestep scheduler, event bus, seeded RNG, components
     data/        prototype registry + zod schema validation
-    scripting/   the stable mod API surface (registerSystem/spawn/despawn/on/emit/…)
+    scripting/   the stable mod API surface (registerSystem/spawn/despawn/on/emit/random/…)
     render/      PixiJS renderer: reads sim state, interpolates, draws; never writes
     persistence/ deterministic (de)serialization + FNV-1a state hashing
     modloader/   mod manifest shape + dependency resolution + data merge + script execution
@@ -57,9 +57,10 @@ all times. Whatever the base game can do, a modder can too.
 
 The base game reaches the engine **only** through the stable `ModApi`: its
 `scripts/main.ts` `init(api)` registers the per-tick systems (`api.registerSystem`),
-creates and spawns entities (`api.spawn`/`api.despawn`), and hands the host a read-only
-state handle for rendering/inspection via an `api.emit('base:ready', …)` event — never by
-importing engine internals. Both hosts run it through the one `runModScripts` seam: the
+creates and spawns entities (`api.spawn`/`api.despawn`), draws any randomness from the
+world's seeded RNG (`api.random`/`api.randomInt` — never `Math.random`, so determinism
+holds), and hands the host a read-only state handle for rendering/inspection via an
+`api.emit('base:ready', …)` event — never by importing engine internals. Both hosts run it through the one `runModScripts` seam: the
 headless runner dynamic-imports the script; the Electron renderer loads a Vite-bundled
 copy. Each mod is a small pnpm workspace package so its scripts resolve `@factory/engine`
 and are typechecked by `pnpm -r typecheck`.

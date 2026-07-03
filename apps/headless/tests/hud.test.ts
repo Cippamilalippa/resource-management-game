@@ -12,6 +12,7 @@ import {
   researchProgress,
   collectAlerts,
   productionFlows,
+  gameObjectives,
   VILLAGE_GROWTH_AFTER,
   VILLAGE_DECLINE_AFTER,
   type GameState,
@@ -200,5 +201,49 @@ describe('productionFlows', () => {
       { color: GRAIN, cap: 1000, role: ROLE_DEPOSIT | ROLE_DRAIN, amt: 0 },
     ])
     expect(productionFlows(state)).toEqual([])
+  })
+})
+
+describe('gameObjectives', () => {
+  it('reports the ordered checklist, all incomplete on a fresh state', () => {
+    const objectives = gameObjectives(createGameState())
+    expect(objectives.map((o) => o.id)).toEqual([
+      'place_crafter',
+      'place_belt',
+      'place_lab',
+      'select_research',
+    ])
+    expect(objectives.every((o) => !o.done)).toBe(true)
+  })
+
+  it('ticks off each step as the world satisfies it', () => {
+    const state = createGameState()
+    crafter(state, 1, 0, 0, 10, 1, 1) // a crafter building → place_crafter
+    state.grid.count = 1 // a belt tile exists → place_belt
+    registerResearchLab(state.research, 5, 5) // a lab → place_lab
+    state.research.activeTech = 123 // an active technology → select_research
+    const done = Object.fromEntries(gameObjectives(state).map((o) => [o.id, o.done]))
+    expect(done).toEqual({
+      place_crafter: true,
+      place_belt: true,
+      place_lab: true,
+      select_research: true,
+    })
+  })
+
+  it('counts a completed technology as chosen research even when idle', () => {
+    const state = createGameState()
+    expect(state.research.activeTech).toBe(RESEARCH_NONE)
+    state.research.completed.push(42)
+    const sel = gameObjectives(state).find((o) => o.id === 'select_research')!
+    expect(sel.done).toBe(true)
+  })
+
+  it('un-ticks a step if what satisfied it is gone (stateless from world)', () => {
+    const state = createGameState()
+    state.grid.count = 2
+    expect(gameObjectives(state).find((o) => o.id === 'place_belt')!.done).toBe(true)
+    state.grid.count = 0
+    expect(gameObjectives(state).find((o) => o.id === 'place_belt')!.done).toBe(false)
   })
 })

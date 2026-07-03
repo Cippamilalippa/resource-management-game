@@ -14,6 +14,7 @@ import { buildStore, type BuildItem } from './buildStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
 import { saveStore, type SaveController } from './saveStore.ts'
+import { appStore, type AppController } from './appStore.ts'
 import { simControlStore } from './simControlStore.ts'
 import { hudStore, type HudController, type HudResearch, type HudTech } from './hudStore.ts'
 import { buildMachineIndex, type MachineIndex } from './machines.ts'
@@ -29,6 +30,9 @@ import {
   researchProgress,
   collectAlerts,
   productionFlows,
+  scenarioList,
+  gameObjectives,
+  type ObjectiveId,
 } from './gameLogic.ts'
 import { buildIconTextures, resourceIconTextures } from './iconTextures.ts'
 import { setResources } from './resources.ts'
@@ -201,6 +205,22 @@ async function loadContent(): Promise<{
   }
 }
 
+/** The starting scenario used for a one-click in-game restart (the menu flow picks one explicitly). */
+const DEFAULT_SCENARIO = 'scenario.abundant'
+
+/** A random uint32 seed. Host UI only — it merely *seeds* the deterministic sim RNG. */
+function randomSeed(): number {
+  return Math.floor(Math.random() * 0xffffffff) >>> 0
+}
+
+/** Display labels for the guided first-objectives checklist (the sim tracks only opaque ids). */
+const OBJECTIVE_LABELS: Record<ObjectiveId, string> = {
+  place_crafter: 'Place a machine (mine or crafter)',
+  place_belt: 'Lay a conveyor belt',
+  place_lab: 'Build a research lab',
+  select_research: 'Choose a technology to research',
+}
+
 async function boot(): Promise<void> {
   // React overlay.
   const overlay = document.getElementById('overlay')!
@@ -297,9 +317,13 @@ async function boot(): Promise<void> {
       serialize: sim.serialize,
     }
     await refreshBuildBar()
+    // A live session is on screen now — leave the menu/setup shells for the running game.
+    appStore.set({ phase: 'playing' })
   }
 
-  await startSession({ kind: 'new' })
+  // Boot into the main menu rather than straight into a game: the player picks New Game / Continue
+  // / Load. The scenario list drives the new-game setup screen; `hasSaves` gates Continue/Load.
+  appStore.set({ scenarios: scenarioList(prototypes), unavailable: !window.factory })
 
   // ── HUD (research / village / alerts / production) ───────────────────────────────────────────
   // Assemble the research view-model: the sim tracks only integer tech ids, so enrich each with its
@@ -368,7 +392,10 @@ async function boot(): Promise<void> {
   }
   const refreshSaves = async (): Promise<void> => {
     if (!bridge) return
-    saveStore.set({ saves: await bridge.listSaves() })
+    const saves = await bridge.listSaves()
+    saveStore.set({ saves })
+    // The main menu enables Continue/Load only when at least one slot exists on disk.
+    appStore.set({ hasSaves: saves.length > 0 })
   }
   /** Restore a slot into a freshly built session and mark it active. */
   const loadMeta = async (meta: SaveMeta): Promise<void> => {
@@ -441,31 +468,84 @@ async function boot(): Promise<void> {
       }),
     newGame: () =>
       withBusy(async () => {
-        await startSession({ kind: 'new' })
+        // A one-click in-game restart: fresh random seed + the default scenario (the menu's New
+        // Game flow lets the player pick both explicitly).
+        await startSession({ kind: 'new', seed: randomSeed(), scenario: DEFAULT_SCENARIO })
         saveStore.set({ open: false, activeId: null })
         flashToast('New game')
       }),
   }
   saveStore.setController(controller)
 
-  // Autosave on a cadence, and best-effort on quit. Rotates through a small ring of `auto` slots
-  // (the main process prunes older ones). Skipped while the menu is open (nothing is advancing).
-  const AUTOSAVE_MS = 3 * 60 * 1000
+  // Best-effort autosave of the live session into a rotating `auto` slot (the main process prunes
+  // older ones). Shared by the cadence timer, the quit/back-to-menu paths, and page unload.
   const autosave = async (): Promise<void> => {
     if (!bridge || !session) return
     await bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
     await refreshSaves()
   }
+
+  // ── Main-menu / new-game controller ──────────────────────────────────────────────────────────
+  // Drives the top-level shells (menu → setup → play). Starting a session flips the phase to
+  // 'playing' inside startSession; returning to the menu just changes the phase (the session, if
+  // any, stays built but paused behind the menu — the frame loop stops advancing it below).
+  const appController: AppController = {
+    showSetup: () => appStore.set({ phase: 'setup' }),
+    backToMenu: () =>
+      withBusy(async () => {
+        // Best-effort autosave so Continue resumes exactly where you left, then drop to the menu.
+        await autosave()
+        saveStore.set({ open: false })
+        appStore.set({ phase: 'menu' })
+      }),
+    startNew: (seed, scenario) =>
+      withBusy(async () => {
+        await startSession({ kind: 'new', seed, scenario })
+        saveStore.set({ activeId: null })
+      }),
+    continueGame: () =>
+      withBusy(async () => {
+        if (!bridge) return
+        const saves = await bridge.listSaves()
+        // `listSaves` returns newest-first; Continue restores the most recent slot.
+        const latest = saves[0]
+        if (!latest) {
+          saveStore.set({ error: 'No saves to continue.' })
+          return
+        }
+        await loadMeta(latest)
+      }),
+    openLoad: () => {
+      saveStore.set({ open: true, error: null })
+      void withBusy(refreshSaves)
+    },
+    quit: () =>
+      withBusy(async () => {
+        // Best-effort autosave before tearing down, rather than relying on `beforeunload` firing
+        // during Electron shutdown.
+        await autosave()
+        if (bridge) void bridge.quit()
+      }),
+  }
+  appStore.setController(appController)
+  // Populate the menu's save availability up-front (Continue/Load stay disabled until a slot exists).
+  void withBusy(refreshSaves)
+
+  // Autosave on a cadence. Skipped while the save menu is open or we're not in play (nothing is
+  // advancing then, so the last cadence save already captured the state).
+  const AUTOSAVE_MS = 3 * 60 * 1000
   setInterval(() => {
-    if (!saveStore.get().open) void autosave()
+    if (!saveStore.get().open && appStore.get().phase === 'playing') void autosave()
   }, AUTOSAVE_MS)
   globalThis.addEventListener('beforeunload', () => {
     // Fire-and-forget: the page is going away, so we can't await the IPC round-trip.
     if (bridge && session) void bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
   })
 
-  // Global hotkeys: F5 quicksave, F9 quickload, Esc toggles the menu. Ignored while typing in a
-  // field (e.g. the save-name input) so the keys reach the input instead.
+  // Global hotkeys: F5 quicksave, F9 quickload, F10 toggles the save overlay. Esc is reserved for
+  // deselecting a build tool (owned by BuildBar) — here it only *closes* the overlay if it is open,
+  // never opens it, so it stays free to deselect. Ignored while typing in a field (e.g. the
+  // save-name input) so the keys reach the input instead.
   globalThis.addEventListener('keydown', (e) => {
     const target = e.target as HTMLElement | null
     const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
@@ -475,10 +555,19 @@ async function boot(): Promise<void> {
     } else if (e.key === 'F9') {
       e.preventDefault()
       void controller.quickLoad()
-    } else if (e.key === 'Escape' && !typing) {
+    } else if (e.key === 'F10') {
       e.preventDefault()
+      // Toggle the in-game save overlay while a session is on screen; the menu/setup shells own
+      // their own dismissal, so it is inert there.
+      if (appStore.get().phase !== 'playing') return
       if (saveStore.get().open) controller.close()
       else controller.open()
+    } else if (e.key === 'Escape' && !typing) {
+      // Close the overlay if it's open; otherwise leave Esc to BuildBar (deselect the build tool).
+      if (appStore.get().phase === 'playing' && saveStore.get().open) {
+        e.preventDefault()
+        controller.close()
+      }
     }
   })
 
@@ -514,12 +603,17 @@ async function boot(): Promise<void> {
       return
     }
 
-    // The sim pauses while the save menu is open OR the player paused playback; we stop advancing
-    // but keep drawing a frozen frame so the paused world stays on screen (and resetting `last`
-    // above avoids a huge delta jump on resume). Otherwise the speed multiplier scales real frame
-    // time before it reaches the fixed-timestep scheduler — the sim stays deterministic, it just
-    // runs more or fewer fixed ticks per real second.
-    if (saveStore.get().open || simControlStore.get().paused) {
+    // The sim pauses while the save menu is open, the player paused playback, OR we're back in the
+    // main menu / setup shell (phase !== 'playing'); we stop advancing but keep drawing a frozen
+    // frame so the paused world stays on screen (and resetting `last` above avoids a huge delta jump
+    // on resume). Otherwise the speed multiplier scales real frame time before it reaches the
+    // fixed-timestep scheduler — the sim stays deterministic, it just runs more or fewer fixed ticks
+    // per real second.
+    if (
+      saveStore.get().open ||
+      simControlStore.get().paused ||
+      appStore.get().phase !== 'playing'
+    ) {
       renderer.render(sess.world, lastAlpha)
     } else {
       // Belts step a whole tile per move-cycle; interpolate across the cycle (not the tick)
@@ -555,6 +649,13 @@ async function boot(): Promise<void> {
           color: f.color,
           producedPerSec: f.produced * DEFAULT_TICK_RATE,
           consumedPerSec: f.consumed * DEFAULT_TICK_RATE,
+        })),
+        // Guided onboarding checklist: the sim reports which steps the world satisfies; the host
+        // attaches each step's display label. The panel hides itself once every step is done.
+        objectives: gameObjectives(sess.state).map((o) => ({
+          id: o.id,
+          label: OBJECTIVE_LABELS[o.id],
+          done: o.done,
         })),
       })
       // Refresh the inspector so a pinned/hovered object's live numbers stay current.

@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from 'react'
 import { SNAPSHOT_VERSION } from '@factory/engine/persistence'
 import { saveStore } from './saveStore.ts'
+import { appStore } from './appStore.ts'
 import type { SaveMeta } from '../electron/preload.ts'
 
 /** Human label for a slot's origin, shown as a small badge. */
@@ -25,6 +26,7 @@ function SaveRow({
   meta,
   active,
   busy,
+  canOverwrite,
   onLoad,
   onOverwrite,
   onDelete,
@@ -32,6 +34,8 @@ function SaveRow({
   meta: SaveMeta
   active: boolean
   busy: boolean
+  /** Whether the Overwrite action is offered (only in-game, for a manual slot). */
+  canOverwrite: boolean
   onLoad: () => void
   onOverwrite: () => void
   onDelete: () => void
@@ -54,7 +58,7 @@ function SaveRow({
         <button className="save-btn" disabled={busy || incompatible} onClick={onLoad}>
           Load
         </button>
-        {meta.kind === 'manual' && (
+        {canOverwrite && meta.kind === 'manual' && (
           <button className="save-btn" disabled={busy} onClick={onOverwrite}>
             Overwrite
           </button>
@@ -74,8 +78,12 @@ function SaveRow({
  */
 export function SaveMenu(): React.JSX.Element | null {
   const state = useSyncExternalStore(saveStore.subscribe, saveStore.get, saveStore.get)
+  const app = useSyncExternalStore(appStore.subscribe, appStore.get, appStore.get)
   const [name, setName] = useState('')
   const controller = saveStore.getController()
+  // Opened from the main menu (no live session) the save-only actions are meaningless — show just
+  // the slot list to load from. In-game, the full save/quicksave/named-save surface is available.
+  const playing = app.phase === 'playing'
 
   const toast = state.toast ? <div className="save-toast">{state.toast}</div> : null
   if (!state.open) return toast
@@ -94,7 +102,7 @@ export function SaveMenu(): React.JSX.Element | null {
       <div className="save-modal-backdrop" onClick={() => controller?.close()}>
         <div className="save-modal" onClick={(e) => e.stopPropagation()}>
           <div className="save-modal-head">
-            <h2>Saved Games</h2>
+            <h2>{playing ? 'Saved Games' : 'Load Game'}</h2>
             <button className="sidebar-close" onClick={() => controller?.close()}>
               ×
             </button>
@@ -106,41 +114,50 @@ export function SaveMenu(): React.JSX.Element | null {
             </p>
           ) : (
             <>
-              <div className="save-actions">
-                <button
-                  className="save-btn save-btn-primary"
-                  disabled={state.busy}
-                  onClick={() => void controller?.quickSave()}
-                >
-                  Quicksave
-                </button>
-                <button
-                  className="save-btn"
-                  disabled={state.busy}
-                  onClick={() => void controller?.newGame()}
-                >
-                  New Game
-                </button>
-                <div className="save-new">
-                  <input
-                    className="save-input"
-                    placeholder="Name a new save…"
-                    value={name}
-                    maxLength={60}
-                    onChange={(e) => setName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') submitNew()
-                    }}
-                  />
+              {playing && (
+                <div className="save-actions">
                   <button
                     className="save-btn save-btn-primary"
-                    disabled={state.busy || name.trim() === ''}
-                    onClick={submitNew}
+                    disabled={state.busy}
+                    onClick={() => void controller?.quickSave()}
                   >
-                    Save
+                    Quicksave
                   </button>
+                  <button
+                    className="save-btn"
+                    disabled={state.busy}
+                    onClick={() => void controller?.newGame()}
+                  >
+                    New Game
+                  </button>
+                  <button
+                    className="save-btn"
+                    disabled={state.busy}
+                    onClick={() => void appStore.getController()?.backToMenu()}
+                  >
+                    Main Menu
+                  </button>
+                  <div className="save-new">
+                    <input
+                      className="save-input"
+                      placeholder="Name a new save…"
+                      value={name}
+                      maxLength={60}
+                      onChange={(e) => setName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitNew()
+                      }}
+                    />
+                    <button
+                      className="save-btn save-btn-primary"
+                      disabled={state.busy || name.trim() === ''}
+                      onClick={submitNew}
+                    >
+                      Save
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {state.error && <div className="save-error">{state.error}</div>}
 
@@ -154,6 +171,7 @@ export function SaveMenu(): React.JSX.Element | null {
                       meta={meta}
                       active={state.activeId === meta.id}
                       busy={state.busy}
+                      canOverwrite={playing}
                       onLoad={() => void controller?.load(meta)}
                       onOverwrite={() => void controller?.overwrite(meta)}
                       onDelete={() => void controller?.remove(meta)}

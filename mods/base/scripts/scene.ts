@@ -1,22 +1,25 @@
 /**
- * The starting scene for the base game ("mod zero"). Spawns the clean starting world through
- * the stable {@link ModApi} — the same surface a third-party mod gets — and populates the
- * mod-owned {@link GameState} (terrain + building store) the systems read.
+ * The starting scene for the base game ("mod zero"). Spawns the starting world through the
+ * stable {@link ModApi} — the same surface a third-party mod gets — and populates the mod-owned
+ * {@link GameState} (terrain + building store) the systems read.
  *
- * Layout (integer tile grid; the renderer centers the camera on the origin):
+ * The layout is driven by a chosen `scenario` prototype and the world's seeded RNG, so each new
+ * game is varied yet fully reproducible for a given seed + scenario:
  *   - one 2x2 "village" centered on the origin,
  *   - a 6x6 orchard of apple trees with its corner at (+50, +50), and
- *   - six terrain patches (bauxite, silica, coal, titanium, rare-earth, oil deposits) that gate
- *     which resource producers can be built on top of them.
+ *   - the scenario's resource deposits (bauxite, silica, coal, titanium, rare-earth, oil) scattered
+ *     as terrain patches around the village — their positions/sizes drawn from the RNG within the
+ *     scenario's bands — that gate which resource producers can be built on top of them, plus an
+ *     optional "starting kit" of stock granted to the village.
  *
- * Reads color/size from the loaded prototypes when present, falling back to sane defaults so
- * the scene still builds if a prototype is missing. Pure setup work (runs once at init) — no
- * RNG, so the scene is fully deterministic.
+ * Reads color/size from the loaded prototypes when present, falling back to sane defaults so the
+ * scene still builds if a prototype is missing. All randomness goes through {@link ModApi.randomInt}
+ * (the world's seeded RNG) — never `Math.random` — so the scene stays deterministic.
  *
- * For every object it spawns, it emits a `base:spawn` event carrying the prototype id and
- * anchor tile. The host (the renderer) uses this — read-only — to name tiles for the
- * inspector; the headless runner has no listener, so it is a no-op there. This keeps the
- * sim→render flow one-way: the scene never knows about the UI.
+ * For every object it spawns, it emits a `base:spawn` event carrying the prototype id and anchor
+ * tile. The host (the renderer) uses this — read-only — to name tiles for the inspector; the
+ * headless runner has no listener, so it is a no-op there. This keeps the sim→render flow one-way:
+ * the scene never knows about the UI.
  */
 import type { ModApi } from '@factory/engine/scripting'
 import {
@@ -25,42 +28,61 @@ import {
   registerBuilding,
   registerVillage,
   villageDemandNeed,
+  MAX_SLOTS,
   TERRAIN_SPRITE,
   ROLE_DEPOSIT,
   ROLE_DRAIN,
   type BuildingSlot,
+  type BuildingStore,
   type GameState,
   type VillageStageConfig,
 } from './sim.ts'
 
-/** The prototype shape this scene reads (only `color` and `size` are consulted). */
+/** The prototype shape this scene reads (only a handful of fields are consulted). */
 export type SceneProto = Record<string, unknown>
+
+/** Config passed to {@link spawnScene}: which starting scenario to lay out. */
+export interface SceneConfig {
+  /** Scenario prototype id (e.g. `scenario.abundant`); falls back to {@link DEFAULT_SCENARIO}. */
+  readonly scenario?: string
+}
+
+/** The scenario used when none is chosen (headless runs, older callers). */
+export const DEFAULT_SCENARIO = 'scenario.abundant'
 
 /** Where the apple orchard's corner sits, and how many tiles on a side. */
 const ORCHARD_X = 50
 const ORCHARD_Y = 50
 const ORCHARD_SIZE = 6
 
-/**
- * The natural terrain patches dotted around the village. Each is a rectangle of a single
- * terrain prototype; producers that declare a matching `requiresTerrain` can only be built
- * on top of these tiles. Kept clear of the village (−1..0) and the orchard (50..55).
- */
-const TERRAIN_PATCHES: ReadonlyArray<{
-  id: string
+/** Gap (tiles) kept between deposit cells and around the reserved village/orchard rects. */
+const MARGIN = 2
+
+/** Fallback deposit terrain ids + colours, used only if the chosen scenario has no `deposits`. */
+const FALLBACK_DEPOSITS: ReadonlyArray<{ id: string; color: number }> = [
+  { id: 'terrain.bauxite_deposit', color: 0xb08d57 },
+  { id: 'terrain.silica_quarry', color: 0xe8d9a0 },
+  { id: 'terrain.coal_seam', color: 0x3c3c44 },
+  { id: 'terrain.titanium_deposit', color: 0x9aa7b0 },
+  { id: 'terrain.rare_earth_deposit', color: 0xa86fb8 },
+  { id: 'terrain.oil_field', color: 0x2a2a38 },
+]
+
+/** An axis-aligned tile rectangle (top-left + size), used for overlap tests during layout. */
+interface Rect {
   x: number
   y: number
   w: number
   h: number
-  fallback: number
-}> = [
-  { id: 'terrain.bauxite_deposit', x: 8, y: -3, w: 4, h: 4, fallback: 0xb08d57 },
-  { id: 'terrain.silica_quarry', x: 8, y: 4, w: 4, h: 4, fallback: 0xe8d9a0 },
-  { id: 'terrain.coal_seam', x: 8, y: 11, w: 4, h: 4, fallback: 0x3c3c44 },
-  { id: 'terrain.titanium_deposit', x: -13, y: -3, w: 4, h: 4, fallback: 0x9aa7b0 },
-  { id: 'terrain.rare_earth_deposit', x: -13, y: 4, w: 4, h: 4, fallback: 0xa86fb8 },
-  { id: 'terrain.oil_field', x: -13, y: 11, w: 4, h: 4, fallback: 0x2a2a38 },
-]
+}
+
+/** The scenario layout params the scene consumes, after parsing (with fallbacks). */
+interface ScenarioConfig {
+  readonly deposits: readonly string[]
+  readonly patch: { readonly min: number; readonly max: number }
+  readonly spread: { readonly min: number; readonly max: number }
+  readonly startingKit: readonly { readonly item: string; readonly amount: number }[]
+}
 
 function colorOf(proto: SceneProto | undefined, fallback: number): number {
   return typeof proto?.color === 'number' ? proto.color : fallback
@@ -75,11 +97,70 @@ function sizeDim(proto: SceneProto | undefined, key: 'w' | 'h', fallback: number
   return fallback
 }
 
+/** Read a `{ min, max }` positive-integer range off a scenario field, clamped to sane fallbacks. */
+function rangeOf(
+  proto: SceneProto | undefined,
+  field: string,
+  fbMin: number,
+  fbMax: number,
+): { min: number; max: number } {
+  const raw = proto?.[field]
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>
+    const min = typeof r.min === 'number' ? Math.max(1, Math.floor(r.min)) : fbMin
+    const max = typeof r.max === 'number' ? Math.max(min, Math.floor(r.max)) : Math.max(min, fbMax)
+    return { min, max }
+  }
+  return { min: fbMin, max: fbMax }
+}
+
 /**
- * Resolve a building prototype's `accepts` (a list of item ids) into stockpile slots, each
- * capped at the prototype's `storage`. Item colour is the resource identity, so each id is
- * looked up via `getProto` to read its colour. Returns an empty list for a building that
- * stockpiles nothing (e.g. plain scenery).
+ * Resolve the chosen scenario prototype into the layout params the scene lays out from, falling
+ * back to defaults so the scene still builds if the scenario is missing a field (or absent).
+ */
+function scenarioConfigOf(
+  getProto: (id: string) => SceneProto | undefined,
+  id: string,
+): ScenarioConfig {
+  const proto = getProto(id)
+  const deposits = Array.isArray(proto?.deposits)
+    ? proto.deposits.filter((d): d is string => typeof d === 'string')
+    : FALLBACK_DEPOSITS.map((d) => d.id)
+  const kitRaw = Array.isArray(proto?.startingKit) ? proto.startingKit : []
+  const startingKit: { item: string; amount: number }[] = []
+  for (const k of kitRaw) {
+    const e = (k ?? {}) as Record<string, unknown>
+    if (typeof e.item === 'string' && typeof e.amount === 'number' && e.amount > 0) {
+      startingKit.push({ item: e.item, amount: Math.floor(e.amount) })
+    }
+  }
+  return {
+    deposits: deposits.length > 0 ? deposits : FALLBACK_DEPOSITS.map((d) => d.id),
+    patch: rangeOf(proto, 'patchSize', 4, 5),
+    spread: rangeOf(proto, 'spread', 6, 18),
+    startingKit,
+  }
+}
+
+/** Fallback colour for a deposit terrain id (used only if the terrain prototype is missing). */
+function depositFallbackColor(id: string): number {
+  return FALLBACK_DEPOSITS.find((d) => d.id === id)?.color ?? 0x808080
+}
+
+/** Whether two rectangles overlap once each is grown outward by `margin` tiles. */
+function overlaps(a: Rect, b: Rect, margin: number): boolean {
+  return (
+    a.x - margin < b.x + b.w &&
+    a.x + a.w + margin > b.x &&
+    a.y - margin < b.y + b.h &&
+    a.y + a.h + margin > b.y
+  )
+}
+
+/**
+ * Resolve a building prototype's `accepts` (a list of item ids) into stockpile slots, each capped
+ * at the prototype's `storage`. Item colour is the resource identity, so each id is looked up via
+ * `getProto` to read its colour. Returns an empty list for a building that stockpiles nothing.
  */
 function acceptSlotsOf(
   getProto: (id: string) => SceneProto | undefined,
@@ -130,16 +211,79 @@ function villageStagesOf(
 }
 
 /**
- * Spawn the clean starting world: a central village, an apple orchard, and the terrain
- * patches resource producers are built on. Terrain tiles fill `state.terrain` (so the sim
- * gates producer placement) and the village is registered in `state.buildings` as a resource
- * store (so input ports can feed it). Each spawn emits `base:spawn` for the host inspector.
+ * Deposit each starting-kit entry into a building's matching stockpile slot (by resource colour),
+ * capped at the slot. Used to grant the village a small grace buffer at spawn. Off the hot path.
  */
-export function spawnScene(api: ModApi, state: GameState): void {
+function grantStartingKit(
+  getProto: (id: string) => SceneProto | undefined,
+  store: BuildingStore,
+  b: number,
+  kit: readonly { item: string; amount: number }[],
+): void {
+  const n = store.slotN[b]!
+  for (const entry of kit) {
+    const color = colorOf(getProto(entry.item), 0xffffff)
+    for (let k = 0; k < n; k++) {
+      const i = b * MAX_SLOTS + k
+      if (store.slotColor[i] !== color) continue
+      const room = store.slotCap[i]! - store.slotCount[i]!
+      store.slotCount[i] = store.slotCount[i]! + Math.max(0, Math.min(entry.amount, room))
+      break
+    }
+  }
+}
+
+/**
+ * Build the candidate deposit-cell anchors: a coarse grid of `cell`-sized cells around the origin,
+ * kept within the scenario's spread band and clear of the reserved (village/orchard) rects. A
+ * deposit patch placed anywhere inside a cell stays within that cell, so distinct cells never
+ * overlap — no per-patch overlap test is needed. Deterministic (pure grid walk).
+ */
+function candidateCells(
+  cell: number,
+  spread: { min: number; max: number },
+  reserved: Rect[],
+): Rect[] {
+  const cells: Rect[] = []
+  const reach = Math.ceil(spread.max / cell) + 1
+  for (let gy = -reach; gy <= reach; gy++) {
+    for (let gx = -reach; gx <= reach; gx++) {
+      const x = gx * cell
+      const y = gy * cell
+      const cheby = Math.max(Math.abs(x), Math.abs(y))
+      if (cheby < spread.min || cheby > spread.max) continue
+      const rect: Rect = { x, y, w: cell, h: cell }
+      if (reserved.some((r) => overlaps(rect, r, MARGIN))) continue
+      cells.push(rect)
+    }
+  }
+  return cells
+}
+
+/** Deterministic in-place Fisher–Yates shuffle, drawing swaps from the world's seeded RNG. */
+function shuffle<T>(api: ModApi, arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = api.randomInt(0, i)
+    const tmp = arr[i]!
+    arr[i] = arr[j]!
+    arr[j] = tmp
+  }
+}
+
+/**
+ * Spawn the starting world for `config.scenario`: a central village (with the scenario's starting
+ * kit), an apple orchard, and the scenario's resource deposits scattered as terrain patches whose
+ * positions/sizes are drawn from the world's seeded RNG within the scenario's bands. Terrain tiles
+ * fill `state.terrain` (so the sim gates producer placement) and the village is registered in
+ * `state.buildings` as a resource store (so input ports can feed it). Each spawn emits `base:spawn`
+ * for the host inspector. Deterministic for a given seed + scenario.
+ */
+export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = {}): void {
   const getProto = (id: string): SceneProto | undefined => api.getPrototype(id)
   const record = (protoId: string, x: number, y: number): void => {
     api.emit('base:spawn', { protoId, x, y })
   }
+  const scenario = scenarioConfigOf(getProto, config.scenario ?? DEFAULT_SCENARIO)
 
   // Village: a 2x2 block centered on the origin (top-left at -1,-1).
   const village = getProto('building.village')
@@ -158,7 +302,7 @@ export function spawnScene(api: ModApi, state: GameState): void {
   // crafts = 0). Skipped if the prototype stockpiles nothing.
   const slots = acceptSlotsOf(getProto, village)
   if (slots.length > 0) {
-    registerBuilding(state.buildings, villageEid, vx, vy, vw, vh, 0, 1, slots)
+    const villageB = registerBuilding(state.buildings, villageEid, vx, vy, vw, vh, 0, 1, slots)
     // Wire up the village demand ladder so it grows/declines on how well it is supplied. All
     // base villages share the one prototype's stages.
     const stages = villageStagesOf(getProto, village)
@@ -166,27 +310,38 @@ export function spawnScene(api: ModApi, state: GameState): void {
       state.villages.stages = stages
       registerVillage(state.villages, vx, vy)
     }
+    // Grant the scenario's starting kit into the village buffer (a grace stock at spawn).
+    grantStartingKit(getProto, state.buildings, villageB, scenario.startingKit)
   }
 
-  // Terrain patches: a flat, full-tile fill recorded into the terrain grid (so producer
-  // placement can read it). Spawned before the orchard/belts/producers that sit on top.
-  for (const patch of TERRAIN_PATCHES) {
-    const proto = getProto(patch.id)
-    const color = colorOf(proto, patch.fallback)
-    const type = terrainTypeOf(patch.id)
-    for (let dy = 0; dy < patch.h; dy++) {
-      for (let dx = 0; dx < patch.w; dx++) {
-        const x = patch.x + dx
-        const y = patch.y + dy
-        api.spawn({
-          pos: { x, y },
-          sprite: TERRAIN_SPRITE,
-          color,
-          width: 1,
-          height: 1,
-        })
+  // Deposit patches: scatter each scenario deposit onto a distinct candidate cell (shuffled by the
+  // seeded RNG), sizing and jittering the patch inside its cell. Cells are disjoint, so patches
+  // never overlap; the village/orchard rects are excluded up-front.
+  const orchard: Rect = { x: ORCHARD_X, y: ORCHARD_Y, w: ORCHARD_SIZE, h: ORCHARD_SIZE }
+  const villageRect: Rect = { x: vx, y: vy, w: vw, h: vh }
+  const cellSize = scenario.patch.max + MARGIN
+  const cells = candidateCells(cellSize, scenario.spread, [villageRect, orchard])
+  shuffle(api, cells)
+
+  for (let d = 0; d < scenario.deposits.length && d < cells.length; d++) {
+    const id = scenario.deposits[d]!
+    const proto = getProto(id)
+    const color = colorOf(proto, depositFallbackColor(id))
+    const type = terrainTypeOf(id)
+    const cellRect = cells[d]!
+    const size = api.randomInt(scenario.patch.min, scenario.patch.max)
+    // Jitter within the cell's free space so the patch still fits entirely inside its own cell.
+    const ox = api.randomInt(0, cellSize - size)
+    const oy = api.randomInt(0, cellSize - size)
+    const px = cellRect.x + ox
+    const py = cellRect.y + oy
+    for (let dy = 0; dy < size; dy++) {
+      for (let dx = 0; dx < size; dx++) {
+        const x = px + dx
+        const y = py + dy
+        api.spawn({ pos: { x, y }, sprite: TERRAIN_SPRITE, color, width: 1, height: 1 })
         state.terrain.set(tileKey(x, y), type)
-        record(patch.id, x, y)
+        record(id, x, y)
       }
     }
   }

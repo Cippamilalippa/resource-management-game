@@ -82,4 +82,27 @@ describe('createModApi', () => {
     host.world.events.emit('evt', 42)
     expect(seen).toEqual([42])
   })
+
+  it('random()/randomInt() draw from the world RNG deterministically', () => {
+    // Same seed → same stream, so two hosts produce identical draws.
+    const a = createModApi('base', makeHost().host)
+    const b = createModApi('base', makeHost().host)
+    const drawsA = [a.random(), a.randomInt(0, 100), a.random()]
+    const drawsB = [b.random(), b.randomInt(0, 100), b.random()]
+    expect(drawsA).toEqual(drawsB)
+    expect(drawsA[0]).toBeGreaterThanOrEqual(0)
+    expect(drawsA[0]).toBeLessThan(1)
+    expect(Number.isInteger(drawsA[1])).toBe(true)
+    expect(drawsA[1]).toBeGreaterThanOrEqual(0)
+    expect(drawsA[1]).toBeLessThanOrEqual(100)
+  })
+
+  it('random() advances the shared RNG stream', () => {
+    const { host } = makeHost()
+    const api = createModApi('base', host)
+    // A draw through the API moves the same state the world exposes directly.
+    const stateBefore = host.world.rng.getState()
+    api.random()
+    expect(host.world.rng.getState()).not.toBe(stateBefore)
+  })
 })
