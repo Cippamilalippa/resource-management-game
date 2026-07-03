@@ -182,21 +182,27 @@ _Two instruments: [`apps/balance`](../../apps/balance/README.md) (`pnpm balance`
 **static** economy shape — raw costs, cost curve, machine ratios — and the headless runner
 for the **dynamic** KPIs of a played-out seed. See [economy.md §8](./economy.md)._
 
-- [~] Headless scenario runner that reports economy KPIs (time-to-first-research,
-  village growth curve, bottlenecks) for a seed set. _(The sampling/report harness is in —
-  [`pnpm kpi`](../../apps/headless/kpi-run.ts) boots a seed, runs it while sampling the
-  read-only HUD selectors at a fixed cadence, and folds the curve into a `KpiReport`
-  (time-to-first-research, peak/final village stage, recurring bottlenecks). Pure read-only
-  observer: chunked sampling is byte-identical to one long run — covered by
-  [kpi.test.ts](../../apps/headless/tests/kpi.test.ts). The **seed-set sweep** is now in too:
-  `pnpm kpi <s0,s1,…>` runs `runKpiSweep` across the seeds and folds the per-seed reports into a
-  `KpiSweepReport` — cross-seed min/max/mean of each KPI plus the bottlenecks shared across seeds,
-  ranked by how many seeds hit them. It's reproducible from the boot + seeds + cadence, and takes
-  an optional per-seed `drive` hook the authored playthrough will plug into. **Still to come:** an
-  authored played-out scenario so the numbers reflect a real factory, not the do-nothing baseline.
-  This needs a hand-routed full-chain factory (the Spaceport village demands `rocket_fuel` even at
-  stage 1, so there is no cheap sustaining chain — every KPI-moving factory sits behind research +
-  a multi-tier chain across the seed-scattered deposits), so it's its own focused build.)_
+- [x] Headless scenario runner that reports economy KPIs (time-to-first-research,
+      village growth curve, bottlenecks) for a seed set. _(The sampling/report harness —
+      [`pnpm kpi`](../../apps/headless/kpi-run.ts) boots a seed, runs it while sampling the
+      read-only HUD selectors at a fixed cadence, and folds the curve into a `KpiReport`
+      (time-to-first-research, peak/final village stage, recurring bottlenecks). Pure read-only
+      observer: chunked sampling is byte-identical to one long run — covered by
+      [kpi.test.ts](../../apps/headless/tests/kpi.test.ts). The **seed-set sweep**:
+      `pnpm kpi <s0,s1,…>` runs `runKpiSweep` across the seeds and folds the per-seed reports into a
+      `KpiSweepReport` — cross-seed min/max/mean of each KPI plus the bottlenecks shared across seeds,
+      ranked by how many seeds hit them. The **authored played-out scenario** is now in too:
+      [playbook.ts](../../apps/headless/playbook.ts) (`playFirstResearch`) reads the freshly-booted
+      scene and hand-routes a real belt-fed factory — a miner on each of the bauxite / coal / silica
+      deposits feeding a refine→smelt→science chain into a lab, with the first research
+      (`tech.oil_refining`) selected — through the same command bridge the build UI uses (it never
+      mutates sim state, so the run stays deterministic). Internal links are straight hand-laid runs;
+      the three raw feeders are wired by a small BFS grid router around the deposit scatter. Drive it
+      with `pnpm kpi play [seed|s0,s1,…]`, or as the sweep's per-seed `drive` hook, so the KPIs reflect
+      a played factory (research completes, raw flows) instead of the do-nothing baseline. Covered by
+      [playbook.test.ts](../../apps/headless/tests/playbook.test.ts): determinism (same seed → same
+      hash) + liveness (the chain completes the first tech). Routing succeeds on the large majority of
+      layouts; a feeder it can't wire is skipped, leaving the run deterministic regardless.)_
 - [ ] Tune recipe rates / tech costs / village demand against those KPIs.
 - [ ] Full playthrough of the slice; capture friction; iterate.
 - [ ] **Gate:** verification gate green + a clean end-to-end play session → slice shippable.
