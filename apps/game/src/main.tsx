@@ -77,9 +77,13 @@ interface RecipeFlow {
  * colour and icon; `produceEvery` is only a placeholder cadence for the empty machine (a real
  * recipe overrides it via `set_recipe`). The recipe catalogue lives in {@link MachineIndex}.
  */
-function machineItems(machines: MachineIndex): BuildItem[] {
+function machineItems(
+  machines: MachineIndex,
+  costOf: (protoId: string) => { color: number; amount: number }[],
+): BuildItem[] {
   const items: BuildItem[] = []
   for (const def of machines.defs) {
+    const cost = costOf(def.id)
     items.push({
       id: def.id,
       name: def.name,
@@ -90,6 +94,7 @@ function machineItems(machines: MachineIndex): BuildItem[] {
       color: def.color,
       itemColor: def.color,
       accepts: [],
+      ...(cost.length > 0 ? { cost } : {}),
       spawnEvery: 20,
       moveEvery: 1,
       produceEvery: def.recipes[0]?.craftEvery ?? 30,
@@ -156,12 +161,27 @@ function toBuildItems(prototypes: readonly ClientPrototype[], machines: MachineI
   const colorOfItem = (id: unknown): number =>
     typeof id === 'string' ? (itemColors.get(id) ?? 0xffffff) : 0xffffff
 
+  // A prototype's build cost, resolved from item ids to the resource colours the sim charges.
+  const protoById = new Map<string, ClientPrototype>()
+  for (const p of prototypes) protoById.set(p.id, p)
+  const costOfProto = (p: ClientPrototype | undefined): { color: number; amount: number }[] => {
+    const raw = Array.isArray(p?.buildCost) ? (p.buildCost as RecipeFlow[]) : []
+    const out: { color: number; amount: number }[] = []
+    for (const c of raw) {
+      if (c && typeof c.item === 'string' && typeof c.amount === 'number') {
+        out.push({ color: colorOfItem(c.item), amount: c.amount })
+      }
+    }
+    return out
+  }
+
   const items: BuildItem[] = []
   for (const p of prototypes) {
     const tool = toolKind(p.type)
     if (!tool) continue
     const size = (p.size ?? {}) as { w?: number; h?: number }
     const accepts = Array.isArray(p.accepts) ? p.accepts.map(colorOfItem) : []
+    const cost = costOfProto(p)
     items.push({
       id: p.id,
       name: typeof p.name === 'string' ? p.name : p.id,
@@ -174,6 +194,8 @@ function toBuildItems(prototypes: readonly ClientPrototype[], machines: MachineI
       itemColor: num(p, 'itemColor', 0xffffff),
       accepts,
       ...(p.researchLab === true ? { researchLab: true } : {}),
+      ...(p.depot === true ? { depot: true } : {}),
+      ...(cost.length > 0 ? { cost } : {}),
       spawnEvery: num(p, 'spawnEvery', 20),
       moveEvery: num(p, 'moveEvery', 1),
       produceEvery: num(p, 'produceEvery', 30),
@@ -181,8 +203,9 @@ function toBuildItems(prototypes: readonly ClientPrototype[], machines: MachineI
       ...(typeof p.requiresTerrain === 'string' ? { requiresTerrain: p.requiresTerrain } : {}),
     })
   }
-  // One 'producer' tool per crafter building (its recipe is chosen after placement).
-  items.push(...machineItems(machines))
+  // One 'producer' tool per crafter building (its recipe is chosen after placement); its cost is
+  // authored on the crafter prototype, resolved here by the same item→colour map.
+  items.push(...machineItems(machines, (id) => costOfProto(protoById.get(id))))
   return items
 }
 

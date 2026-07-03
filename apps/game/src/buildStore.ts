@@ -28,6 +28,14 @@ export interface BuildItem {
   readonly accepts: readonly number[]
   /** Building tool only: register the placed store as a research lab (its packs drive research). */
   readonly researchLab?: boolean
+  /** Building tool only: register the placed store as a treasury depot (belted goods refill the bank). */
+  readonly depot?: boolean
+  /**
+   * Build cost charged from the treasury to place one of these (resolved to resource colours). For a
+   * belt this is the *per-tile* cost — the placement path multiplies it by the drawn run length.
+   * Empty/omitted means free.
+   */
+  readonly cost?: readonly { readonly color: number; readonly amount: number }[]
   /** True when the unlocking technology is not yet researched — shown greyed and not selectable. */
   readonly locked?: boolean
   /** Ticks between drains for an output port. */

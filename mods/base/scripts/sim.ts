@@ -536,6 +536,12 @@ export interface BuildingStore {
   /** 1 if this building runs a recipe (a crafter), 0 for a pure store. */
   crafts: Int8Array
   /**
+   * 1 if this building is a *depot* (a treasury sink): items arriving on its input ports are
+   * credited straight into the global {@link TreasuryStore} by colour instead of being stocked in
+   * a slot, so a depot needs no accept slots and is not bound by {@link MAX_SLOTS}. 0 otherwise.
+   */
+  depot: Int8Array
+  /**
    * The recipe a crafter is currently set to, as an opaque integer id (see {@link recipeTypeOf}),
    * or 0 for an empty crafter with no recipe yet. Drives no sim logic (the slots do) — it is kept
    * so the UI can show/highlight the chosen recipe and so it survives save/load.
@@ -570,6 +576,7 @@ export function createBuildingStore(): BuildingStore {
     bw: new Int32Array(cap),
     bh: new Int32Array(cap),
     crafts: new Int8Array(cap),
+    depot: new Int8Array(cap),
     recipe: new Int32Array(cap),
     craftEvery: new Int32Array(cap).fill(1),
     craftTimer: new Int32Array(cap),
@@ -594,6 +601,7 @@ function ensureBuildingCapacity(s: BuildingStore, need: number): void {
   s.bw = grow(s.bw, next, 0)
   s.bh = grow(s.bh, next, 0)
   s.crafts = grow8(s.crafts, next, 0)
+  s.depot = grow8(s.depot, next, 0)
   s.recipe = grow(s.recipe, next, 0)
   s.craftEvery = grow(s.craftEvery, next, 1)
   s.craftTimer = grow(s.craftTimer, next, 0)
@@ -654,6 +662,7 @@ export function registerBuilding(
   crafts: number,
   craftEvery: number,
   slots: readonly BuildingSlot[],
+  depot = 0,
 ): number {
   ensureBuildingCapacity(store, store.count + 1)
   const b = store.count++
@@ -663,6 +672,7 @@ export function registerBuilding(
   store.bw[b] = w
   store.bh[b] = h
   store.crafts[b] = crafts ? 1 : 0
+  store.depot[b] = depot ? 1 : 0
   store.recipe[b] = 0
   store.craftEvery[b] = Math.max(1, craftEvery)
   store.craftTimer[b] = 0
@@ -1160,7 +1170,13 @@ export function deserializeResearch(snap: ResearchSnapshot): ResearchStore {
  * before the tile behind it is visited, so a packed run shuffles forward one tile in a
  * single pass.
  */
-function stepBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore): void {
+function stepBelts(
+  gw: GameWorld,
+  api: ModApi,
+  g: BeltGrid,
+  store: BuildingStore,
+  treasury: TreasuryStore,
+): void {
   const { order, slot, kind, nbr, face, inDir, rr, tx, ty, dueEvery, portBuilding } = g
   const { Position, Renderable } = gw.components
   const n = g.count
@@ -1196,6 +1212,14 @@ function stepBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore
     const b = portBuilding[t]!
     if (b === NONE) continue
     const eid = slot[t]!
+    // A depot is a wildcard treasury sink: any arriving item is banked by its colour (no slot,
+    // no capacity), refilling the build-cost pool. Depots hold no stock, so this never blocks.
+    if (store.depot[b]) {
+      depositTreasury(treasury, Renderable.color[eid]!, 1)
+      api.despawn(eid)
+      slot[t] = NONE
+      continue
+    }
     const k = findSlot(store, b, Renderable.color[eid]!)
     if (k === NONE) continue
     const si = b * MAX_SLOTS + k
@@ -1346,10 +1370,16 @@ function extractFromOutputs(api: ModApi, g: BeltGrid, store: BuildingStore): voi
  * their stores and output ports drain those stores onto the belts. Crafting runs before drain
  * so a unit made this tick can leave the same tick if the belt is free.
  */
-function updateBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingStore): void {
+function updateBelts(
+  gw: GameWorld,
+  api: ModApi,
+  g: BeltGrid,
+  store: BuildingStore,
+  treasury: TreasuryStore,
+): void {
   if (++g.moveTimer >= g.moveEvery) {
     g.moveTimer = 0
-    stepBelts(gw, api, g, store)
+    stepBelts(gw, api, g, store, treasury)
     g.moveCount++
   }
   runCrafters(store)
@@ -1358,7 +1388,130 @@ function updateBelts(gw: GameWorld, api: ModApi, g: BeltGrid, store: BuildingSto
 
 // --- Game state -------------------------------------------------------------
 
-/** Mutable per-world game state owned by the base game (not by the engine). */
+// --- Treasury: the global build-cost bank -----------------------------------
+
+/**
+ * The global resource bank the player spends to place buildings. Unlike Factorio (a character
+ * carries items) this is a Factory-Town-style central stockpile: a placement is charged its
+ * `buildCost` from here, and the pool is refilled by belting goods into a *depot* (see
+ * {@link BuildingStore.depot}). Keyed by resource colour — the same identity buildings, belts and
+ * ports use — so a build cost of "1 mining drill" simply reserves one unit of that item's colour.
+ *
+ * Owned by the base game (not the engine). Held as flat parallel arrays (colour → amount) grown at
+ * deposit time; every mutation happens off the per-tick hot path (placement, removal, and the
+ * handful of depot credits per belt pass), so linear scans over the few distinct resources are
+ * fine. Serialized in dense index order, so a save round-trips byte-identically.
+ */
+export interface TreasuryStore {
+  /** Number of distinct resource colours currently banked. */
+  n: number
+  /** Per-entry resource colour. */
+  color: Int32Array
+  /** Per-entry banked amount (parallel to {@link color}). */
+  amount: Int32Array
+}
+
+export function createTreasuryStore(): TreasuryStore {
+  const cap = 8
+  return { n: 0, color: new Int32Array(cap), amount: new Int32Array(cap) }
+}
+
+/** Index of resource `color` in the treasury, or -1 if none is banked. */
+function treasuryIndexOf(t: TreasuryStore, color: number): number {
+  for (let i = 0; i < t.n; i++) if (t.color[i] === color) return i
+  return -1
+}
+
+/** Units of resource `color` currently banked in the treasury. */
+export function treasuryAmount(t: TreasuryStore, color: number): number {
+  const i = treasuryIndexOf(t, color)
+  return i < 0 ? 0 : t.amount[i]!
+}
+
+/** Bank `amount` (>= 0) units of resource `color`, appending a new entry if needed. Off the hot path. */
+export function depositTreasury(t: TreasuryStore, color: number, amount: number): void {
+  if (amount <= 0) return
+  const i = treasuryIndexOf(t, color)
+  if (i >= 0) {
+    t.amount[i] = t.amount[i]! + amount
+    return
+  }
+  if (t.n >= t.color.length) {
+    const next = t.color.length * 2
+    t.color = grow(t.color, next, 0)
+    t.amount = grow(t.amount, next, 0)
+  }
+  const j = t.n++
+  t.color[j] = color
+  t.amount[j] = amount
+}
+
+/** One line of a build cost / refund: a resource colour and how many units. */
+export interface CostEntry {
+  readonly color: number
+  readonly amount: number
+}
+
+/**
+ * True if the treasury can cover every line of `cost`. Summed per colour first so a cost that
+ * lists the same colour twice is checked against the combined requirement. Off the hot path.
+ */
+export function canAffordTreasury(t: TreasuryStore, cost: readonly CostEntry[]): boolean {
+  for (let a = 0; a < cost.length; a++) {
+    const color = cost[a]!.color
+    // Only test each colour on its first occurrence, against the sum of all its lines.
+    let firstOccurrence = true
+    for (let b = 0; b < a; b++) if (cost[b]!.color === color) firstOccurrence = false
+    if (!firstOccurrence) continue
+    let total = 0
+    for (let b = 0; b < cost.length; b++) if (cost[b]!.color === color) total += cost[b]!.amount
+    if (total > 0 && treasuryAmount(t, color) < total) return false
+  }
+  return true
+}
+
+/** Deduct every line of `cost` from the treasury (clamped at 0). Call only after {@link canAffordTreasury}. */
+export function spendTreasury(t: TreasuryStore, cost: readonly CostEntry[]): void {
+  for (let a = 0; a < cost.length; a++) {
+    const i = treasuryIndexOf(t, cost[a]!.color)
+    if (i < 0) continue
+    t.amount[i] = Math.max(0, t.amount[i]! - cost[a]!.amount)
+  }
+}
+
+// --- Game config: new-game settings that tune the rules ---------------------
+
+/**
+ * Per-game tunables chosen at new-game time and carried in the (serialized) {@link GameState} so
+ * they survive save/load and stay deterministic. Kept as a small struct so future settings (build
+ * refund is the first) are added additively without threading new params through the sim.
+ */
+export interface GameConfig {
+  /**
+   * Fraction of a building's `buildCost` returned to the treasury when it is removed, in permille
+   * (1000 = full refund, 0 = none). Integer so the refund math stays exact and deterministic.
+   */
+  buildRefundPermille: number
+}
+
+/** The default rules: full (100%) build refund. */
+export function createGameConfig(): GameConfig {
+  return { buildRefundPermille: 1000 }
+}
+
+/** Refund `refund` scaled by the config's permille into the treasury (used on removal). */
+export function refundTreasury(
+  t: TreasuryStore,
+  config: GameConfig,
+  refund: readonly CostEntry[],
+): void {
+  const per = Math.max(0, config.buildRefundPermille)
+  for (let a = 0; a < refund.length; a++) {
+    const back = Math.floor((refund[a]!.amount * per) / 1000)
+    depositTreasury(t, refund[a]!.color, back)
+  }
+}
+
 export interface GameState {
   /** The belt network. */
   readonly grid: BeltGrid
@@ -1370,6 +1523,10 @@ export interface GameState {
   readonly villages: VillageStore
   /** The live research progression — labs consume packs to complete the active technology. */
   readonly research: ResearchStore
+  /** The global build-cost bank spent on placement and refilled by depots. */
+  readonly treasury: TreasuryStore
+  /** New-game rule settings (build refund, …) — carried here so they save and stay deterministic. */
+  readonly config: GameConfig
 }
 
 export function createGameState(moveEvery = 60): GameState {
@@ -1379,6 +1536,8 @@ export function createGameState(moveEvery = 60): GameState {
     buildings: createBuildingStore(),
     villages: createVillageStore(),
     research: createResearchStore(),
+    treasury: createTreasuryStore(),
+    config: createGameConfig(),
   }
 }
 
@@ -1439,6 +1598,8 @@ export interface BuildingSnapshot {
   readonly bw: number
   readonly bh: number
   readonly crafts: number
+  /** 1 if this building is a treasury depot. Absent in pre-treasury saves → treated as 0. */
+  readonly depot?: number
   /** The crafter's recipe id (0 = empty machine). Absent in pre-recipe saves → treated as 0. */
   readonly recipe?: number
   readonly craftEvery: number
@@ -1462,13 +1623,31 @@ export interface VillageSnapshot {
   readonly entries: readonly VillageEntrySnapshot[]
 }
 
+/** The treasury bank: its distinct resource colours and banked amounts, in dense index order. */
+export interface TreasurySnapshot {
+  readonly entries: readonly { readonly color: number; readonly amount: number }[]
+}
+
+/** Capture the treasury as a plain snapshot (dense index order → byte-identical round-trip). */
+export function serializeTreasury(t: TreasuryStore): TreasurySnapshot {
+  const entries: { color: number; amount: number }[] = []
+  for (let i = 0; i < t.n; i++) entries.push({ color: t.color[i]!, amount: t.amount[i]! })
+  return { entries }
+}
+
+/** Load a treasury snapshot into an existing store in place (systems close over the store). */
+export function loadTreasurySnapshot(t: TreasuryStore, snap: TreasurySnapshot): void {
+  t.n = 0
+  for (const e of snap.entries) depositTreasury(t, e.color, e.amount)
+}
+
 /**
  * Plain, JSON-safe capture of the whole base-game {@link GameState} — everything the sim keeps
- * outside the ECS (belt grid, building stockpiles, terrain types, villages, research). This is
- * what the base game contributes to a save's per-mod state blob so nothing sim-critical is
- * dropped. Terrain is emitted sorted by packed key so the capture is canonical (Map order is
- * insertion-dependent); belts/buildings/villages keep dense-index order (rebuilt in the same
- * order, so a round-trip re-serializes byte-identically).
+ * outside the ECS (belt grid, building stockpiles, terrain types, villages, research, the treasury
+ * bank and the new-game config). This is what the base game contributes to a save's per-mod state
+ * blob so nothing sim-critical is dropped. Terrain is emitted sorted by packed key so the capture
+ * is canonical (Map order is insertion-dependent); belts/buildings/villages keep dense-index order
+ * (rebuilt in the same order, so a round-trip re-serializes byte-identically).
  */
 export interface GameStateSnapshot {
   readonly belt: BeltSnapshot
@@ -1476,6 +1655,10 @@ export interface GameStateSnapshot {
   readonly terrain: readonly (readonly [number, number])[]
   readonly villages: VillageSnapshot
   readonly research: ResearchSnapshot
+  /** The build-cost bank. Absent in pre-treasury saves → loads as empty. */
+  readonly treasury?: TreasurySnapshot
+  /** New-game rule settings. Absent in pre-treasury saves → loads as defaults. */
+  readonly config?: GameConfig
 }
 
 /** Capture the base game's {@link GameState} as a plain snapshot (see {@link loadGameState}). */
@@ -1517,6 +1700,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       bw: store.bw[b]!,
       bh: store.bh[b]!,
       crafts: store.crafts[b]!,
+      depot: store.depot[b]!,
       recipe: store.recipe[b]!,
       craftEvery: store.craftEvery[b]!,
       craftTimer: store.craftTimer[b]!,
@@ -1546,6 +1730,8 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
     terrain,
     villages: { stages: v.stages, timer: v.timer, entries },
     research: serializeResearch(state.research),
+    treasury: serializeTreasury(state.treasury),
+    config: { buildRefundPermille: state.config.buildRefundPermille },
   }
 }
 
@@ -1626,6 +1812,7 @@ export function loadGameState(
     store.bw[b] = bldg.bw
     store.bh[b] = bldg.bh
     store.crafts[b] = bldg.crafts
+    store.depot[b] = bldg.depot ?? 0
     store.recipe[b] = bldg.recipe ?? 0
     store.craftEvery[b] = bldg.craftEvery
     store.craftTimer[b] = bldg.craftTimer
@@ -1679,6 +1866,12 @@ export function loadGameState(
 
   // Research: mutate the existing store in place (systems close over it).
   loadResearchSnapshot(state.research, snap.research)
+
+  // Treasury + config: mutate in place too. Both are optional so a pre-treasury save loads as an
+  // empty bank with default rules.
+  loadTreasurySnapshot(state.treasury, snap.treasury ?? { entries: [] })
+  state.config.buildRefundPermille =
+    snap.config?.buildRefundPermille ?? createGameConfig().buildRefundPermille
 }
 
 /**
@@ -1714,6 +1907,13 @@ export interface PlaceBuildingCommand {
    * Only meaningful when `accepts` gives it a stockpile; omitted/false for a plain store.
    */
   readonly researchLab?: boolean
+  /**
+   * Register this building as a *depot* (a treasury sink): items belted into it are banked in the
+   * global {@link TreasuryStore} rather than stocked. Needs no `accepts`. Omitted/false otherwise.
+   */
+  readonly depot?: boolean
+  /** Build cost charged from the treasury; the placement is dropped if unaffordable. Omitted = free. */
+  readonly cost?: readonly CostEntry[]
 }
 
 /** Place a conveyor running from tile A to tile B. */
@@ -1732,6 +1932,12 @@ export interface PlaceBeltCommand {
    * facing (a length-1 run has no drawn direction to project, so it would otherwise default East).
    */
   readonly face?: number
+  /**
+   * Total build cost for the whole run (the host multiplies the per-tile belt cost by the run
+   * length). Charged all-or-nothing from the treasury; the run is dropped if unaffordable. Free
+   * when omitted.
+   */
+  readonly cost?: readonly CostEntry[]
 }
 
 /**
@@ -1755,6 +1961,8 @@ export interface PlacePortCommand {
    * the underlying belt tile's facing — back-compat for callers that pre-date rotation.
    */
   readonly dir?: number
+  /** Build cost charged from the treasury; the port is dropped if unaffordable. Omitted = free. */
+  readonly cost?: readonly CostEntry[]
 }
 
 /** Mark the belt tile at (x, y) a splitter. A splitter off any belt is dropped. */
@@ -1764,6 +1972,8 @@ export interface PlaceSplitterCommand {
   readonly y: number
   /** Color of the splitter's footprint. */
   readonly color: number
+  /** Build cost charged from the treasury; the splitter is dropped if unaffordable. Omitted = free. */
+  readonly cost?: readonly CostEntry[]
 }
 
 /** One resource flow of a crafter recipe: a resource colour and its per-craft amount. */
@@ -1808,6 +2018,11 @@ export interface PlaceCrafterCommand {
    * {@link TERRAIN_NONE}/omitted for a crafter that may sit anywhere.
    */
   readonly requiresTerrainType?: number
+  /**
+   * Build cost charged from the treasury; the crafter is dropped if unaffordable. Checked *after*
+   * the terrain gate, so a placement blocked by terrain is never charged. Omitted = free.
+   */
+  readonly cost?: readonly CostEntry[]
 }
 
 /**
@@ -1841,6 +2056,12 @@ export interface RemoveCommand {
   readonly type: 'remove'
   readonly x: number
   readonly y: number
+  /**
+   * The removed object's build cost, so the treasury can be credited its (config-scaled) refund —
+   * the host supplies it from whatever prototype sits at (x, y). Only applied when something is
+   * actually removed; omitted (or on a no-op remove) means no refund.
+   */
+  readonly refund?: readonly CostEntry[]
 }
 
 /**
@@ -1914,6 +2135,7 @@ function copyBuilding(s: BuildingStore, src: number, dst: number): void {
   s.bw[dst] = s.bw[src]!
   s.bh[dst] = s.bh[src]!
   s.crafts[dst] = s.crafts[src]!
+  s.depot[dst] = s.depot[src]!
   s.recipe[dst] = s.recipe[src]!
   s.craftEvery[dst] = s.craftEvery[src]!
   s.craftTimer[dst] = s.craftTimer[src]!
@@ -1964,17 +2186,35 @@ function removeBuilding(api: ModApi, store: BuildingStore, g: BeltGrid, b: numbe
   store.count--
 }
 
+/**
+ * Charge `cost` from the treasury for a placement. Returns false — telling the caller to drop the
+ * placement — when the pool cannot cover it; otherwise spends and returns true. A free placement
+ * (no/empty cost) always proceeds. Must be called only *after* any non-cost drop check (terrain,
+ * off-belt) so a placement rejected for another reason is never charged.
+ */
+function charge(state: GameState, cost: readonly CostEntry[] | undefined): boolean {
+  if (cost === undefined || cost.length === 0) return true
+  if (!canAffordTreasury(state.treasury, cost)) return false
+  spendTreasury(state.treasury, cost)
+  return true
+}
+
 function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCommand): void {
   const g = state.grid
   switch (cmd.type) {
     case 'place_building': {
+      if (!charge(state, cmd.cost)) return
       const eid = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
         color: cmd.color,
         width: cmd.w,
         height: cmd.h,
       })
-      if (cmd.accepts && cmd.accepts.length > 0) {
+      const accepts = cmd.accepts ?? []
+      // A store, a lab or a depot is registered in the building store; plain scenery (no accepts,
+      // not a depot) just gets a footprint entity. A depot needs no accept slots (it banks to the
+      // treasury), so register it even with an empty accept list.
+      if (accepts.length > 0 || cmd.depot) {
         registerBuilding(
           state.buildings,
           eid,
@@ -1984,7 +2224,8 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
           cmd.h,
           0,
           1,
-          storeSlots(cmd.accepts),
+          storeSlots(accepts),
+          cmd.depot ? 1 : 0,
         )
         relinkUnlinkedPorts(g, state.buildings)
         // A lab is a store the research system drains its packs from; anchor it by tile.
@@ -1993,6 +2234,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       return
     }
     case 'place_belt': {
+      if (!charge(state, cmd.cost)) return
       const { dx, dy, length } = projectBelt(cmd.ax, cmd.ay, cmd.bx, cmd.by)
       // A forced facing (blueprint paste) wins over the direction projected from the drawn run.
       const face = cmd.face !== undefined ? cmd.face & 3 : dirOf(dx, dy)
@@ -2007,6 +2249,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
     case 'place_port': {
       const t = tileAt(g, cmd.x, cmd.y)
       if (t === NONE) return // a port must sit on a belt; off-belt placements are dropped.
+      if (!charge(state, cmd.cost)) return
       // The arrow facing — and, for an output, the direction drained items leave on — is the
       // placed rotation when the host supplies one; otherwise keep the tile's belt facing.
       if (cmd.dir !== undefined) g.face[t] = cmd.dir & 3
@@ -2033,6 +2276,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
     case 'place_splitter': {
       const t = tileAt(g, cmd.x, cmd.y)
       if (t === NONE) return // a splitter must sit on a belt; off-belt placements are dropped.
+      if (!charge(state, cmd.cost)) return
       g.kind[t] = KIND_SPLITTER
       g.rr[t] = 0
       rebuildTopology(g)
@@ -2051,6 +2295,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       // terrain (an unrestricted crafter carries TERRAIN_NONE and places anywhere).
       const need = cmd.requiresTerrainType ?? TERRAIN_NONE
       if (need !== TERRAIN_NONE && terrainTypeAt(state.terrain, cmd.x, cmd.y) !== need) return
+      if (!charge(state, cmd.cost)) return
       const eid = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
         sprite: sprite(SHAPE_CRAFTER, 0),
@@ -2130,10 +2375,14 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       const t = tileAt(g, cmd.x, cmd.y)
       if (t !== NONE) {
         removeBeltTile(api, g, t)
+        if (cmd.refund) refundTreasury(state.treasury, state.config, cmd.refund)
         return
       }
       const b = buildingAt(state.buildings, cmd.x, cmd.y)
-      if (b !== NONE) removeBuilding(api, state.buildings, g, b)
+      if (b !== NONE) {
+        removeBuilding(api, state.buildings, g, b)
+        if (cmd.refund) refundTreasury(state.treasury, state.config, cmd.refund)
+      }
       return
     }
   }
@@ -2159,7 +2408,7 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
   }
 
   const beltSystem: System = (gw) => {
-    updateBelts(gw, api, state.grid, state.buildings)
+    updateBelts(gw, api, state.grid, state.buildings, state.treasury)
   }
 
   const villageSystem: System = () => {

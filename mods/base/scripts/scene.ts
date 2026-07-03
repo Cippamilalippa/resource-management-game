@@ -28,6 +28,7 @@ import {
   registerBuilding,
   registerVillage,
   villageDemandNeed,
+  depositTreasury,
   MAX_SLOTS,
   TERRAIN_SPRITE,
   ROLE_DEPOSIT,
@@ -35,16 +36,23 @@ import {
   type BuildingSlot,
   type BuildingStore,
   type GameState,
+  type TreasuryStore,
   type VillageStageConfig,
 } from './sim.ts'
 
 /** The prototype shape this scene reads (only a handful of fields are consulted). */
 export type SceneProto = Record<string, unknown>
 
-/** Config passed to {@link spawnScene}: which starting scenario to lay out. */
+/** Config passed to {@link spawnScene}: which starting scenario to lay out, and rule overrides. */
 export interface SceneConfig {
   /** Scenario prototype id (e.g. `scenario.abundant`); falls back to {@link DEFAULT_SCENARIO}. */
   readonly scenario?: string
+  /**
+   * Build-refund setting for the new game, in permille (1000 = full refund). New-game screens set
+   * this; omitted keeps the sim default (see {@link createGameConfig}). Carried into
+   * {@link GameState.config} so it saves and stays deterministic.
+   */
+  readonly refundPermille?: number
 }
 
 /** The scenario used when none is chosen (headless runs, older callers). */
@@ -82,6 +90,7 @@ interface ScenarioConfig {
   readonly patch: { readonly min: number; readonly max: number }
   readonly spread: { readonly min: number; readonly max: number }
   readonly startingKit: readonly { readonly item: string; readonly amount: number }[]
+  readonly startingTreasury: readonly { readonly item: string; readonly amount: number }[]
 }
 
 function colorOf(proto: SceneProto | undefined, fallback: number): number {
@@ -126,20 +135,29 @@ function scenarioConfigOf(
   const deposits = Array.isArray(proto?.deposits)
     ? proto.deposits.filter((d): d is string => typeof d === 'string')
     : FALLBACK_DEPOSITS.map((d) => d.id)
-  const kitRaw = Array.isArray(proto?.startingKit) ? proto.startingKit : []
-  const startingKit: { item: string; amount: number }[] = []
-  for (const k of kitRaw) {
-    const e = (k ?? {}) as Record<string, unknown>
-    if (typeof e.item === 'string' && typeof e.amount === 'number' && e.amount > 0) {
-      startingKit.push({ item: e.item, amount: Math.floor(e.amount) })
-    }
-  }
   return {
     deposits: deposits.length > 0 ? deposits : FALLBACK_DEPOSITS.map((d) => d.id),
     patch: rangeOf(proto, 'patchSize', 4, 5),
     spread: rangeOf(proto, 'spread', 6, 18),
-    startingKit,
+    startingKit: flowListOf(proto, 'startingKit'),
+    startingTreasury: flowListOf(proto, 'startingTreasury'),
   }
+}
+
+/** Parse a `{ item, amount }[]` flow list off a scenario field, skipping malformed entries. */
+function flowListOf(
+  proto: SceneProto | undefined,
+  field: string,
+): { item: string; amount: number }[] {
+  const raw = Array.isArray(proto?.[field]) ? (proto[field] as unknown[]) : []
+  const out: { item: string; amount: number }[] = []
+  for (const k of raw) {
+    const e = (k ?? {}) as Record<string, unknown>
+    if (typeof e.item === 'string' && typeof e.amount === 'number' && e.amount > 0) {
+      out.push({ item: e.item, amount: Math.floor(e.amount) })
+    }
+  }
+  return out
 }
 
 /** Fallback colour for a deposit terrain id (used only if the terrain prototype is missing). */
@@ -214,6 +232,21 @@ function villageStagesOf(
  * Deposit each starting-kit entry into a building's matching stockpile slot (by resource colour),
  * capped at the slot. Used to grant the village a small grace buffer at spawn. Off the hot path.
  */
+/**
+ * Seed the global build-cost treasury with a scenario's starting balance (item id → colour →
+ * banked amount). This is the player's opening stock — what they can build before any depot has
+ * refilled the pool. Off the hot path (new-game only).
+ */
+function seedTreasury(
+  getProto: (id: string) => SceneProto | undefined,
+  treasury: TreasuryStore,
+  balance: readonly { item: string; amount: number }[],
+): void {
+  for (const entry of balance) {
+    depositTreasury(treasury, colorOf(getProto(entry.item), 0xffffff), entry.amount)
+  }
+}
+
 function grantStartingKit(
   getProto: (id: string) => SceneProto | undefined,
   store: BuildingStore,
@@ -284,6 +317,12 @@ export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = 
     api.emit('base:spawn', { protoId, x, y })
   }
   const scenario = scenarioConfigOf(getProto, config.scenario ?? DEFAULT_SCENARIO)
+
+  // New-game rule overrides + the opening treasury balance the player builds from.
+  if (config.refundPermille !== undefined) {
+    state.config.buildRefundPermille = Math.max(0, Math.floor(config.refundPermille))
+  }
+  seedTreasury(getProto, state.treasury, scenario.startingTreasury)
 
   // Village: a 2x2 block centered on the origin (top-left at -1,-1).
   const village = getProto('building.village')

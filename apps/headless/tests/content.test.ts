@@ -254,6 +254,59 @@ describe('validateContent', () => {
     })
     expect(() => validateContent(reg)).toThrow(/item\.ghost/)
   })
+
+  it('accepts a well-formed buildCost on a buildable', () => {
+    const reg = validRegistry()
+    // A furnace that costs 2 plates to place — the treasury-cost the placement charges.
+    reg.register({
+      id: 'building.priced_furnace',
+      type: 'crafter',
+      craftingCategories: ['smelting'],
+      speed: 1,
+      storage: 100,
+      buildCost: [{ item: 'item.plate', amount: 2 }],
+    })
+    expect(() => validateContent(reg)).not.toThrow()
+  })
+
+  it('rejects a buildCost that references a missing item', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'building.badcost',
+      type: 'crafter',
+      craftingCategories: ['smelting'],
+      speed: 1,
+      storage: 100,
+      buildCost: [{ item: 'item.ghost', amount: 1 }],
+    })
+    expect(() => validateContent(reg)).toThrow(/item\.ghost/)
+  })
+
+  it('rejects a buildCost with a non-positive amount', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'building.freecost',
+      type: 'crafter',
+      craftingCategories: ['smelting'],
+      speed: 1,
+      storage: 100,
+      buildCost: [{ item: 'item.plate', amount: 0 }],
+    })
+    expect(() => validateContent(reg)).toThrow(/amount/)
+  })
+
+  it('rejects a scenario startingTreasury item that references a missing item', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.badbank',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      startingTreasury: [{ item: 'item.ghost', amount: 5 }],
+    })
+    expect(() => validateContent(reg)).toThrow(/item\.ghost/)
+  })
 })
 
 describe('scenarioList', () => {

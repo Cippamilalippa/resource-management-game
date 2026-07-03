@@ -15,7 +15,9 @@ import {
   VILLAGE_GROWTH_AFTER,
   VILLAGE_DECLINE_AFTER,
   buildingAt,
+  canAffordTreasury,
   type BuildingStore,
+  type CostEntry,
   type GameState,
 } from './sim.ts'
 
@@ -127,6 +129,28 @@ export function researchProgress(state: GameState): ResearchProgress {
     cost,
     completed: r.completed.slice(),
   }
+}
+
+/** One banked resource in the build-cost treasury: its colour and how many units are held. */
+export interface TreasuryBalance {
+  readonly color: number
+  readonly amount: number
+}
+
+/**
+ * The current treasury balances, in the bank's dense index order, for the build-cost readout. The
+ * host maps each colour back to its item name/icon (the sim stays string-agnostic). Read-only.
+ */
+export function treasuryBalances(state: GameState): TreasuryBalance[] {
+  const t = state.treasury
+  const out: TreasuryBalance[] = []
+  for (let i = 0; i < t.n; i++) out.push({ color: t.color[i]!, amount: t.amount[i]! })
+  return out
+}
+
+/** Whether the treasury can currently afford `cost` — for greying out an unaffordable buildable. */
+export function canAfford(state: GameState, cost: readonly CostEntry[]): boolean {
+  return canAffordTreasury(state.treasury, cost)
 }
 
 /** Why a crafter is stalled, or a village is losing population. */

@@ -154,6 +154,37 @@ function startingKit(proto: Prototype): { item: string; amount: number }[] {
   return flows(proto, 'startingKit')
 }
 
+/** The `{ item, amount }[]` starting balance a scenario seeds into the build-cost treasury. */
+function startingTreasury(proto: Prototype): { item: string; amount: number }[] {
+  return flows(proto, 'startingTreasury')
+}
+
+/**
+ * The `{ item, amount }[]` a building/belt/port/… costs from the treasury to place. Empty for a
+ * free placement. The prototype types that may bear a `buildCost` (everything the player can build).
+ */
+export const COST_BEARING_TYPES = [
+  'crafter',
+  'building',
+  'belt',
+  'splitter',
+  'input',
+  'output',
+  'village',
+] as const
+
+/** Read and shape-validate a prototype's `buildCost` flow list (item id + positive amount). */
+export function buildCostOf(proto: Prototype): { item: string; amount: number }[] {
+  return flows(proto, 'buildCost')
+}
+
+/** Shape-check every cost-bearing prototype's `buildCost` (empty/absent is fine — a free build). */
+function validateBuildCostShapes(registry: PrototypeRegistry): void {
+  for (const type of COST_BEARING_TYPES) {
+    for (const p of registry.listByType(type)) buildCostOf(p)
+  }
+}
+
 /**
  * Validate every scenario prototype's shape: a non-empty terrain `deposits` list, positive-integer
  * `patchSize`/`spread` ranges, and a well-formed `startingKit` flow list. The starting scene
@@ -166,6 +197,7 @@ function validateScenarioShapes(registry: PrototypeRegistry): void {
     intRange(s, 'patchSize')
     intRange(s, 'spread')
     startingKit(s)
+    startingTreasury(s)
   }
 }
 
@@ -222,8 +254,16 @@ export function validateContent(registry: PrototypeRegistry): void {
   validateCrafterShapes(registry)
   validateVillageShapes(registry)
   validateScenarioShapes(registry)
+  validateBuildCostShapes(registry)
 
   validateReferences(registry, [
+    // Every cost-bearing type's `buildCost` must reference known items.
+    ...COST_BEARING_TYPES.map((type) => ({
+      type,
+      select: (p: Prototype) => buildCostOf(p).map((c) => c.item),
+      expectType: 'item',
+      label: 'buildCost',
+    })),
     {
       type: 'recipe',
       select: (r) => flows(r, 'ingredients').map((f) => f.item),
@@ -274,6 +314,12 @@ export function validateContent(registry: PrototypeRegistry): void {
       select: (s) => startingKit(s).map((k) => k.item),
       expectType: 'item',
       label: 'startingKit',
+    },
+    {
+      type: 'scenario',
+      select: (s) => startingTreasury(s).map((k) => k.item),
+      expectType: 'item',
+      label: 'startingTreasury',
     },
   ])
 

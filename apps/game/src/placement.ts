@@ -61,6 +61,34 @@ export function installPlacement(
 ): { refresh: () => void } {
   const grid = state.grid
 
+  /** One resource cost line the sim charges/refunds: a resource colour and a unit amount. */
+  type Cost = readonly { readonly color: number; readonly amount: number }[]
+
+  /** Scale a per-unit cost by `n` (a belt run length), or undefined when there's nothing to charge. */
+  const scaleCost = (cost: Cost | undefined, n: number): Cost | undefined =>
+    cost && cost.length > 0
+      ? cost.map((c) => ({ color: c.color, amount: c.amount * n }))
+      : undefined
+
+  /**
+   * The build cost the palette assigns to a footprint colour. Used where placement/removal works
+   * from a placed object's colour rather than a live tool selection — the delete-refund and the
+   * blueprint-paste paths — so a pasted or removed object is charged/refunded the same as one
+   * placed directly.
+   */
+  const costForColor = (color: number): Cost | undefined => {
+    for (const it of buildStore.get().items) {
+      if (it.color === color && it.cost && it.cost.length > 0) return it.cost
+    }
+    return undefined
+  }
+
+  /** The colour of whatever deletable object sits at (x, y), for looking up its refund. */
+  const colorAt = (x: number, y: number): number | null => {
+    const info = resolveInspect(world, grid, state.buildings, state.villages, registry, x, y)
+    return info ? info.color : null
+  }
+
   // The recipe picker (sidebar) drives recipe changes on the pinned crafter through here — only the
   // host owns the world, so the store just carries intent and this enqueues the command.
   recipeStore.setController({
@@ -328,8 +356,12 @@ export function installPlacement(
     if (!bp) return
     const o = pasteOrigin(tile, bp)
     for (const p of blueprintPlacements(bp, o.x, o.y)) {
+      // Paste works from placed colours, so each tile is charged the same cost the palette assigns
+      // to that colour (a belt run scaled by its length) — pasting is never cheaper than building.
+      const cost = costForColor(p.color)
       switch (p.kind) {
-        case 'belt':
+        case 'belt': {
+          const beltCost = scaleCost(cost, projectBelt(p.ax, p.ay, p.bx, p.by).length)
           enqueuePlaceBelt(world, {
             ax: p.ax,
             ay: p.ay,
@@ -338,9 +370,11 @@ export function installPlacement(
             color: p.color,
             moveEvery: p.moveEvery,
             face: p.face,
+            ...(beltCost ? { cost: beltCost } : {}),
           })
           registry.record(p.ax, p.ay, { name: pasteName(p), type: 'belt' })
           break
+        }
         case 'port':
           enqueuePlacePort(world, {
             x: p.x,
@@ -349,11 +383,17 @@ export function installPlacement(
             color: p.color,
             spawnEvery: p.spawnEvery,
             dir: p.dir,
+            ...(cost ? { cost } : {}),
           })
           registry.record(p.x, p.y, { name: pasteName(p), type: p.port })
           break
         case 'splitter':
-          enqueuePlaceSplitter(world, { x: p.x, y: p.y, color: p.color })
+          enqueuePlaceSplitter(world, {
+            x: p.x,
+            y: p.y,
+            color: p.color,
+            ...(cost ? { cost } : {}),
+          })
           registry.record(p.x, p.y, { name: pasteName(p), type: 'splitter' })
           break
         case 'building':
@@ -365,6 +405,7 @@ export function installPlacement(
             color: p.color,
             accepts: p.accepts,
             ...(p.researchLab ? { researchLab: true } : {}),
+            ...(cost ? { cost } : {}),
           })
           registry.record(p.x, p.y, { name: pasteName(p), type: 'building' })
           break
@@ -378,6 +419,7 @@ export function installPlacement(
             craftEvery: p.craftEvery,
             storageCap: p.storageCap,
             ...(p.recipe ? { recipe: p.recipe, inputs: p.inputs, outputs: p.outputs } : {}),
+            ...(cost ? { cost } : {}),
           })
           registry.record(p.x, p.y, { name: pasteName(p), type: 'producer' })
           break
@@ -536,7 +578,10 @@ export function installPlacement(
       const start = pressTile
       pressTile = null
       if (start && start.x === tile.x && start.y === tile.y && deletableAt(tile.x, tile.y)) {
-        enqueueRemove(world, { x: tile.x, y: tile.y })
+        // Refund the removed object's build cost (the sim scales it by the game's refund setting).
+        const color = colorAt(tile.x, tile.y)
+        const refund = color === null ? undefined : costForColor(color)
+        enqueueRemove(world, { x: tile.x, y: tile.y, ...(refund ? { refund } : {}) })
       }
       return
     }
@@ -558,6 +603,8 @@ export function installPlacement(
         color: item.color,
         accepts: item.accepts.map((color) => ({ color, cap: item.storage })),
         ...(item.researchLab ? { researchLab: true } : {}),
+        ...(item.depot ? { depot: true } : {}),
+        ...(item.cost ? { cost: item.cost } : {}),
       })
       registry.record(tile.x, tile.y, { name: item.name, type: 'building' })
       return
@@ -572,13 +619,19 @@ export function installPlacement(
         color: item.color,
         spawnEvery: item.spawnEvery,
         dir: placeDir,
+        ...(item.cost ? { cost: item.cost } : {}),
       })
       registry.record(tile.x, tile.y, { name: item.name, type: item.port })
       return
     }
     // Splitter: also drops onto the belt tile under the cursor (ignored off-belt).
     if (item.kind === 'splitter') {
-      enqueuePlaceSplitter(world, { x: tile.x, y: tile.y, color: item.color })
+      enqueuePlaceSplitter(world, {
+        x: tile.x,
+        y: tile.y,
+        color: item.color,
+        ...(item.cost ? { cost: item.cost } : {}),
+      })
       registry.record(tile.x, tile.y, { name: item.name, type: 'splitter' })
       return
     }
@@ -602,6 +655,7 @@ export function installPlacement(
         craftEvery: recipe?.craftEvery ?? item.produceEvery,
         storageCap: item.storage,
         ...(recipe ? { recipe: recipe.int, inputs: recipe.inputs, outputs: recipe.outputs } : {}),
+        ...(item.cost ? { cost: item.cost } : {}),
       })
       registry.record(tile.x, tile.y, { name: item.name, type: 'producer' })
       return
@@ -610,6 +664,10 @@ export function installPlacement(
     const start = beltStart
     beltStart = null
     if (!start || (start.x === tile.x && start.y === tile.y)) return
+    // Name every tile along the projected run so each is inspectable; the run length also scales
+    // the belt's per-tile cost into the all-or-nothing charge the sim applies.
+    const { dx, dy, length } = projectBelt(start.x, start.y, tile.x, tile.y)
+    const beltCost = scaleCost(item.cost, length)
     enqueuePlaceBelt(world, {
       ax: start.x,
       ay: start.y,
@@ -617,9 +675,8 @@ export function installPlacement(
       by: tile.y,
       color: item.color,
       moveEvery: item.moveEvery,
+      ...(beltCost ? { cost: beltCost } : {}),
     })
-    // Name every tile along the projected run so each is inspectable.
-    const { dx, dy, length } = projectBelt(start.x, start.y, tile.x, tile.y)
     for (let i = 0; i < length; i++) {
       registry.record(start.x + dx * i, start.y + dy * i, { name: item.name, type: 'belt' })
     }
