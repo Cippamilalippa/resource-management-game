@@ -7,7 +7,9 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
     title: 'Camera',
     keys: [
       ['WASD', 'Pan'],
+      ['Screen edge', 'Pan'],
       ['Scroll', 'Zoom'],
+      ['F', 'Focus on cursor'],
     ],
   },
   {

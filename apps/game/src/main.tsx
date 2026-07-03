@@ -293,6 +293,14 @@ async function boot(): Promise<void> {
   globalThis.addEventListener('resize', () => {
     renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
   })
+  // Suppress edge-of-screen camera panning unless a session is actively on screen and no save
+  // overlay is open, so the view doesn't drift under a modal or on the menu shell.
+  const syncEdgeScroll = (): void => {
+    renderer.edgeScroll = appStore.get().phase === 'playing' && !saveStore.get().open
+  }
+  appStore.subscribe(syncEdgeScroll)
+  saveStore.subscribe(syncEdgeScroll)
+  syncEdgeScroll()
 
   /**
    * The live sim the render loop drives. Swapped wholesale on new-game/load: a fresh

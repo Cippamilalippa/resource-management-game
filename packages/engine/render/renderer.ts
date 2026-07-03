@@ -116,6 +116,19 @@ export class Renderer {
    */
   #colorVals = new Map<number, number>()
   readonly #gridExtent: number
+  /**
+   * Last pointer position (client px) and whether it is over the canvas — so keyboard actions
+   * (Q pick, F focus) can resolve the tile under the cursor, and edge panning knows the cursor
+   * is on screen, without a pointer event of their own.
+   */
+  #lastClientX = 0
+  #lastClientY = 0
+  #pointerInside = false
+  /**
+   * When false, edge-of-screen panning is suppressed. The app flips this off while a modal (save
+   * menu, help) is open so the camera doesn't drift under the overlay.
+   */
+  edgeScroll = true
 
   /** Called when the pointer moves over a new tile. */
   onTileHover: ((tile: GridCoord) => void) | null = null
@@ -512,10 +525,6 @@ export class Renderer {
   #installInput(): void {
     const canvas = this.#app.canvas
     let pressed = false
-    // Last pointer position (client px), so a keypress (e.g. Q pick) can resolve the tile under
-    // the cursor without a pointer event of its own.
-    let lastClientX = 0
-    let lastClientY = 0
 
     const tileAt = (clientX: number, clientY: number): GridCoord => {
       const rect = canvas.getBoundingClientRect()
@@ -540,48 +549,63 @@ export class Renderer {
       pressed = false
     })
     globalThis.addEventListener('pointermove', (e) => {
-      lastClientX = e.clientX
-      lastClientY = e.clientY
+      this.#lastClientX = e.clientX
+      this.#lastClientY = e.clientY
       const tile = tileAt(e.clientX, e.clientY)
       if (pressed && this.onDragMove) this.onDragMove(tile)
       if (this.onTileHover) this.onTileHover(tile)
     })
+    // Track whether the cursor is over the canvas so edge panning only kicks in on screen.
+    canvas.addEventListener('pointerenter', () => (this.#pointerInside = true))
+    canvas.addEventListener('pointerleave', () => (this.#pointerInside = false))
     canvas.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault()
         const rect = canvas.getBoundingClientRect()
         const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
-        this.#camera.zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor)
+        this.#camera.zoomTo(e.clientX - rect.left, e.clientY - rect.top, factor)
       },
       { passive: false },
     )
 
     // R rotates the armed placement (e.g. a port's arrow); Q picks the tool under the cursor
-    // ("pipette"). The app owns the resulting state; the renderer just relays the keypress (it
-    // never mutates sim state). Q resolves the tile from the last pointer position. Both ignore
-    // keystrokes aimed at a text field so typing a save/blueprint name isn't hijacked.
+    // ("pipette"); F smoothly re-centers the camera on the tile under the cursor (a follow that
+    // glides in and settles, released by any manual pan). The app owns the resulting state; the
+    // renderer just relays the keypress (it never mutates sim state). Q/F resolve the tile from
+    // the last pointer position. All ignore keystrokes aimed at a text field so typing a
+    // save/blueprint name isn't hijacked.
     globalThis.addEventListener('keydown', (e) => {
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       const k = e.key.toLowerCase()
       if (k === 'r' && this.onRotate) this.onRotate()
-      else if (k === 'q' && this.onPick) this.onPick(tileAt(lastClientX, lastClientY))
+      else if (k === 'q' && this.onPick) this.onPick(tileAt(this.#lastClientX, this.#lastClientY))
+      else if (k === 'f') {
+        const tile = tileAt(this.#lastClientX, this.#lastClientY)
+        // Glide to the tile centre; a constant target eases in and settles at the viewport centre.
+        const point = { x: (tile.x + 0.5) * TILE_SIZE, y: (tile.y + 0.5) * TILE_SIZE }
+        this.#camera.follow(() => point)
+      }
     })
 
-    this.#installKeyboardPan()
+    this.#installCameraDrive()
   }
 
   /**
-   * Pan the camera while WASD keys are held. The actual move happens on the Pixi
-   * ticker so panning is smooth and frame-rate independent (speed is in CSS px/sec).
+   * Drive the camera each frame off the Pixi ticker: integrate held WASD keys and edge-of-screen
+   * pointer position into a pan (screen px/sec, so it's frame-rate independent), then advance the
+   * camera's own zoom/follow smoothing. Panning input releases any active follow via `panBy`.
    */
-  #installKeyboardPan(): void {
+  #installCameraDrive(): void {
     const PAN_PX_PER_SEC = 700
+    const EDGE_MARGIN = 28
     const PAN_KEYS = new Set(['w', 'a', 's', 'd'])
     const held = new Set<string>()
 
     globalThis.addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       const k = e.key.toLowerCase()
       if (PAN_KEYS.has(k)) held.add(k)
     })
@@ -590,15 +614,33 @@ export class Renderer {
     globalThis.addEventListener('blur', () => held.clear())
 
     this.#app.ticker.add((ticker) => {
-      if (held.size === 0) return
-      const step = PAN_PX_PER_SEC * (ticker.deltaMS / 1000)
+      const dtMs = ticker.deltaMS
+      const step = PAN_PX_PER_SEC * (dtMs / 1000)
       let dx = 0
       let dy = 0
       if (held.has('a')) dx += step
       if (held.has('d')) dx -= step
       if (held.has('w')) dy += step
       if (held.has('s')) dy -= step
-      this.#camera.panBy(dx, dy)
+
+      // Edge scroll: pan when the on-screen cursor sits within a margin of a canvas edge. The
+      // strength ramps from 0 at the margin to full at the very edge so it eases in.
+      if (this.edgeScroll && this.#pointerInside) {
+        const rect = this.#app.canvas.getBoundingClientRect()
+        const px = this.#lastClientX - rect.left
+        const py = this.#lastClientY - rect.top
+        if (px >= 0 && px <= rect.width && py >= 0 && py <= rect.height) {
+          if (px < EDGE_MARGIN) dx += step * (1 - px / EDGE_MARGIN)
+          else if (px > rect.width - EDGE_MARGIN) dx -= step * (1 - (rect.width - px) / EDGE_MARGIN)
+          if (py < EDGE_MARGIN) dy += step * (1 - py / EDGE_MARGIN)
+          else if (py > rect.height - EDGE_MARGIN)
+            dy -= step * (1 - (rect.height - py) / EDGE_MARGIN)
+        }
+      }
+
+      if (dx !== 0 || dy !== 0) this.#camera.panBy(dx, dy)
+      this.#camera.setViewport(this.#app.screen.width, this.#app.screen.height)
+      this.#camera.update(dtMs)
     })
   }
 }

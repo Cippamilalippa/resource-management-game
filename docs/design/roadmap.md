@@ -173,7 +173,14 @@ world's seeded RNG), so mods keep their no-`Math.random` guarantee._
 
 - [ ] Placement/removal, craft-tick, research-complete, and village-level SFX.
 - [ ] Visual juice: build/remove animations, active-crafter indicators, belt item motion.
-- [ ] Camera: smooth pan/zoom, edge scroll, follow, minimap (reads sim only — never mutates).
+- [~] Camera: smooth pan/zoom, edge scroll, follow, minimap (reads sim only — never mutates).
+      _Smooth eased zoom (target-tracked, focal-stable), screen-edge panning, and a follow/focus
+      glide (F re-centers on the cursor tile) landed in [camera.ts](../../packages/engine/render/camera.ts),
+      driven off the render ticker in [renderer.ts](../../packages/engine/render/renderer.ts) and gated
+      by `renderer.edgeScroll` while a modal/menu is up. Covered by
+      [camera.test.ts](../../packages/engine/tests/camera.test.ts) (the Camera stays pure — its only
+      runtime dep is `@factory/shared`, so the pan/zoom/follow math is unit-tested without a GPU).
+      **Minimap still to come.**_
 - [ ] Icon/art pass for the expanded content set (build on `iconTextures` / `buildIcons`).
 
 ## M7 — Balancing & playtest harness (gates the slice)

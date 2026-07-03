@@ -3,4 +3,4 @@
  * from mutating the sim. Depends on core (for components/queries) only.
  */
 export { Renderer, type RendererOptions, type Ghost, type Highlight } from './renderer.ts'
-export { Camera } from './camera.ts'
+export { Camera, type WorldPoint } from './camera.ts'
