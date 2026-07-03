@@ -161,6 +161,27 @@ describe('belt', () => {
     sim.scheduler.runTicks(sim.world, 10)
     expect(entityCount(sim.world)).toBe(BASELINE + BELT_LEN)
   })
+
+  it('honours a forced facing (blueprint paste) on a length-1 run instead of defaulting East', async () => {
+    // A single-tile belt has no drawn direction to project (it would default to East, dir 1). The
+    // blueprint paste path forces the captured facing via `face` — here North (dir 0).
+    const sim = await bootstrapSim(1, { startScene: false })
+    enqueuePlaceBelt(sim.world, {
+      ax: 5,
+      ay: 5,
+      bx: 5,
+      by: 5,
+      color: 0x404040,
+      moveEvery: 1,
+      face: 0,
+    })
+    sim.scheduler.runTicks(sim.world, 1) // drain the queued placement so the grid is live
+    const g = sim.state.grid
+    let tile = -1
+    for (let t = 0; t < g.count; t++) if (g.tx[t]! === 5 && g.ty[t]! === 5) tile = t
+    expect(tile).not.toBe(-1)
+    expect(g.face[tile]!).toBe(0)
+  })
 })
 
 /**

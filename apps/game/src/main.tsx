@@ -11,6 +11,7 @@ import { SNAPSHOT_VERSION, type WorldSnapshot } from '@factory/engine/persistenc
 import { App } from './App.tsx'
 import { statsStore } from './statsStore.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
+import { blueprintStore } from './blueprintStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
 import { saveStore, type SaveController } from './saveStore.ts'
@@ -549,7 +550,13 @@ async function boot(): Promise<void> {
   globalThis.addEventListener('keydown', (e) => {
     const target = e.target as HTMLElement | null
     const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
-    if (e.key === 'F5') {
+    if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey) && !typing) {
+      // Ctrl/Cmd+C arms copy-select (drag a rectangle to capture, then click to paste). Only while
+      // a session is on screen; ignored while typing so it doesn't hijack text copy.
+      if (appStore.get().phase !== 'playing') return
+      e.preventDefault()
+      blueprintStore.armCopy()
+    } else if (e.key === 'F5') {
       e.preventDefault()
       void controller.quickSave()
     } else if (e.key === 'F9') {

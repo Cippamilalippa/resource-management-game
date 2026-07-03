@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { buildStore, type BuildItem } from './buildStore.ts'
+import { blueprintStore } from './blueprintStore.ts'
 import { Icon } from './Icon.tsx'
 import { GROUP_ICON, iconForItem } from './buildIcons.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
@@ -178,6 +179,11 @@ function DetailPanel({ hover }: { hover: Hover }): React.JSX.Element {
  */
 export function BuildBar(): React.JSX.Element | null {
   const state = useSyncExternalStore(buildStore.subscribe, buildStore.get, buildStore.get)
+  const clip = useSyncExternalStore(
+    blueprintStore.subscribe,
+    blueprintStore.get,
+    blueprintStore.get,
+  )
   // Which group is expanded (its kind), or null while showing the top-level group list.
   const [openKey, setOpenKey] = useState<string | null>(null)
   // What the cursor is currently over, surfaced in the detail panel; null when not hovering.
@@ -205,7 +211,11 @@ export function BuildBar(): React.JSX.Element | null {
       const target = e.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       if (e.key === 'Escape') {
-        if (openKey !== null) goBack()
+        // A clipboard tool (copy-select / paste) takes priority — Esc clears the cursor, matching
+        // Factorio (right-click also cancels). The naming/library overlays own their own Esc.
+        if (blueprintStore.get().mode !== 'idle' && !blueprintStore.get().naming) {
+          blueprintStore.cancel()
+        } else if (openKey !== null) goBack()
         else buildStore.clearSelection()
         return
       }
@@ -286,6 +296,25 @@ export function BuildBar(): React.JSX.Element | null {
           aria-pressed={state.deleting}
         >
           <Icon name="Trash2" size={22} />
+        </button>
+        <button
+          className={`tool tool-copy${clip.mode !== 'idle' ? ' selected' : ''}`}
+          onClick={() =>
+            clip.mode === 'idle' ? blueprintStore.armCopy() : blueprintStore.cancel()
+          }
+          title="Copy area (drag to select, then click to paste) · Ctrl+C"
+          aria-label="Copy area"
+          aria-pressed={clip.mode !== 'idle'}
+        >
+          <Icon name="Copy" size={22} />
+        </button>
+        <button
+          className="tool tool-blueprint"
+          onClick={() => blueprintStore.toggleLibrary()}
+          title="Blueprint library"
+          aria-label="Blueprint library"
+        >
+          <Icon name="ClipboardList" size={22} />
         </button>
       </div>
     </div>

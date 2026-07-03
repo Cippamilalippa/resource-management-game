@@ -14,9 +14,20 @@ import {
   terrainTypeAt,
   buildingAt,
   tileKey,
+  KIND_OUTPUT,
+  KIND_INPUT,
+  KIND_SPLITTER,
   type GameState,
 } from './gameLogic.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
+import { blueprintStore } from './blueprintStore.ts'
+import {
+  captureBlueprint,
+  blueprintPlacements,
+  blueprintGhostCells,
+  normalizeRect,
+  type Blueprint,
+} from './blueprint.ts'
 import { resolveInspect, type InspectInfo, type InspectRegistry } from './inspect.ts'
 import { inspectStore } from './inspectStore.ts'
 import { recipeStore } from './recipeStore.ts'
@@ -162,6 +173,10 @@ export function installPlacement(
   // Inspect-mode state: the last hovered tile, and the pinned object (tile + footprint), if any.
   let hoverTile: GridCoord | null = null
   let pinned: { tile: GridCoord; footprint: InspectInfo['footprint'] } | null = null
+  // Clipboard-mode state: the last tile the cursor was over (so a mode switch can redraw the paste
+  // ghost without a fresh pointer event), and the copy-select drag's start corner while dragging.
+  let cursorTile: GridCoord | null = null
+  let selectStart: GridCoord | null = null
 
   /** Push the current inspect view (pinned wins over hover) to the store and highlight. */
   const applyView = (): void => {
@@ -273,7 +288,162 @@ export function installPlacement(
     renderer.setGhost({ kind: 'rect', x: fp.x, y: fp.y, w: fp.w, h: fp.h, color: INVALID_COLOR })
   }
 
+  /** Top-left origin for stamping blueprint `bp` centred on the cursor tile — shared by ghost + stamp. */
+  const pasteOrigin = (tile: GridCoord, bp: Blueprint): GridCoord => ({
+    x: tile.x - Math.floor(bp.w / 2),
+    y: tile.y - Math.floor(bp.h / 2),
+  })
+
+  /** Draw the translucent multi-cell paste preview for the pending blueprint centred on `tile`. */
+  const drawPasteGhost = (tile: GridCoord): void => {
+    const bp = blueprintStore.get().pending
+    if (!bp) {
+      renderer.setGhost(null)
+      return
+    }
+    const o = pasteOrigin(tile, bp)
+    renderer.setGhost({ kind: 'cells', cells: blueprintGhostCells(bp, o.x, o.y) })
+  }
+
+  /** Fallback inspector name for a pasted placement of the given kind (used when the capture had none). */
+  const pasteName = (p: ReturnType<typeof blueprintPlacements>[number]): string => {
+    if (p.name) return p.name
+    switch (p.kind) {
+      case 'belt':
+        return 'Conveyor belt'
+      case 'port':
+        return p.port === 'output' ? 'Output port' : 'Input port'
+      case 'splitter':
+        return 'Splitter'
+      case 'crafter':
+        return 'Machine'
+      default:
+        return 'Structure'
+    }
+  }
+
+  /** Stamp the pending blueprint at the cursor: enqueue every placement and name each tile. */
+  const stampPaste = (tile: GridCoord): void => {
+    const bp = blueprintStore.get().pending
+    if (!bp) return
+    const o = pasteOrigin(tile, bp)
+    for (const p of blueprintPlacements(bp, o.x, o.y)) {
+      switch (p.kind) {
+        case 'belt':
+          enqueuePlaceBelt(world, {
+            ax: p.ax,
+            ay: p.ay,
+            bx: p.bx,
+            by: p.by,
+            color: p.color,
+            moveEvery: p.moveEvery,
+            face: p.face,
+          })
+          registry.record(p.ax, p.ay, { name: pasteName(p), type: 'belt' })
+          break
+        case 'port':
+          enqueuePlacePort(world, {
+            x: p.x,
+            y: p.y,
+            port: p.port,
+            color: p.color,
+            spawnEvery: p.spawnEvery,
+            dir: p.dir,
+          })
+          registry.record(p.x, p.y, { name: pasteName(p), type: p.port })
+          break
+        case 'splitter':
+          enqueuePlaceSplitter(world, { x: p.x, y: p.y, color: p.color })
+          registry.record(p.x, p.y, { name: pasteName(p), type: 'splitter' })
+          break
+        case 'building':
+          enqueuePlaceBuilding(world, {
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            h: p.h,
+            color: p.color,
+            accepts: p.accepts,
+            ...(p.researchLab ? { researchLab: true } : {}),
+          })
+          registry.record(p.x, p.y, { name: pasteName(p), type: 'building' })
+          break
+        case 'crafter':
+          enqueuePlaceCrafter(world, {
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            h: p.h,
+            color: p.color,
+            craftEvery: p.craftEvery,
+            storageCap: p.storageCap,
+            ...(p.recipe ? { recipe: p.recipe, inputs: p.inputs, outputs: p.outputs } : {}),
+          })
+          registry.record(p.x, p.y, { name: pasteName(p), type: 'producer' })
+          break
+      }
+    }
+  }
+
+  /**
+   * Q "pipette": arm the build tool matching whatever sits under the cursor. Reads the belt grid
+   * (belt/port/splitter) or the building store (crafter/store), matches it against the current build
+   * catalogue by kind + colour, and selects that tool (a port also adopts the picked facing). A no-op
+   * over empty ground or an object with no matching tool (e.g. terrain/scenery).
+   */
+  const pickAt = (tile: GridCoord): void => {
+    const items = buildStore.get().items
+    const t = grid.index.get(tileKey(tile.x, tile.y))
+    if (t !== undefined) {
+      const kind = grid.kind[t]!
+      if (kind === KIND_OUTPUT || kind === KIND_INPUT) {
+        const port = kind === KIND_OUTPUT ? 'output' : 'input'
+        const item = items.find((i) => i.kind === 'port' && i.port === port && !i.locked)
+        if (item) {
+          placeDir = grid.face[t]! & 3
+          buildStore.select(item.id)
+        }
+        return
+      }
+      if (kind === KIND_SPLITTER) {
+        const item = items.find((i) => i.kind === 'splitter' && !i.locked)
+        if (item) buildStore.select(item.id)
+        return
+      }
+      const color = world.components.Renderable.color[grid.trackEid[t]!]
+      const item =
+        items.find((i) => i.kind === 'belt' && i.color === color && !i.locked) ??
+        items.find((i) => i.kind === 'belt' && !i.locked)
+      if (item) buildStore.select(item.id)
+      return
+    }
+    const b = buildingAt(state.buildings, tile.x, tile.y)
+    if (b < 0) return
+    const color = world.components.Renderable.color[state.buildings.eid[b]!]
+    if (state.buildings.crafts[b]) {
+      const def = color !== undefined ? machines.byColor.get(color) : undefined
+      const item = items.find((i) => i.kind === 'producer' && i.id === def?.id && !i.locked)
+      if (item) buildStore.select(item.id)
+      return
+    }
+    const item = items.find((i) => i.kind === 'building' && i.color === color && !i.locked)
+    if (item) buildStore.select(item.id)
+  }
+
+  renderer.onPick = (tile) => pickAt(tile)
+
   renderer.onTileHover = (tile) => {
+    cursorTile = { x: tile.x, y: tile.y }
+    const mode = blueprintStore.get().mode
+    if (mode === 'paste') {
+      drawPasteGhost(tile)
+      return
+    }
+    if (mode === 'copy-select') {
+      // The marquee is drawn on drag-move; a bare hover shows nothing.
+      if (!selectStart) renderer.setGhost(null)
+      return
+    }
     if (buildStore.get().deleting) {
       previewDeleteGhost(tile)
       return
@@ -300,11 +470,31 @@ export function installPlacement(
   }
 
   renderer.onDragStart = (tile) => {
+    const mode = blueprintStore.get().mode
+    if (mode === 'copy-select') {
+      selectStart = { x: tile.x, y: tile.y }
+      return
+    }
+    if (mode === 'paste') return // paste stamps on release (a click), not on press.
     pressTile = { x: tile.x, y: tile.y }
     if (buildStore.selectedItem()?.kind === 'belt') beltStart = { x: tile.x, y: tile.y }
   }
 
   renderer.onDragMove = (tile) => {
+    // Copy-select: preview the marquee rectangle from the drag's start corner to the cursor.
+    if (blueprintStore.get().mode === 'copy-select') {
+      if (selectStart) {
+        renderer.setGhost({
+          kind: 'line',
+          ax: selectStart.x,
+          ay: selectStart.y,
+          bx: tile.x,
+          by: tile.y,
+          color: 0x66ccff,
+        })
+      }
+      return
+    }
     if (!beltStart) return
     const item = buildStore.selectedItem()
     if (item?.kind !== 'belt') return
@@ -321,6 +511,26 @@ export function installPlacement(
   }
 
   renderer.onDragEnd = (tile) => {
+    const mode = blueprintStore.get().mode
+    if (mode === 'copy-select') {
+      const start = selectStart
+      selectStart = null
+      renderer.setGhost(null)
+      if (!start) return
+      const rect = normalizeRect(start.x, start.y, tile.x, tile.y)
+      const bp = captureBlueprint(state, world, registry, rect)
+      // Hand the capture to the store: it either arms the paste ghost or opens the naming flow
+      // (save-to-library). After capture, redraw the ghost at the cursor if we're now pasting.
+      blueprintStore.captured(bp)
+      if (blueprintStore.get().mode === 'paste') drawPasteGhost(tile)
+      return
+    }
+    if (mode === 'paste') {
+      // A press+release stamps the pending blueprint; it stays armed for repeat stamping.
+      stampPaste(tile)
+      drawPasteGhost(tile)
+      return
+    }
     if (buildStore.get().deleting) {
       // A press+release on the same tile is a click → delete the object under the cursor.
       const start = pressTile
@@ -422,18 +632,42 @@ export function installPlacement(
   })
 
   // Selecting a build tool or arming delete enters an action mode (drop any inspection);
-  // deselecting returns to inspect.
+  // deselecting returns to inspect. Arming a build tool also cancels any clipboard mode — the
+  // two are mutually exclusive.
   buildStore.subscribe(() => {
     if (buildStore.selectedItem() || buildStore.get().deleting) {
+      if (blueprintStore.get().mode !== 'idle') blueprintStore.cancel()
       renderer.setGhost(null)
       clearInspect()
-    } else {
+    } else if (blueprintStore.get().mode === 'idle') {
       applyView()
     }
   })
 
-  // Right-click cancels the armed build/delete tool, returning to inspect mode.
+  // Entering a clipboard mode (copy-select / paste) is mutually exclusive with the build/delete
+  // tools and inspect; leaving it returns to inspect. Redraw the paste ghost at the last cursor
+  // tile so switching to paste shows a preview immediately (no pointer move needed).
+  blueprintStore.subscribe(() => {
+    const mode = blueprintStore.get().mode
+    if (mode !== 'idle') {
+      selectStart = null
+      if (buildStore.selectedItem() || buildStore.get().deleting) buildStore.clearSelection()
+      clearInspect()
+      if (mode === 'paste' && cursorTile) drawPasteGhost(cursorTile)
+      else renderer.setGhost(null)
+    } else {
+      renderer.setGhost(null)
+      ghostTile = null
+      if (!buildStore.selectedItem() && !buildStore.get().deleting) applyView()
+    }
+  })
+
+  // Right-click cancels the armed build/delete tool or the clipboard mode, returning to inspect.
   renderer.onCancel = () => {
+    if (blueprintStore.get().mode !== 'idle') {
+      blueprintStore.cancel()
+      return
+    }
     if (!buildStore.selectedItem() && !buildStore.get().deleting) return
     renderer.setGhost(null)
     ghostTile = null

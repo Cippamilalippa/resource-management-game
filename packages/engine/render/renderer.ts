@@ -53,6 +53,19 @@ export type Ghost =
       readonly by: number
       readonly color: number
     }
+  | {
+      /** A multi-cell preview (blueprint paste): a set of tinted footprint rects. */
+      readonly kind: 'cells'
+      readonly cells: readonly {
+        readonly x: number
+        readonly y: number
+        readonly w: number
+        readonly h: number
+        readonly color: number
+        /** Optional facing 0..3 (port cells) — draws a direction chevron like a rect ghost. */
+        readonly dir?: number
+      }[]
+    }
 
 /**
  * A selection/hover outline drawn over an object's full footprint. Like {@link Ghost}
@@ -118,6 +131,12 @@ export class Renderer {
   onDragEnd: ((tile: GridCoord) => void) | null = null
   /** Called when the rotate key (R) is pressed — the app rotates the armed placement. */
   onRotate: (() => void) | null = null
+  /**
+   * Called when the pick key (Q) is pressed — the app arms the build tool matching whatever is
+   * under the cursor ("pipette"). The renderer resolves the tile from the last pointer position
+   * and relays it; it never mutates sim state.
+   */
+  onPick: ((tile: GridCoord) => void) | null = null
   /**
    * Called when the pointer is right-clicked (context menu) — the app cancels the current
    * gesture/armed tool. The renderer suppresses the native browser menu and never mutates
@@ -285,6 +304,21 @@ export class Renderer {
         const cx = (ghost.x + ghost.w / 2) * TILE_SIZE
         const cy = (ghost.y + ghost.h / 2) * TILE_SIZE
         this.#chevron(g, ghost.dir, cx, cy, TILE_SIZE * 0.34, 0xffffff, 0.95)
+      }
+      return
+    }
+    if (ghost.kind === 'cells') {
+      // Multi-cell paste preview: a tinted footprint rect per captured object.
+      for (let i = 0; i < ghost.cells.length; i++) {
+        const c = ghost.cells[i]!
+        g.rect(c.x * TILE_SIZE, c.y * TILE_SIZE, c.w * TILE_SIZE, c.h * TILE_SIZE)
+        g.fill({ color: c.color, alpha: 0.4 })
+        g.stroke({ width: 1.5, color: c.color, alpha: 0.85 })
+        if (c.dir !== undefined) {
+          const cx = (c.x + c.w / 2) * TILE_SIZE
+          const cy = (c.y + c.h / 2) * TILE_SIZE
+          this.#chevron(g, c.dir, cx, cy, TILE_SIZE * 0.3, 0xffffff, 0.9)
+        }
       }
       return
     }
@@ -478,6 +512,10 @@ export class Renderer {
   #installInput(): void {
     const canvas = this.#app.canvas
     let pressed = false
+    // Last pointer position (client px), so a keypress (e.g. Q pick) can resolve the tile under
+    // the cursor without a pointer event of its own.
+    let lastClientX = 0
+    let lastClientY = 0
 
     const tileAt = (clientX: number, clientY: number): GridCoord => {
       const rect = canvas.getBoundingClientRect()
@@ -502,6 +540,8 @@ export class Renderer {
       pressed = false
     })
     globalThis.addEventListener('pointermove', (e) => {
+      lastClientX = e.clientX
+      lastClientY = e.clientY
       const tile = tileAt(e.clientX, e.clientY)
       if (pressed && this.onDragMove) this.onDragMove(tile)
       if (this.onTileHover) this.onTileHover(tile)
@@ -517,10 +557,16 @@ export class Renderer {
       { passive: false },
     )
 
-    // R rotates the armed placement (e.g. a port's arrow). The app owns the rotation state;
-    // the renderer just relays the keypress (it never mutates sim state).
+    // R rotates the armed placement (e.g. a port's arrow); Q picks the tool under the cursor
+    // ("pipette"). The app owns the resulting state; the renderer just relays the keypress (it
+    // never mutates sim state). Q resolves the tile from the last pointer position. Both ignore
+    // keystrokes aimed at a text field so typing a save/blueprint name isn't hijacked.
     globalThis.addEventListener('keydown', (e) => {
-      if (e.key.toLowerCase() === 'r' && this.onRotate) this.onRotate()
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      const k = e.key.toLowerCase()
+      if (k === 'r' && this.onRotate) this.onRotate()
+      else if (k === 'q' && this.onPick) this.onPick(tileAt(lastClientX, lastClientY))
     })
 
     this.#installKeyboardPan()

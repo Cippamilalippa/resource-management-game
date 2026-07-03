@@ -71,6 +71,8 @@ export const buildStore = {
   /** Toggle a tool: re-selecting the active tool deselects it. Arming a tool disarms delete. */
   toggle: (id: string): void =>
     set({ ...state, selected: state.selected === id ? null : id, deleting: false }),
+  /** Select a tool outright (never a toggle-off) — used by the Q pick tool. Disarms delete. */
+  select: (id: string): void => set({ ...state, selected: id, deleting: false }),
   /** Arm/disarm the delete tool; arming it clears any selected build tool. */
   toggleDelete: (): void => set({ ...state, deleting: !state.deleting, selected: null }),
   /** Disarm everything (build tool and delete) — returns to inspect mode. */

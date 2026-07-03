@@ -14,7 +14,9 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
     title: 'Build',
     keys: [
       ['1–9 / 0', 'Pick tool'],
+      ['Q', 'Pick from cursor'],
       ['R', 'Rotate port'],
+      ['Ctrl+C', 'Copy area'],
       ['Esc', 'Deselect / back'],
       ['Hover / Click', 'Inspect / pin'],
     ],

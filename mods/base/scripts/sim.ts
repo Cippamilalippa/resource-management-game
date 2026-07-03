@@ -1725,6 +1725,13 @@ export interface PlaceBeltCommand {
   readonly by: number
   readonly color: number
   readonly moveEvery: number
+  /**
+   * Facing 0..3 (N,E,S,W) to force on every tile of the run, overriding the direction projected
+   * from A→B. Omitted for a normal drawn belt (facing follows the drag); set by the blueprint
+   * paste path, which lays each captured tile as its own length-1 run and must preserve its exact
+   * facing (a length-1 run has no drawn direction to project, so it would otherwise default East).
+   */
+  readonly face?: number
 }
 
 /**
@@ -1987,7 +1994,8 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
     }
     case 'place_belt': {
       const { dx, dy, length } = projectBelt(cmd.ax, cmd.ay, cmd.bx, cmd.by)
-      const face = dirOf(dx, dy)
+      // A forced facing (blueprint paste) wins over the direction projected from the drawn run.
+      const face = cmd.face !== undefined ? cmd.face & 3 : dirOf(dx, dy)
       const period = Math.max(1, cmd.moveEvery)
       for (let i = 0; i < length; i++) {
         addOrAimTile(gw, api, g, cmd.ax + dx * i, cmd.ay + dy * i, face, cmd.color, period)
