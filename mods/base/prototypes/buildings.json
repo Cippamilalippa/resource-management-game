@@ -51,7 +51,7 @@
     "size": { "w": 2, "h": 2 },
     "color": 13214759,
     "depot": true,
-    "buildCost": [{ "item": "item.aluminum_sheet", "amount": 2 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 4 }]
   },
   {
     "id": "building.belt",
@@ -121,7 +121,7 @@
     "craftingCategories": ["mining"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.mining_drill", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 4 }]
   },
   {
     "id": "building.oil_derrick",
@@ -133,7 +133,7 @@
     "craftingCategories": ["drilling"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.oil_derrick", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 4 }]
   },
   {
     "id": "building.refinery",
@@ -145,7 +145,7 @@
     "craftingCategories": ["refining"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.refinery", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 5 }]
   },
   {
     "id": "building.smelter",
@@ -157,7 +157,7 @@
     "craftingCategories": ["smelting"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.smelter", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 4 }]
   },
   {
     "id": "building.chemical_plant",
@@ -169,7 +169,10 @@
     "craftingCategories": ["chemistry"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.chemical_plant", "amount": 1 }]
+    "buildCost": [
+      { "item": "item.aluminum", "amount": 5 },
+      { "item": "item.glass", "amount": 2 }
+    ]
   },
   {
     "id": "building.composites_press",
@@ -181,7 +184,7 @@
     "craftingCategories": ["composites"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.composites_press", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 6 }]
   },
   {
     "id": "building.rolling_mill",
@@ -193,7 +196,7 @@
     "craftingCategories": ["metalworking"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.rolling_mill", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 6 }]
   },
   {
     "id": "building.electronics_bench",
@@ -205,7 +208,10 @@
     "craftingCategories": ["electronics"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.electronics_bench", "amount": 1 }]
+    "buildCost": [
+      { "item": "item.aluminum", "amount": 5 },
+      { "item": "item.glass", "amount": 3 }
+    ]
   },
   {
     "id": "building.machine_shop",
@@ -217,7 +223,7 @@
     "craftingCategories": ["machining"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.machine_shop", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 8 }]
   },
   {
     "id": "building.fabricator",
@@ -229,7 +235,7 @@
     "craftingCategories": ["fabrication"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.fabricator", "amount": 1 }]
+    "buildCost": [{ "item": "item.aluminum", "amount": 8 }]
   },
   {
     "id": "building.assembly_hall",
@@ -241,7 +247,10 @@
     "craftingCategories": ["assembly"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.assembly_hall", "amount": 1 }]
+    "buildCost": [
+      { "item": "item.aluminum", "amount": 10 },
+      { "item": "item.glass", "amount": 2 }
+    ]
   },
   {
     "id": "building.science_press",
@@ -253,7 +262,10 @@
     "craftingCategories": ["science"],
     "speed": 1,
     "storage": 100,
-    "buildCost": [{ "item": "item.science_press", "amount": 1 }]
+    "buildCost": [
+      { "item": "item.aluminum", "amount": 6 },
+      { "item": "item.glass", "amount": 2 }
+    ]
   },
   {
     "id": "building.lab",
@@ -272,8 +284,8 @@
     "storage": 200,
     "researchLab": true,
     "buildCost": [
-      { "item": "item.aluminum_sheet", "amount": 4 },
-      { "item": "item.microchip", "amount": 2 }
+      { "item": "item.aluminum", "amount": 10 },
+      { "item": "item.glass", "amount": 4 }
     ]
   }
 ]

@@ -16,21 +16,8 @@
     "spread": { "min": 6, "max": 18 },
     "startingKit": [{ "item": "item.rocket_fuel", "amount": 40 }],
     "startingTreasury": [
-      { "item": "item.mining_drill", "amount": 6 },
-      { "item": "item.oil_derrick", "amount": 2 },
-      { "item": "item.smelter", "amount": 4 },
-      { "item": "item.refinery", "amount": 2 },
-      { "item": "item.chemical_plant", "amount": 2 },
-      { "item": "item.composites_press", "amount": 1 },
-      { "item": "item.rolling_mill", "amount": 2 },
-      { "item": "item.electronics_bench", "amount": 2 },
-      { "item": "item.machine_shop", "amount": 2 },
-      { "item": "item.fabricator", "amount": 2 },
-      { "item": "item.assembly_hall", "amount": 1 },
-      { "item": "item.science_press", "amount": 1 },
-      { "item": "item.aluminum", "amount": 120 },
-      { "item": "item.aluminum_sheet", "amount": 24 },
-      { "item": "item.microchip", "amount": 8 }
+      { "item": "item.aluminum", "amount": 90 },
+      { "item": "item.glass", "amount": 24 }
     ]
   },
   {
@@ -50,12 +37,8 @@
     "spread": { "min": 14, "max": 30 },
     "startingKit": [],
     "startingTreasury": [
-      { "item": "item.mining_drill", "amount": 3 },
-      { "item": "item.smelter", "amount": 2 },
-      { "item": "item.refinery", "amount": 1 },
-      { "item": "item.fabricator", "amount": 1 },
-      { "item": "item.aluminum", "amount": 40 },
-      { "item": "item.aluminum_sheet", "amount": 10 }
+      { "item": "item.aluminum", "amount": 48 },
+      { "item": "item.glass", "amount": 10 }
     ]
   }
 ]
