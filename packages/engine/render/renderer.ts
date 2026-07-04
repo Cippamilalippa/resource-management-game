@@ -33,6 +33,21 @@ const SPAWN_MS = 160
 /** Duration (ms) of the scale+fade dissolve when an entity is removed. */
 const REMOVE_MS = 150
 
+/**
+ * Shade a packed `0xRRGGBB` colour toward white (`f > 0`) or black (`f < 0`) by fraction `|f|`.
+ * A pure, allocation-free helper the building glyph uses to fake a bezel + top-light without any
+ * art assets — a darker frame, the base face, and a lighter top highlight are all derived from the
+ * entity's single authored colour, so the renderer stays game-agnostic.
+ */
+function shade(color: number, f: number): number {
+  const r = (color >> 16) & 0xff
+  const g = (color >> 8) & 0xff
+  const b = color & 0xff
+  const mix = (c: number): number =>
+    f >= 0 ? Math.round(c + (255 - c) * f) : Math.round(c * (1 + f))
+  return (mix(r) << 16) | (mix(g) << 8) | mix(b)
+}
+
 export interface RendererOptions {
   /** Existing canvas to render into. */
   canvas: HTMLCanvasElement
@@ -321,7 +336,7 @@ export class Renderer {
       }
       g.alpha = spriteAlpha
 
-      this.#updateIcon(eid, color, x, y, wTiles, spr)
+      this.#updateIcon(eid, color, x, y, wTiles, hTiles, spr)
       const icon = this.#iconSprites.get(eid)
       if (icon) icon.alpha = spriteAlpha
 
@@ -471,8 +486,8 @@ export class Renderer {
   /**
    * Sync entity `eid`'s overlay icon: create/move/retexture it, or drop it if its colour has none.
    * A small item riding a belt (circle shape, `sprite >> 2 === 1`) gets its glyph centred on the
-   * tile and sized to the item disc, so a resource reads as its icon-on-colour; anything larger
-   * (buildings/producers) gets a small top-right corner badge instead.
+   * tile and sized to the item disc; a building/producer gets a larger glyph centred on its
+   * footprint (over the recessed icon plate the body draws), so each machine type reads at a glance.
    */
   #updateIcon(
     eid: number,
@@ -480,6 +495,7 @@ export class Renderer {
     x: number,
     y: number,
     wTiles: number,
+    hTiles: number,
     sprite: number,
   ): void {
     const tex = this.#iconTextures.get(color)
@@ -487,8 +503,11 @@ export class Renderer {
       this.#removeIcon(eid)
       return
     }
-    const centred = sprite >> 2 === 1
-    const size = TILE_SIZE * (centred ? 0.42 : 0.3)
+    const fw = wTiles * TILE_SIZE
+    const fh = hTiles * TILE_SIZE
+    const isItem = sprite >> 2 === 1
+    // Items sit on a single tile; buildings centre a bigger glyph on the whole footprint.
+    const size = isItem ? TILE_SIZE * 0.42 : Math.min(fw, fh) * 0.4
     let icon = this.#iconSprites.get(eid)
     if (!icon) {
       icon = new Sprite(tex)
@@ -500,14 +519,10 @@ export class Renderer {
       icon.texture = tex
       icon.setSize(size, size)
     }
-    if (centred) {
-      // Centre the glyph on the item disc.
-      icon.position.set(x + (TILE_SIZE - size) / 2, y + (TILE_SIZE - size) / 2)
-    } else {
-      // Anchor to the tile's top-right corner, inset a little so it doesn't touch the edge.
-      const inset = TILE_SIZE * 0.08
-      icon.position.set(x + wTiles * TILE_SIZE - size - inset, y + inset)
-    }
+    // Centre on the tile (items) or the footprint (buildings).
+    const boxW = isItem ? TILE_SIZE : fw
+    const boxH = isItem ? TILE_SIZE : fh
+    icon.position.set(x + (boxW - size) / 2, y + (boxH - size) / 2)
   }
 
   /** Destroy entity `eid`'s overlay icon, if it has one. */
@@ -663,9 +678,32 @@ export class Renderer {
         return
       }
       default: {
-        // Rect — buildings, scenery (the default placeholder).
-        g.rect(pad, pad, wTiles * TILE_SIZE - pad * 2, hTiles * TILE_SIZE - pad * 2)
+        // Building — a framed panel derived entirely from the entity's single colour: a soft drop
+        // shadow, a darker bezel, a lit face with a top highlight (fakes a top-down light), and a
+        // recessed icon plate the centred glyph sits on. No art assets; stays game-agnostic.
+        const fw = wTiles * TILE_SIZE
+        const fh = hTiles * TILE_SIZE
+        const r = 5
+        // Drop shadow, offset down-right.
+        g.roundRect(3, 4, fw - 4, fh - 4, r)
+        g.fill({ color: 0x000000, alpha: 0.25 })
+        // Bezel/frame: full footprint in a darkened shade.
+        g.roundRect(1, 1, fw - 2, fh - 2, r)
+        g.fill(shade(color, -0.35))
+        // Face: inset panel in the base colour.
+        const fi = 3
+        g.roundRect(fi, fi, fw - fi * 2, fh - fi * 2, r - 1)
         g.fill(color)
+        // Top highlight band (fake top-down light).
+        g.roundRect(fi + 1, fi + 1, fw - fi * 2 - 2, (fh - fi * 2) * 0.4, r - 2)
+        g.fill({ color: shade(color, 0.22), alpha: 0.55 })
+        // Recessed icon plate: a soft dark rounded square so the white glyph reads on any colour.
+        const ps = Math.min(fw, fh) * 0.52
+        g.roundRect((fw - ps) / 2, (fh - ps) / 2, ps, ps, 4)
+        g.fill({ color: shade(color, -0.55), alpha: 0.45 })
+        // Crisp rim on the bezel edge.
+        g.roundRect(1, 1, fw - 2, fh - 2, r)
+        g.stroke({ width: 1, color: shade(color, 0.3), alpha: 0.6 })
       }
     }
   }
