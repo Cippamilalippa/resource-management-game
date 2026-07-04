@@ -83,18 +83,27 @@ interface DetailRow {
   readonly value: string
   /** When set, render a colour swatch instead of the text value. */
   readonly swatches?: readonly number[]
+  /** When set, render each cost as a resource swatch with its amount (the build cost readout). */
+  readonly costs?: readonly { readonly color: number; readonly amount: number }[]
+}
+
+/** The build-cost row for an item, or nothing when it is free. Belt cost is per tile. */
+function costRow(item: BuildItem): DetailRow[] {
+  if (!item.cost || item.cost.length === 0) return []
+  return [{ label: item.kind === 'belt' ? 'Cost / tile' : 'Cost', value: '', costs: item.cost }]
 }
 
 /** The stat rows shown in the hover panel for a single placeable item. */
 function itemRows(item: BuildItem): DetailRow[] {
   switch (item.kind) {
     case 'belt':
-      return [{ label: 'Speed', value: `1 tile / ${item.moveEvery} ticks` }]
+      return [{ label: 'Speed', value: `1 tile / ${item.moveEvery} ticks` }, ...costRow(item)]
     case 'producer':
       // A machine is placed empty; its recipe (and thus I/O) is chosen afterward in the sidebar.
       return [
         { label: 'Storage', value: String(item.storage) },
         { label: 'Recipe', value: 'Choose after placing' },
+        ...costRow(item),
       ]
     case 'building':
       return [
@@ -102,13 +111,17 @@ function itemRows(item: BuildItem): DetailRow[] {
           ? [{ label: 'Accepts', value: '', swatches: item.accepts }]
           : []),
         { label: 'Storage', value: String(item.storage) },
+        ...costRow(item),
       ]
     case 'port':
-      return item.port === 'output'
-        ? [{ label: 'Drains', value: `1 / ${item.spawnEvery} ticks` }]
-        : [{ label: 'Feeds', value: 'the attached belt' }]
+      return [
+        ...(item.port === 'output'
+          ? [{ label: 'Drains', value: `1 / ${item.spawnEvery} ticks` }]
+          : [{ label: 'Feeds', value: 'the attached belt' }]),
+        ...costRow(item),
+      ]
     case 'splitter':
-      return [{ label: 'Routes', value: 'evenly across outputs' }]
+      return [{ label: 'Routes', value: 'evenly across outputs' }, ...costRow(item)]
     default:
       return []
   }
@@ -152,7 +165,16 @@ function DetailPanel({ hover }: { hover: Hover }): React.JSX.Element {
         {itemRows(item).map((row) => (
           <div key={row.label} className="buildbar-detail-row">
             <span className="buildbar-detail-label">{row.label}</span>
-            {row.swatches ? (
+            {row.costs ? (
+              <span className="buildbar-detail-swatches">
+                {row.costs.map((c, i) => (
+                  <span key={i} className="buildbar-detail-cost">
+                    <ResourceLabel color={c.color} />
+                    <span className="buildbar-detail-cost-amt">{c.amount}</span>
+                  </span>
+                ))}
+              </span>
+            ) : row.swatches ? (
               <span className="buildbar-detail-swatches">
                 {row.swatches.map((c, i) => (
                   <ResourceLabel key={i} color={c} />
@@ -188,9 +210,19 @@ export function BuildBar(): React.JSX.Element | null {
   const [openKey, setOpenKey] = useState<string | null>(null)
   // What the cursor is currently over, surfaced in the detail panel; null when not hovering.
   const [hover, setHover] = useState<Hover | null>(null)
+  // Free-text filter: while non-empty, a flat result row replaces the group's items.
+  const [query, setQuery] = useState('')
 
   const groups = useMemo(() => groupItems(state.items), [state.items])
   const openGroup = openKey ? (groups.find((g) => g.key === openKey) ?? null) : null
+  const q = query.trim().toLowerCase()
+  // Search matches item names across every group; null (not empty) means "not searching".
+  const results = useMemo(
+    () => (q ? state.items.filter((i) => i.name.toLowerCase().includes(q)) : null),
+    [q, state.items],
+  )
+  // The items row shows search results when searching, otherwise the opened group's items.
+  const shownItems = results ?? openGroup?.items ?? null
 
   const goBack = (): void => {
     setOpenKey(null)
@@ -221,6 +253,12 @@ export function BuildBar(): React.JSX.Element | null {
       }
       const slot = slotForKey(e.key)
       if (slot < 0) return
+      // While searching, the number keys pick from the flat result row.
+      if (results) {
+        const item = results[slot]
+        if (item && !item.locked) buildStore.toggle(item.id)
+        return
+      }
       if (openKey === null) {
         const group = groups[slot]
         if (group) setOpenKey(group.key)
@@ -231,16 +269,17 @@ export function BuildBar(): React.JSX.Element | null {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [groups, openKey, openGroup])
+  }, [groups, openKey, openGroup, results])
 
   if (groups.length === 0) return null
 
   return (
     <div className="buildbar">
       {hover && <DetailPanel hover={hover} />}
-      {openGroup && (
+      {shownItems && (
         <div className="buildbar-tools buildbar-items">
-          {openGroup.items.map((item, i) => {
+          {shownItems.length === 0 && <span className="buildbar-empty">No matches</span>}
+          {shownItems.map((item, i) => {
             const { name, badge } = iconForItem(item)
             return (
               <button
@@ -316,6 +355,29 @@ export function BuildBar(): React.JSX.Element | null {
         >
           <Icon name="ClipboardList" size={22} />
         </button>
+        <div className="buildbar-search">
+          <Icon name="Search" size={15} />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setQuery('')
+            }}
+            placeholder="Search…"
+            aria-label="Search build tools"
+          />
+          {query && (
+            <button
+              className="buildbar-search-clear"
+              onClick={() => setQuery('')}
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

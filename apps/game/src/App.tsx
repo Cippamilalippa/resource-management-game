@@ -9,9 +9,12 @@ import { Objectives } from './Objectives.tsx'
 import { MainMenu } from './MainMenu.tsx'
 import { NewGameSetup } from './NewGameSetup.tsx'
 import { TopBar } from './TopBar.tsx'
+import { TreasuryBar } from './TreasuryBar.tsx'
 import { HelpOverlay } from './HelpOverlay.tsx'
 import { DebugOverlay } from './DebugOverlay.tsx'
 import { BlueprintLibrary } from './BlueprintLibrary.tsx'
+import { Encyclopedia } from './Encyclopedia.tsx'
+import { StatusOverlay } from './StatusOverlay.tsx'
 
 /**
  * Root of the DOM overlay. Renders the in-game HUD only while a session is on screen (`playing`);
@@ -26,6 +29,7 @@ export function App(): React.JSX.Element {
       {playing && (
         <>
           <TopBar />
+          <TreasuryBar />
           <Alerts />
           <HudPanels />
           <Objectives />
@@ -33,6 +37,8 @@ export function App(): React.JSX.Element {
           <BlueprintLibrary />
           <InfoSidebar />
           <HelpOverlay />
+          <Encyclopedia />
+          <StatusOverlay />
           <DebugOverlay />
         </>
       )}

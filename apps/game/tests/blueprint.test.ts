@@ -10,6 +10,7 @@ import {
   enqueuePlacePort,
   enqueuePlaceProducer,
   enqueuePlaceSplitter,
+  enqueueRemove,
   type GameState,
 } from '../src/gameLogic.ts'
 import { InspectRegistry } from '../src/inspect.ts'
@@ -203,5 +204,76 @@ describe('captureBlueprint', () => {
       bp2.entries.filter((e) => e.kind === 'belt').map((e) => e.kind === 'belt' && e.face),
     ).toEqual(bp.entries.filter((e) => e.kind === 'belt').map((e) => e.kind === 'belt' && e.face))
     expect(bp2.entries.some((e) => e.kind === 'port' && e.dir === 1)).toBe(true)
+  })
+
+  it('delete → undo in place: removing then re-placing the capture restores the region', () => {
+    // This is the reconstruction path `placement.ts` uses for undoing a deletion: capture what is
+    // about to be removed, remove it, then re-place the captured blueprint at the same origin.
+    const world = createGameWorld(1)
+    const state = createGameState()
+    const reg = new InspectRegistry()
+    enqueuePlaceBelt(world, { ax: 2, ay: 2, bx: 4, by: 2, color: 0x404040, moveEvery: 60 })
+    enqueuePlacePort(world, { x: 2, y: 2, port: 'output', color: 0x445500, spawnEvery: 20, dir: 1 })
+    enqueuePlaceBuilding(world, {
+      x: 6,
+      y: 2,
+      w: 1,
+      h: 1,
+      color: 0xb5651d,
+      accepts: [{ color: 0x112233, cap: 50 }],
+    })
+    flush(world, state)
+    const rect = normalizeRect(2, 2, 6, 2)
+    const before = captureBlueprint(state, world, reg, rect)
+
+    // Delete: remove every captured tile (the redo half of a delete-undo step).
+    for (const p of blueprintPlacements(before, 2, 2)) {
+      const t = p.kind === 'belt' ? { x: p.ax, y: p.ay } : { x: p.x, y: p.y }
+      enqueueRemove(world, { x: t.x, y: t.y })
+    }
+    flush(world, state)
+    expect(captureBlueprint(state, world, reg, rect).entries).toHaveLength(0)
+
+    // Undo: re-place the capture at its original origin (the undo half).
+    for (const p of blueprintPlacements(before, 2, 2)) {
+      if (p.kind === 'belt')
+        enqueuePlaceBelt(world, {
+          ax: p.ax,
+          ay: p.ay,
+          bx: p.bx,
+          by: p.by,
+          color: p.color,
+          moveEvery: p.moveEvery,
+          face: p.face,
+        })
+      else if (p.kind === 'port')
+        enqueuePlacePort(world, {
+          x: p.x,
+          y: p.y,
+          port: p.port,
+          color: p.color,
+          spawnEvery: p.spawnEvery,
+          dir: p.dir,
+        })
+      else if (p.kind === 'building')
+        enqueuePlaceBuilding(world, {
+          x: p.x,
+          y: p.y,
+          w: p.w,
+          h: p.h,
+          color: p.color,
+          accepts: p.accepts,
+        })
+    }
+    flush(world, state)
+
+    // The region is structurally identical to before the delete.
+    const after = captureBlueprint(state, world, reg, rect)
+    expect(after.entries).toHaveLength(before.entries.length)
+    expect(after.entries.map((e) => e.kind).sort()).toEqual(
+      before.entries.map((e) => e.kind).sort(),
+    )
+    expect(after.entries.filter((e) => e.kind === 'port' && e.dir === 1)).toHaveLength(1)
+    expect(after.entries.filter((e) => e.kind === 'building')).toHaveLength(1)
   })
 })

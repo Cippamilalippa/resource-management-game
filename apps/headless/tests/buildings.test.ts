@@ -329,3 +329,89 @@ describe('removing objects', () => {
     expect(hashState(a.world)).toBe(hashState(b.world))
   })
 })
+
+describe('placement occupancy gate', () => {
+  /** A plain sink building with one accept slot, footprint w×h anchored at (x, y). */
+  const placeSink = (sim: Sim, x: number, y: number, w = 1, h = 1): void =>
+    enqueuePlaceBuilding(sim.world, {
+      x,
+      y,
+      w,
+      h,
+      color: 0x334455,
+      accepts: [{ color: SRC, cap: 100 }],
+    })
+
+  it('rejects a building whose footprint overlaps another building', async () => {
+    const sim = await bootstrapSim(1)
+    placeSink(sim, 30, 30)
+    sim.scheduler.runTicks(sim.world, 1)
+    const first = buildingAt(sim.state.buildings, 30, 30)
+    expect(first).toBeGreaterThanOrEqual(0)
+    const count = sim.state.buildings.count
+    // A second building on the same tile is dropped: the tile still resolves to the first.
+    placeSink(sim, 30, 30)
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.buildings.count).toBe(count)
+    expect(buildingAt(sim.state.buildings, 30, 30)).toBe(first)
+  })
+
+  it('rejects a 2×2 building overlapping an existing footprint by a single corner', async () => {
+    const sim = await bootstrapSim(1)
+    placeSink(sim, 30, 30, 2, 2) // covers (30,30)…(31,31)
+    sim.scheduler.runTicks(sim.world, 1)
+    const count = sim.state.buildings.count
+    placeSink(sim, 31, 31, 2, 2) // its top-left corner lands on the first's bottom-right — blocked
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.buildings.count).toBe(count)
+    expect(buildingAt(sim.state.buildings, 32, 32)).toBe(-1) // nothing spilled onto the new tiles
+  })
+
+  it('rejects a building placed on a belt tile', async () => {
+    const sim = await bootstrapSim(1)
+    enqueuePlaceBelt(sim.world, { ax: 30, ay: 30, bx: 33, by: 30, color: 0x404040, moveEvery: 1 })
+    sim.scheduler.runTicks(sim.world, 1)
+    const count = sim.state.buildings.count
+    placeSink(sim, 31, 30) // squarely on the belt run — blocked
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.buildings.count).toBe(count)
+    expect(buildingAt(sim.state.buildings, 31, 30)).toBe(-1)
+  })
+
+  it('rejects a crafter overlapping a building', async () => {
+    const sim = await bootstrapSim(1)
+    placeSink(sim, 30, 30)
+    sim.scheduler.runTicks(sim.world, 1)
+    const first = buildingAt(sim.state.buildings, 30, 30)
+    const count = sim.state.buildings.count
+    enqueuePlaceProducer(sim.world, {
+      x: 30,
+      y: 30,
+      w: 1,
+      h: 1,
+      color: 0x223344,
+      itemColor: SRC,
+      produceEvery: 5,
+      storageCap: 100,
+    })
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.buildings.count).toBe(count)
+    expect(buildingAt(sim.state.buildings, 30, 30)).toBe(first) // the sink still owns the tile
+  })
+
+  it('is deterministic across a sequence including blocked placements', async () => {
+    const run = async (): Promise<Sim> => {
+      const sim = await bootstrapSim(11)
+      placeSink(sim, 30, 30)
+      placeSink(sim, 30, 30) // blocked (overlap)
+      enqueuePlaceBelt(sim.world, { ax: 32, ay: 30, bx: 35, by: 30, color: 0x404040, moveEvery: 1 })
+      placeSink(sim, 33, 30) // blocked (on belt)
+      placeSink(sim, 40, 40) // accepted
+      sim.scheduler.runTicks(sim.world, 50)
+      return sim
+    }
+    const a = await run()
+    const b = await run()
+    expect(hashState(a.world)).toBe(hashState(b.world))
+  })
+})

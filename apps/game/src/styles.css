@@ -208,6 +208,164 @@ input:focus-visible,
   border-color: var(--border-strong);
 }
 
+/* ── Status overlay toggle ───────────────────────────────────────────────── */
+.overlay-btn {
+  position: absolute;
+  right: 224px;
+  bottom: 16px;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition);
+}
+.overlay-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.overlay-btn.active {
+  color: var(--text);
+  border-color: var(--accent, #66ccff);
+}
+
+/* ── Recipe encyclopedia ─────────────────────────────────────────────────── */
+.enc-btn {
+  position: absolute;
+  right: 120px;
+  bottom: 16px;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition);
+}
+.enc-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.enc-modal {
+  position: absolute;
+  right: 16px;
+  bottom: 60px;
+  z-index: 30;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  padding: 14px 16px;
+}
+.enc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.enc-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.enc-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(var(--surface-rgb), 0.6);
+  color: var(--text-muted);
+}
+.enc-search input {
+  width: 150px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 0;
+  outline: none;
+}
+.enc-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 4px;
+}
+.enc-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 8px 0;
+}
+.enc-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(var(--surface-rgb), 0.55);
+}
+.enc-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.enc-card-name {
+  font-size: 13px;
+  color: var(--text);
+}
+.enc-card-machine {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.enc-card-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.enc-flows {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.enc-flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.enc-amt {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.enc-none {
+  color: var(--text-muted);
+}
+.enc-card-foot {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .help-panel {
   position: absolute;
   right: 16px;
@@ -293,6 +451,43 @@ input:focus-visible,
   padding: 8px;
   backdrop-filter: blur(6px);
   box-shadow: var(--elev-1);
+}
+
+/* Free-text search box docked at the end of the group row: filters tools by name across groups. */
+.buildbar-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(var(--surface-rgb), 0.6);
+  color: var(--muted, #9aa);
+}
+.buildbar-search input {
+  width: 96px;
+  border: none;
+  background: transparent;
+  color: var(--text, inherit);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 0;
+  outline: none;
+}
+.buildbar-search-clear {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.buildbar-empty {
+  align-self: center;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--muted, #9aa);
 }
 
 /* Icon wrapper (Icon.tsx): a square box holding a lucide glyph plus an optional corner badge. */
@@ -624,6 +819,15 @@ input:focus-visible,
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 4px 10px;
+}
+.buildbar-detail-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.buildbar-detail-cost-amt {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 /* A resource shown as its icon (tinted its colour) beside its name — the shared way the UI
@@ -1140,9 +1344,35 @@ input:focus-visible,
 
 /* ── Alerts (top-right stack) ────────────────────────────────────────────── */
 /* Top-centre so it never overlaps the top-right inspector (which owns that corner). */
+/* Treasury strip: banked build-cost resources, centred at the very top. */
+.treasury {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  max-width: min(70vw, 820px);
+  overflow-x: auto;
+  font-size: 13px;
+}
+.treasury-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.treasury-amt {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
 .alerts {
   position: absolute;
-  top: 16px;
+  top: 58px;
   left: 50%;
   transform: translateX(-50%);
   pointer-events: none;
@@ -1162,6 +1392,24 @@ input:focus-visible,
   background: rgba(var(--surface-rgb), 0.9);
   border: 1px solid var(--border);
   backdrop-filter: blur(6px);
+  /* Rows are <button>s (click to jump the camera): re-enable pointer events the container disables,
+     and reset the native button look so they read as the former info chips. */
+  pointer-events: auto;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.08s ease,
+    border-color 0.12s ease;
+}
+.alert:hover {
+  border-color: var(--accent, #66ccff);
+  transform: translateY(-1px);
+}
+.alert:focus-visible {
+  outline: 2px solid var(--accent, #66ccff);
+  outline-offset: 2px;
 }
 .alert-warn {
   border-color: rgba(var(--warn-rgb), 0.55);
@@ -1389,9 +1637,13 @@ input:focus-visible,
 /* Production stats grid: resource | make | use. */
 .hud-prod-grid {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 5px 14px;
   align-items: center;
+}
+.hud-spark {
+  display: block;
+  opacity: 0.85;
 }
 .hud-prod-h {
   font-size: 10px;

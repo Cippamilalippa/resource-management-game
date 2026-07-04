@@ -2438,10 +2438,30 @@ function charge(state: GameState, cost: readonly CostEntry[] | undefined): boole
   return true
 }
 
+/**
+ * Whether the w×h footprint anchored at (x, y) is free for a building/crafter: every tile must be
+ * empty of belt-grid tiles (belts/ports/splitters) and of any registered building. Mirrored by the
+ * app-side placement ghost so its red "blocked" preview agrees with what the sim would reject — a
+ * building never overlaps a belt or another building. Off the hot path (one player placement).
+ */
+function footprintClear(state: GameState, x: number, y: number, w: number, h: number): boolean {
+  const g = state.grid
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      if (tileAt(g, x + dx, y + dy) !== NONE) return false
+      if (buildingAt(state.buildings, x + dx, y + dy) !== NONE) return false
+    }
+  }
+  return true
+}
+
 function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCommand): void {
   const g = state.grid
   switch (cmd.type) {
     case 'place_building': {
+      // Reject a footprint overlapping a belt or another building before charging, so a blocked
+      // placement is never billed and can't stack two structures on one tile.
+      if (!footprintClear(state, cmd.x, cmd.y, cmd.w, cmd.h)) return
       if (!charge(state, cmd.cost)) return
       const accepts = cmd.accepts ?? []
       // A depot (treasury sink), a silo and a plain store all wear the warehouse roof; a research
@@ -2543,6 +2563,9 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       // terrain (an unrestricted crafter carries TERRAIN_NONE and places anywhere).
       const need = cmd.requiresTerrainType ?? TERRAIN_NONE
       if (need !== TERRAIN_NONE && terrainTypeAt(state.terrain, cmd.x, cmd.y) !== need) return
+      // Same occupancy gate as a building: the crafter's footprint must be clear of belts and
+      // other buildings. Checked after the terrain gate but before charging.
+      if (!footprintClear(state, cmd.x, cmd.y, cmd.w, cmd.h)) return
       if (!charge(state, cmd.cost)) return
       // Pick the silhouette from the machine's role: one bound to a terrain type is an extractor
       // (mine/derrick/farm), an input-less machine is a raw producer, anything else a crafter.

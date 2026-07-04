@@ -262,53 +262,84 @@ feels the most; feedback/onboarding/polish follow._
       History resets on each session swap (new-game/load). Covered by
       [history.test.ts](../../apps/game/tests/history.test.ts) (LIFO undo, redo-branch invalidation,
       refund symmetry, labels).
-- [ ] **Undo / redo of deletions + edits.** The follow-up half: make `remove`, `set_recipe` and
-      port filter/rotate undoable. Needs the sim to echo the removed/overwritten entity's full
-      descriptor (recipe, filters, links) so the inverse can faithfully re-create it — an additive
-      `applied` echo on the command queue. **Test:** a delete→undo round-trip preserves `stateHash`.
-- [ ] **Rectangular drag-delete.** Delete tool + drag removes every removable tile in the marquee.
-      Reuse the copy-marquee rectangle gesture already in [placement.ts](../../apps/game/src/placement.ts);
-      enqueue one `remove` per tile.
-- [ ] **Drag / line-stamp for machines & ports.** Belts already project a line on drag; extend the
-      same gesture so a machine or port tool stamps a repeated run along the drag axis.
-- [ ] **Config pipette (Shift+Q).** Q picks a tool from the cursor; Shift+Q copies the hovered
-      building's **full config** (recipe + port filters) into the armed tool so subsequent
-      placements inherit it — lay down rows of identically-configured machines in one pass.
-      Carried through `buildStore`/`recipeStore` intent, applied via `set_recipe`/filter commands.
-- [ ] **Planning / ghost mode (deferred construction).** Place translucent "planned" ghosts that
-      cost nothing and aren't simulated, then commit (manually or when affordable). Needs an additive
-      `planned` flag on the base building the sim ignores until committed; render draws it faded via
-      the transient `RenderHints` channel pattern from M6. **Test:** a planned ghost never perturbs
-      `stateHash` until committed.
-- [ ] **Inline cost + affordability on the ghost.** Surface the per-resource cost lines already
-      computed in [placement.ts](../../apps/game/src/placement.ts) on the build ghost, with a red
-      "can't afford" tint mirroring the existing reject tint.
+- [x] **Undo / redo of deletions + recipe edits.** Delete (click or marquee sweep) is now undoable:
+      the gesture captures the affected region as a blueprint _before_ removing (read-only, via the
+      existing `captureBlueprint`), then removes exactly those captured objects — so undo re-places
+      them (charging the same cost) and redo removes them (refunding). No sim echo was needed after
+      all: the reconstruction is client-side, and `removeTile` never clears the inspector registry, so
+      re-placed objects keep their names. Recipe changes from the sidebar picker are also undoable —
+      the controller captures the crafter's current recipe as the inverse `set_recipe`. Paste and
+      delete-undo share one `placementToStep` bridge so a re-placed object matches a pasted one.
+      Covered by a delete→undo in-place round-trip in
+      [blueprint.test.ts](../../apps/game/tests/blueprint.test.ts); determinism unchanged
+      (client-side command replay, no engine/sim change). _(Port filter/rotate edit-undo still to
+      come — the empty→first-recipe assignment has no clean inverse command and is intentionally not
+      recorded.)_
+- [x] **Rectangular drag-delete.** With the delete tool armed, a drag draws a red marquee and
+      sweep-removes every removable tile inside it on release (a single tile still deletes on click);
+      each removed object refunds via the shared `removeTile` path. See
+      [placement.ts](../../apps/game/src/placement.ts) (`onDragMove`/`onDragEnd` delete branches).
+- [x] **Drag / line-stamp for machines & ports.** A machine or port tool now stamps a flush row along
+      an axis-projected drag (`lineTiles`, stepping by footprint for machines, 1 for ports), previewed
+      as a line ghost, recorded as one undoable gesture; each stamped machine resolves its own
+      recipe per tile (terrain for extraction, else the pipette recipe). [placement.ts](../../apps/game/src/placement.ts).
+- [x] **Config pipette (Shift+Q).** Q picks the tool under the cursor; Shift+Q also copies that
+      crafter's recipe, so subsequent machine placements of the same type adopt it — lay down a row of
+      identically-configured smelters in one pass. Threaded through an additive copy-config flag on the
+      render pick callback. See [placement.ts](../../apps/game/src/placement.ts). _(Port-filter copy is
+      left as a later extension.)_
+- [~] **Planning / ghost mode (deferred construction).** _Deferred._ This is the one QoL item that
+  needs invasive change to the central placement path (or an additive planned-flag sim state plus
+  persistence), so landing it in the same pass as the rest carries real regression risk against the
+  build flow and the determinism/persistence invariants — it wants its own focused, play-tested
+  change. The existing **blueprint copy-paste** already provides deferred multi-placement, so the
+  core "lay it out, then build" need is partly served today. Design unchanged from below.
+- [x] **Inline cost + affordability on the ghost.** The build ghost tints red when the treasury
+      can't afford the cost (via `canAfford`, alongside the terrain/link reject tint), and the build
+      detail panel shows each tool's cost as resource swatches + amounts.
+      [placement.ts](../../apps/game/src/placement.ts), [BuildBar.tsx](../../apps/game/src/BuildBar.tsx).
 
 ## QoL-2 — Information & feedback
 
-- [ ] **Clickable alerts → camera jump.** Each entry in [Alerts.tsx](../../apps/game/src/Alerts.tsx)
-      pans/focuses the camera on the offending entity, reusing the F-focus glide in
-      [camera.ts](../../packages/engine/render/camera.ts); aggregated alerts expand to a list.
-- [ ] **Heat / status overlays.** Toggleable map recolour by a metric from the HUD selectors
-      ([hud.ts](../../mods/base/scripts/hud.ts)): starved/idle crafters, belt congestion, per-resource
-      production. Pure render read.
-- [ ] **Production sparklines over time.** Small make/use-rate charts in `ProductionPanel`
-      ([HudPanels.tsx](../../apps/game/src/HudPanels.tsx)), sampled from the throttled HUD refresh in
-      the UI layer (wall-clock sampling — never in the sim).
-- [ ] **Searchable build bar + recipe lookup.** Filterable [BuildBar.tsx](../../apps/game/src/BuildBar.tsx)
-      and a "what makes X / what does X make" panel built read-only from the prototype registry (the
-      balance tool already unfolds recipes to raw — surface that data in-game).
+- [x] **Clickable alerts → camera jump.** Each [Alerts.tsx](../../apps/game/src/Alerts.tsx) row is a
+      button that glides the camera to the alert's source tile via a new read-only `renderer.focusTile`
+      (the F-key/minimap eased follow), wired through a tiny `focusStore` bridge.
+- [x] **Heat / status overlays.** A "Status" toggle (button + `V`) tints every trouble-spot tile on
+      the map — starved crafters, backed-up outputs, declining villages — drawn in a new read-only
+      `renderer.setStatusOverlay` layer from the same HUD alert selector the stack uses.
+      [StatusOverlay.tsx](../../apps/game/src/StatusOverlay.tsx), [overlayStore.ts](../../apps/game/src/overlayStore.ts).
+- [x] **Production sparklines over time.** `ProductionPanel` now charts each resource's make-rate
+      trend from a rolling [productionHistory.ts](../../apps/game/src/productionHistory.ts) sampled on
+      the throttled HUD refresh (wall-clock, never the sim). [HudPanels.tsx](../../apps/game/src/HudPanels.tsx).
+- [x] **Searchable build bar + recipe lookup.** [BuildBar.tsx](../../apps/game/src/BuildBar.tsx) has a
+      search box that filters tools by name across groups (number keys pick results); the
+      **encyclopedia** below is the recipe lookup.
 
 ## QoL-3 — Onboarding & polish
 
-- [ ] **In-game recipe/tech encyclopedia** built read-only from the prototype registry, so planning
-      never leaves the game.
-- [ ] **Placement SFX** — the outstanding M6 item: place/remove/craft-tick/research-complete/village-
-      level, wall-clock driven in the render/UI layer, sim-independent.
-- [ ] **Keybind polish** — configurable rebinds, a pinned build-bar favourites row, mouse-wheel to
-      cycle recipe/rotation. Reflect any additions in [HelpOverlay.tsx](../../apps/game/src/HelpOverlay.tsx).
+- [x] **In-game recipe/tech encyclopedia.** A searchable "Recipes" modal (button + `E`) lists every
+      recipe — machine, ingredients → products, craft time — built read-only from the loaded
+      machine/recipe catalogue. [Encyclopedia.tsx](../../apps/game/src/Encyclopedia.tsx),
+      [encyclopedia.ts](../../apps/game/src/encyclopedia.ts).
+- [x] **SFX** — procedural Web Audio cues (no asset files) for place / remove / research-complete /
+      village-level, muteable with `M` (persisted). Wall-clock, sim-independent.
+      [sfx.ts](../../apps/game/src/sfx.ts). _(Per-craft-tick SFX intentionally omitted — too noisy.)_
+- [x] **Keybind polish** — mouse-wheel rotates an armed port's facing (falls through to zoom
+      otherwise) via an additive `renderer.onWheel`; `M` mutes sound. [HelpOverlay.tsx](../../apps/game/src/HelpOverlay.tsx)
+      updated. _(Configurable rebinds + a pinned favourites row left as a later extension.)_
+- [x] **Treasury/bank display.** An always-visible top strip shows the banked build-cost resources
+      and how much of each is held, so affordability is legible (the ghost already tints red when a
+      placement is out of reach — this shows the actual balance). `treasuryBalances` is plumbed into
+      `HudState`; strip in [TreasuryBar.tsx](../../apps/game/src/TreasuryBar.tsx). Read-only.
+- [x] **Drag length readout.** Dragging a belt, or line-stamping machines/ports, now draws a live
+      "×N" count at the drag's end tile (an additive `label` on the line ghost + a reused Pixi text in
+      the renderer), so the run length reads before release. [placement.ts](../../apps/game/src/placement.ts).
 
-**Suggested sequence:** undo → drag-delete → config pipette → alert-jump → overlays, then the rest.
+**Shipped this pass:** everything above except planning/ghost mode (dropped at the user's request) and
+port-filter edit-undo. Deletion + recipe-edit undo landed. New logic covered by
+[history.test.ts](../../apps/game/tests/history.test.ts), [qol.test.ts](../../apps/game/tests/qol.test.ts)
+and a delete→undo round-trip in [blueprint.test.ts](../../apps/game/tests/blueprint.test.ts); full gate
+green + determinism unchanged (`pnpm headless 99 750` → `f37ae68a` across runs).
 
 ---
 

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useSyncExternalStore } from 'react'
 import { hudStore } from './hudStore.ts'
+import { focusStore } from './focusStore.ts'
 import type { Alert, AlertKind } from './gameLogic.ts'
 import { Icon, type IconName } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
@@ -19,6 +20,9 @@ interface AlertGroup {
   readonly kind: AlertKind
   readonly color?: number
   readonly count: number
+  /** The first raising tile — clicking the row glides the camera here. */
+  readonly x: number
+  readonly y: number
 }
 
 /** Collapse identical alerts (same kind + resource) into a single row carrying a count. */
@@ -29,7 +33,13 @@ function groupAlerts(alerts: readonly Alert[]): AlertGroup[] {
     const cur = byKey.get(key)
     if (cur) byKey.set(key, { ...cur, count: cur.count + 1 })
     else
-      byKey.set(key, { kind: a.kind, count: 1, ...(a.color !== undefined && { color: a.color }) })
+      byKey.set(key, {
+        kind: a.kind,
+        count: 1,
+        x: a.x,
+        y: a.y,
+        ...(a.color !== undefined && { color: a.color }),
+      })
   }
   return [...byKey.values()]
 }
@@ -53,12 +63,18 @@ export function Alerts(): React.JSX.Element | null {
       {groups.map((g) => {
         const kind = KIND[g.kind]
         return (
-          <div key={`${g.kind}:${g.color ?? ''}`} className={`alert alert-${kind.severity}`}>
+          <button
+            key={`${g.kind}:${g.color ?? ''}`}
+            type="button"
+            className={`alert alert-${kind.severity}`}
+            onClick={() => focusStore.focus(g.x, g.y)}
+            title="Jump to location"
+          >
             <Icon name={kind.icon} size={16} />
             <span className="alert-text">{kind.label}</span>
             {g.color !== undefined && <ResourceLabel color={g.color} size={14} />}
             {g.count > 1 && <span className="alert-count">×{g.count}</span>}
-          </div>
+          </button>
         )
       })}
     </div>

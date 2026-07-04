@@ -17,8 +17,10 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
     keys: [
       ['1–9 / 0', 'Pick tool'],
       ['Q', 'Pick from cursor'],
-      ['R', 'Rotate port'],
+      ['Shift+Q', 'Pick + copy recipe'],
+      ['R / Wheel', 'Rotate port'],
       ['Ctrl+C', 'Copy area'],
+      ['Delete + drag', 'Sweep-delete area'],
       ['Ctrl+Z', 'Undo build'],
       ['Ctrl+Shift+Z', 'Redo build'],
       ['Esc', 'Deselect / back'],
@@ -30,6 +32,7 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
     keys: [
       ['Space', 'Pause'],
       ['[  /  ]', 'Speed down / up'],
+      ['M', 'Mute / unmute sound'],
     ],
   },
   {
@@ -38,6 +41,8 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
       ['F10', 'Save menu'],
       ['F5 / F9', 'Quicksave / quickload'],
       ['F3', 'Debug stats'],
+      ['V', 'Status overlay'],
+      ['E', 'Recipe book'],
       ['?', 'This help'],
     ],
   },

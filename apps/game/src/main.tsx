@@ -13,6 +13,21 @@ import { statsStore } from './statsStore.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
 import { blueprintStore } from './blueprintStore.ts'
 import { historyStore } from './historyStore.ts'
+import { focusStore } from './focusStore.ts'
+import { productionHistory } from './productionHistory.ts'
+import { sfx } from './sfx.ts'
+import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
+import { overlayStore } from './overlayStore.ts'
+import type { AlertKind } from './gameLogic.ts'
+
+/** Status-overlay marker colour per alert kind (starved = orange, backed up = amber, etc.). */
+const ALERT_COLOR: Record<AlertKind, number> = {
+  crafter_missing_input: 0xff9800,
+  crafter_output_full: 0xffd54f,
+  village_declining: 0xff5252,
+  cannon_no_target: 0xba68ff,
+  cannon_out_of_range: 0xba68ff,
+}
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
 import { saveStore, type SaveController } from './saveStore.ts'
@@ -32,6 +47,7 @@ import {
   researchProgress,
   collectAlerts,
   productionFlows,
+  treasuryBalances,
   scenarioList,
   gameObjectives,
   type ObjectiveId,
@@ -268,6 +284,8 @@ async function boot(): Promise<void> {
   // (one tool per machine) and the sidebar recipe picker (via placement.ts).
   const machines = buildMachineIndex(prototypes)
   const allBuildItems = toBuildItems(prototypes, machines)
+  // Populate the read-only recipe encyclopedia once from the loaded machine/recipe catalogue.
+  encyclopediaStore.setEntries(buildEncyclopedia(machines))
 
   // Derive the researched-string set from a research store's completed integer ids plus the always-
   // available root techs. Called when a session starts so a loaded save unlocks exactly what it had.
@@ -293,6 +311,13 @@ async function boot(): Promise<void> {
   })
   globalThis.addEventListener('resize', () => {
     renderer.resize(globalThis.innerWidth, globalThis.innerHeight)
+  })
+  // Let read-only UI (the alert stack) glide the camera to a source tile via the same eased follow
+  // as the F key — a pure view action, so it never touches sim state.
+  focusStore.setController((x, y) => renderer.focusTile(x, y))
+  // Clear the status overlay the moment it is toggled off (the boot loop repopulates when on).
+  overlayStore.subscribe(() => {
+    if (!overlayStore.get().on) renderer.setStatusOverlay(null)
   })
   // Suppress edge-of-screen camera panning AND hide the minimap unless a session is actively on
   // screen and no save overlay is open, so nothing drifts under a modal or shows on the menu shell.
@@ -341,6 +366,8 @@ async function boot(): Promise<void> {
   /** Build a fresh sim from an origin (new game or restored save) and make it the live session. */
   const startSession = async (origin: SimOrigin): Promise<void> => {
     const sim = await createSim(prototypes, discovered, origin)
+    productionHistory.reset() // a new world starts its production trend fresh
+    prevVillageLevels = -1 // don't chime on the first sample of a freshly started/loaded session
     const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry, machines)
     session = {
       world: sim.world,
@@ -601,6 +628,9 @@ async function boot(): Promise<void> {
       if (appStore.get().phase !== 'playing') return
       e.preventDefault()
       historyStore.redo()
+    } else if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !typing) {
+      // Toggle sound effects (procedural, UI-layer only). Persisted across sessions.
+      sfx.setMuted(!sfx.isMuted())
     } else if (e.key === 'F5') {
       e.preventDefault()
       void controller.quickSave()
@@ -633,6 +663,9 @@ async function boot(): Promise<void> {
   let last = performance.now()
   let lastFrameAt = last
   let lastStatsAt = 0
+  // Sum of village levels last refresh, to chime when any village grows a stage. -1 until first read
+  // so loading into an already-grown town doesn't fire on the first sample.
+  let prevVillageLevels = -1
   let lastAlpha = 0
   let frames = 0
   let fps = 0
@@ -691,17 +724,35 @@ async function boot(): Promise<void> {
           grew = true
         }
       }
-      if (grew) void refreshBuildBar()
+      if (grew) {
+        void refreshBuildBar()
+        sfx.play('research') // a tech just completed — chime
+      }
       // Push a fresh HUD snapshot for the M4 panels (research / villages / alerts / production).
+      const production = productionFlows(sess.state).map((f) => ({
+        color: f.color,
+        producedPerSec: f.produced * DEFAULT_TICK_RATE,
+        consumedPerSec: f.consumed * DEFAULT_TICK_RATE,
+      }))
+      // Fold the per-resource make rate into the rolling history the sparklines chart.
+      productionHistory.push(production)
+      const villages = villageStatuses(sess.state)
+      // Chime when the total village level rises (a stage was gained since the last sample).
+      const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)
+      if (prevVillageLevels >= 0 && villageLevels > prevVillageLevels) sfx.play('level')
+      prevVillageLevels = villageLevels
+      const alerts = collectAlerts(sess.state)
+      // Status overlay: tint each flagged tile on the map while the overlay is toggled on.
+      renderer.setStatusOverlay(
+        overlayStore.get().on
+          ? alerts.map((a) => ({ x: a.x, y: a.y, color: ALERT_COLOR[a.kind] ?? 0xff5252 }))
+          : null,
+      )
       hudStore.set({
         research: buildResearchHud(sess),
-        villages: villageStatuses(sess.state),
-        alerts: collectAlerts(sess.state),
-        production: productionFlows(sess.state).map((f) => ({
-          color: f.color,
-          producedPerSec: f.produced * DEFAULT_TICK_RATE,
-          consumedPerSec: f.consumed * DEFAULT_TICK_RATE,
-        })),
+        villages,
+        alerts,
+        production,
         // Guided onboarding checklist: the sim reports which steps the world satisfies; the host
         // attaches each step's display label. The panel hides itself once every step is done.
         objectives: gameObjectives(sess.state).map((o) => ({
@@ -709,6 +760,7 @@ async function boot(): Promise<void> {
           label: OBJECTIVE_LABELS[o.id],
           done: o.done,
         })),
+        treasury: treasuryBalances(sess.state),
       })
       // Refresh the inspector so a pinned/hovered object's live numbers stay current.
       sess.inspect.refresh()

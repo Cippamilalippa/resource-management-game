@@ -1,9 +1,49 @@
 import { useState } from 'react'
 import { useSyncExternalStore } from 'react'
 import { hudStore, type HudTech, type HudProductionRow } from './hudStore.ts'
+import { productionHistory } from './productionHistory.ts'
 import type { VillageStatus } from './gameLogic.ts'
 import { Icon, type IconName } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
+
+/** A packed 0xRRGGBB colour as a CSS hex string. */
+function cssColor(color: number): string {
+  return `#${(color >>> 0).toString(16).padStart(6, '0')}`
+}
+
+/**
+ * A tiny inline trend line for a resource's make rate over the recent samples. Pure presentation:
+ * it reads the rolling {@link productionHistory} (wall-clock sampled, never the sim). A flat/empty
+ * series renders as a baseline.
+ */
+function Sparkline({ color }: { color: number }): React.JSX.Element {
+  const version = useSyncExternalStore(
+    productionHistory.subscribe,
+    productionHistory.getVersion,
+    productionHistory.getVersion,
+  )
+  // `version` re-subscribes the component each push; the series read is keyed off it.
+  void version
+  const samples = productionHistory.series(color)
+  const w = 56
+  const h = 16
+  const n = samples.length
+  const max = Math.max(1, ...samples)
+  const points =
+    n < 2
+      ? `0,${h} ${w},${h}`
+      : samples
+          .map(
+            (v, i) =>
+              `${((i / (n - 1)) * w).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`,
+          )
+          .join(' ')
+  return (
+    <svg className="hud-spark" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
+      <polyline points={points} fill="none" stroke={cssColor(color)} strokeWidth="1.5" />
+    </svg>
+  )
+}
 
 /** Format a per-second rate: two decimals below 10, rounded above (matches the inspector). */
 function rate(perSec: number): string {
@@ -201,6 +241,7 @@ function ProductionPanel(): React.JSX.Element {
           <span className="hud-prod-h" />
           <span className="hud-prod-h">make</span>
           <span className="hud-prod-h">use</span>
+          <span className="hud-prod-h">trend</span>
           {production.map((p: HudProductionRow) => (
             <ProductionRow key={p.color} p={p} />
           ))}
@@ -225,6 +266,7 @@ function ProductionRow({ p }: { p: HudProductionRow }): React.JSX.Element {
       >
         {rate(p.consumedPerSec)}
       </span>
+      <Sparkline color={p.color} />
     </>
   )
 }

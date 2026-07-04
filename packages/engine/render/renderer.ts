@@ -1,4 +1,4 @@
-import { Application, Container, Graphics, Sprite, type Texture } from 'pixi.js'
+import { Application, Container, Graphics, Sprite, Text, type Texture } from 'pixi.js'
 import { lerp, type GridCoord } from '@factory/shared'
 import { TILE_SIZE, renderableEntities, type GameWorld } from '../core/index.ts'
 import { Camera } from './camera.ts'
@@ -27,6 +27,11 @@ const BELT_ARROW: readonly (readonly [number, number])[] = [
   [-0.4, -0.4],
   [0, -0.4],
 ]
+
+/** Green ring on a placement ghost the sim would accept — a "clear to place" signal. */
+const GHOST_VALID = 0x55ff88
+/** Red fill+ring on a placement ghost the sim would reject (off-terrain, overlapping, unaffordable). */
+const GHOST_INVALID = 0xff5555
 
 /** Duration (ms) of the scale+fade "pop" when an entity first appears. */
 const SPAWN_MS = 160
@@ -85,6 +90,13 @@ export type Ghost =
       readonly color: number
       /** Optional facing 0..3 (N,E,S,W): when set, draw a direction chevron (port rotation). */
       readonly dir?: number
+      /**
+       * Optional placement validity. When set, the ghost reads as a go/no-go signal rather than a
+       * plain tint: `true` rings the footprint green (clear to place), `false` fills it red (blocked
+       * — off-terrain, overlapping, or unaffordable). Left unset for previews with no validity
+       * meaning (e.g. a belt's start-tile cursor).
+       */
+      readonly valid?: boolean
     }
   | {
       readonly kind: 'line'
@@ -93,6 +105,8 @@ export type Ghost =
       readonly bx: number
       readonly by: number
       readonly color: number
+      /** Optional readout drawn at the line's end tile (e.g. a drag length "×5"). */
+      readonly label?: string
     }
   | {
       /** A multi-cell preview (blueprint paste): a set of tinted footprint rects. */
@@ -122,6 +136,15 @@ export interface Highlight {
   readonly selected: boolean
 }
 
+/** One status-overlay marker: a tinted footprint at a flagged tile (default 1×1). */
+export interface StatusMark {
+  readonly x: number
+  readonly y: number
+  readonly w?: number
+  readonly h?: number
+  readonly color: number
+}
+
 /**
  * Read-only PixiJS renderer. It NEVER mutates sim state — every frame it reads the
  * Position/Renderable component arrays and draws colored-rectangle placeholders,
@@ -137,6 +160,12 @@ export class Renderer {
   #iconLayer = new Container()
   #ghostLayer = new Graphics()
   #highlightLayer = new Graphics()
+  #overlayLayer = new Graphics()
+  /** A small readout drawn at a ghost line's end (e.g. a drag length). Hidden unless a label is set. */
+  #ghostLabel = new Text({
+    text: '',
+    style: { fill: 0xffffff, fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold' },
+  })
   #camera: Camera
   #sprites = new Map<number, Graphics>()
   /**
@@ -218,10 +247,17 @@ export class Renderer {
   onRotate: (() => void) | null = null
   /**
    * Called when the pick key (Q) is pressed — the app arms the build tool matching whatever is
-   * under the cursor ("pipette"). The renderer resolves the tile from the last pointer position
-   * and relays it; it never mutates sim state.
+   * under the cursor ("pipette"). `copyConfig` is true when Shift is held (Shift+Q), asking the app
+   * to also adopt the picked object's settings (e.g. a crafter's recipe). The renderer resolves the
+   * tile from the last pointer position and relays it; it never mutates sim state.
    */
-  onPick: ((tile: GridCoord) => void) | null = null
+  onPick: ((tile: GridCoord, copyConfig: boolean) => void) | null = null
+  /**
+   * Called on mouse-wheel with the scroll delta before the camera zooms. The app returns true to
+   * claim the wheel (e.g. rotate an armed port's facing) and suppress zoom; false to let it zoom.
+   * The renderer never mutates sim state — it only relays the intent.
+   */
+  onWheel: ((deltaY: number) => boolean) | null = null
   /**
    * Called when the pointer is right-clicked (context menu) — the app cancels the current
    * gesture/armed tool. The renderer suppresses the native browser menu and never mutates
@@ -238,6 +274,10 @@ export class Renderer {
     this.#world.addChild(this.#iconLayer)
     this.#world.addChild(this.#ghostLayer)
     this.#world.addChild(this.#highlightLayer)
+    this.#world.addChild(this.#overlayLayer)
+    this.#ghostLabel.visible = false
+    this.#ghostLabel.zIndex = 10
+    this.#world.addChild(this.#ghostLabel)
     this.#app.stage.addChild(this.#world)
     // The minimap lives on the stage (not #world) so it stays fixed to the screen corner.
     this.#app.stage.addChild(this.#minimapLayer)
@@ -485,6 +525,15 @@ export class Renderer {
   }
 
   /**
+   * Glide the camera to centre tile (x, y), the same eased follow the F key and minimap use. A pure
+   * view action (never mutates the sim) — the app calls it to jump to an alert's source tile.
+   */
+  focusTile(x: number, y: number): void {
+    const point = { x: (x + 0.5) * TILE_SIZE, y: (y + 0.5) * TILE_SIZE }
+    this.#camera.follow(() => point)
+  }
+
+  /**
    * Register the per-entity overlay icons, keyed by an entity's packed `color`. Each colour
    * that maps to a texture has that texture drawn small in the top-right of every matching
    * entity's tile (the app uses this to stamp the build-bar glyph onto placed buildings).
@@ -550,11 +599,17 @@ export class Renderer {
   setGhost(ghost: Ghost | null): void {
     const g = this.#ghostLayer
     g.clear()
+    this.#ghostLabel.visible = false // hidden unless a line ghost sets a readout below
     if (!ghost) return
     if (ghost.kind === 'rect') {
+      // A validity flag turns the ghost into a go/no-go signal: blocked placements fill red, clear
+      // ones keep their build colour but gain a bold green ring. With no flag it's a plain tint.
+      const invalid = ghost.valid === false
+      const fillColor = invalid ? GHOST_INVALID : ghost.color
+      const ringColor = ghost.valid === true ? GHOST_VALID : invalid ? GHOST_INVALID : ghost.color
       g.rect(ghost.x * TILE_SIZE, ghost.y * TILE_SIZE, ghost.w * TILE_SIZE, ghost.h * TILE_SIZE)
-      g.fill({ color: ghost.color, alpha: 0.45 })
-      g.stroke({ width: 2, color: ghost.color, alpha: 0.9 })
+      g.fill({ color: fillColor, alpha: invalid ? 0.35 : 0.45 })
+      g.stroke({ width: ghost.valid === undefined ? 2 : 3, color: ringColor, alpha: 0.95 })
       // A facing arrow for a directional placement (e.g. a port), so rotation reads on-screen.
       if (ghost.dir !== undefined) {
         const cx = (ghost.x + ghost.w / 2) * TILE_SIZE
@@ -586,6 +641,33 @@ export class Renderer {
     g.rect(minX * TILE_SIZE, minY * TILE_SIZE, w * TILE_SIZE, h * TILE_SIZE)
     g.fill({ color: ghost.color, alpha: 0.45 })
     g.stroke({ width: 2, color: ghost.color, alpha: 0.9 })
+    // Drag readout (e.g. "×5"): drawn just past the line's end tile so it tracks the cursor.
+    if (ghost.label) {
+      this.#ghostLabel.text = ghost.label
+      this.#ghostLabel.anchor.set(0, 0.5)
+      this.#ghostLabel.position.set((ghost.bx + 1) * TILE_SIZE + 4, (ghost.by + 0.5) * TILE_SIZE)
+      this.#ghostLabel.visible = true
+    }
+  }
+
+  /**
+   * Show (or clear, with `null`) the status overlay: a tinted marker per flagged tile (e.g. starved
+   * crafters, backed-up outputs), so the whole factory's trouble spots read at a glance. Drawn in
+   * world space above entities. A pure read — the app supplies the marks from the read-only HUD
+   * selectors; the renderer never mutates sim state.
+   */
+  setStatusOverlay(marks: readonly StatusMark[] | null): void {
+    const g = this.#overlayLayer
+    g.clear()
+    if (!marks) return
+    for (let i = 0; i < marks.length; i++) {
+      const m = marks[i]!
+      const w = (m.w ?? 1) * TILE_SIZE
+      const h = (m.h ?? 1) * TILE_SIZE
+      g.rect(m.x * TILE_SIZE, m.y * TILE_SIZE, w, h)
+      g.fill({ color: m.color, alpha: 0.28 })
+      g.stroke({ width: 2, color: m.color, alpha: 0.95 })
+    }
   }
 
   /**
@@ -908,6 +990,9 @@ export class Renderer {
       'wheel',
       (e) => {
         e.preventDefault()
+        // Let the app claim the wheel first (e.g. rotate an armed port instead of zooming). It
+        // returns true when it handled the scroll; otherwise fall through to camera zoom.
+        if (this.onWheel?.(e.deltaY)) return
         const rect = canvas.getBoundingClientRect()
         const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
         this.#camera.zoomTo(e.clientX - rect.left, e.clientY - rect.top, factor)
@@ -926,7 +1011,8 @@ export class Renderer {
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       const k = e.key.toLowerCase()
       if (k === 'r' && this.onRotate) this.onRotate()
-      else if (k === 'q' && this.onPick) this.onPick(tileAt(this.#lastClientX, this.#lastClientY))
+      else if (k === 'q' && this.onPick)
+        this.onPick(tileAt(this.#lastClientX, this.#lastClientY), e.shiftKey)
       else if (k === 'f') {
         const tile = tileAt(this.#lastClientX, this.#lastClientY)
         // Glide to the tile centre; a constant target eases in and settles at the viewport centre.
