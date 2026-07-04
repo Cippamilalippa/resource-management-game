@@ -12,6 +12,7 @@ import { App } from './App.tsx'
 import { statsStore } from './statsStore.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
 import { blueprintStore } from './blueprintStore.ts'
+import { historyStore } from './historyStore.ts'
 import { installPlacement } from './placement.ts'
 import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
 import { saveStore, type SaveController } from './saveStore.ts'
@@ -589,6 +590,17 @@ async function boot(): Promise<void> {
       if (appStore.get().phase !== 'playing') return
       e.preventDefault()
       blueprintStore.armCopy()
+    } else if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !typing) {
+      // Ctrl/Cmd+Z undoes the last build gesture; add Shift (or Ctrl/Cmd+Y) to redo. Both replay
+      // through the ordinary command queue, so the sim only sees regular place/remove commands.
+      if (appStore.get().phase !== 'playing') return
+      e.preventDefault()
+      if (e.shiftKey) historyStore.redo()
+      else historyStore.undo()
+    } else if ((e.key === 'y' || e.key === 'Y') && (e.ctrlKey || e.metaKey) && !typing) {
+      if (appStore.get().phase !== 'playing') return
+      e.preventDefault()
+      historyStore.redo()
     } else if (e.key === 'F5') {
       e.preventDefault()
       void controller.quickSave()

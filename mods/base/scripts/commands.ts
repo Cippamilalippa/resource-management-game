@@ -134,3 +134,16 @@ export function enqueueSetActiveResearch(
 export function enqueueRemove(gw: GameWorld, cmd: Omit<RemoveCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'remove', ...cmd })
 }
+
+/**
+ * Queue an already-assembled command (applied next tick) — the generic form the undo/redo
+ * history uses to replay or reverse a recorded gesture. The typed `enqueuePlace*` helpers above
+ * are preferred for authoring new placements; this bridge exists for command records that were
+ * built once and are re-dispatched verbatim.
+ */
+export function dispatchCommand(
+  gw: GameWorld,
+  cmd: { type: string; [key: string]: unknown },
+): void {
+  enqueueCommand(gw, cmd)
+}

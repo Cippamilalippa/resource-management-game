@@ -234,6 +234,84 @@ for the **dynamic** KPIs of a played-out seed. See [economy.md §8](./economy.md
 
 ---
 
+# Milestone: Quality-of-life (M-QoL)
+
+_The core loop is playable (M1–M5) and juiced (M6). This milestone is about the **feel of the
+moment-to-moment build/manage loop** — making construction effortless and the factory legible.
+Weighted toward **build ergonomics** (QoL-1) first, since undo + drag-editing change how the game
+feels the most; feedback/onboarding/polish follow._
+
+> Same invariants as everything above — **UI never mutates sim state** (gestures only enqueue
+> commands the sim applies next tick), **determinism** (no `Date.now`/`Math.random` in
+> `mods/**/scripts`), **render is a read-only view**. New commands ship a determinism test; any
+> persisted-state change ships a serialize→deserialize round-trip test. Read-only feedback
+> (overlays, charts, SFX, tooltips) lives in `apps/game/src` or `render/` and must not touch the sim.
+
+## QoL-1 — Build ergonomics (priority)
+
+- [x] **Undo / redo of build actions (v1: placements).** New
+      [historyStore.ts](../../apps/game/src/historyStore.ts) holds a bounded (100) stack of
+      inverse/replay command pairs. Every placement gesture in
+      [placement.ts](../../apps/game/src/placement.ts) — single building/port/splitter/crafter, a belt
+      run, and a whole blueprint paste (one grouped step) — records its inverse (`remove` per filled
+      tile, refunding the original charge) and its replay (the original `place_*` command). Ctrl+Z
+      undoes / Ctrl+Shift+Z (or Ctrl+Y) redoes, dispatched through the new generic
+      `dispatchCommand` bridge ([commands.ts](../../mods/base/scripts/commands.ts)) as ordinary
+      queued commands — so the sim only ever sees regular place/remove ops and **determinism is
+      untouched** (verified: `pnpm headless 99 750` matches across runs; no engine/sim change).
+      History resets on each session swap (new-game/load). Covered by
+      [history.test.ts](../../apps/game/tests/history.test.ts) (LIFO undo, redo-branch invalidation,
+      refund symmetry, labels).
+- [ ] **Undo / redo of deletions + edits.** The follow-up half: make `remove`, `set_recipe` and
+      port filter/rotate undoable. Needs the sim to echo the removed/overwritten entity's full
+      descriptor (recipe, filters, links) so the inverse can faithfully re-create it — an additive
+      `applied` echo on the command queue. **Test:** a delete→undo round-trip preserves `stateHash`.
+- [ ] **Rectangular drag-delete.** Delete tool + drag removes every removable tile in the marquee.
+      Reuse the copy-marquee rectangle gesture already in [placement.ts](../../apps/game/src/placement.ts);
+      enqueue one `remove` per tile.
+- [ ] **Drag / line-stamp for machines & ports.** Belts already project a line on drag; extend the
+      same gesture so a machine or port tool stamps a repeated run along the drag axis.
+- [ ] **Config pipette (Shift+Q).** Q picks a tool from the cursor; Shift+Q copies the hovered
+      building's **full config** (recipe + port filters) into the armed tool so subsequent
+      placements inherit it — lay down rows of identically-configured machines in one pass.
+      Carried through `buildStore`/`recipeStore` intent, applied via `set_recipe`/filter commands.
+- [ ] **Planning / ghost mode (deferred construction).** Place translucent "planned" ghosts that
+      cost nothing and aren't simulated, then commit (manually or when affordable). Needs an additive
+      `planned` flag on the base building the sim ignores until committed; render draws it faded via
+      the transient `RenderHints` channel pattern from M6. **Test:** a planned ghost never perturbs
+      `stateHash` until committed.
+- [ ] **Inline cost + affordability on the ghost.** Surface the per-resource cost lines already
+      computed in [placement.ts](../../apps/game/src/placement.ts) on the build ghost, with a red
+      "can't afford" tint mirroring the existing reject tint.
+
+## QoL-2 — Information & feedback
+
+- [ ] **Clickable alerts → camera jump.** Each entry in [Alerts.tsx](../../apps/game/src/Alerts.tsx)
+      pans/focuses the camera on the offending entity, reusing the F-focus glide in
+      [camera.ts](../../packages/engine/render/camera.ts); aggregated alerts expand to a list.
+- [ ] **Heat / status overlays.** Toggleable map recolour by a metric from the HUD selectors
+      ([hud.ts](../../mods/base/scripts/hud.ts)): starved/idle crafters, belt congestion, per-resource
+      production. Pure render read.
+- [ ] **Production sparklines over time.** Small make/use-rate charts in `ProductionPanel`
+      ([HudPanels.tsx](../../apps/game/src/HudPanels.tsx)), sampled from the throttled HUD refresh in
+      the UI layer (wall-clock sampling — never in the sim).
+- [ ] **Searchable build bar + recipe lookup.** Filterable [BuildBar.tsx](../../apps/game/src/BuildBar.tsx)
+      and a "what makes X / what does X make" panel built read-only from the prototype registry (the
+      balance tool already unfolds recipes to raw — surface that data in-game).
+
+## QoL-3 — Onboarding & polish
+
+- [ ] **In-game recipe/tech encyclopedia** built read-only from the prototype registry, so planning
+      never leaves the game.
+- [ ] **Placement SFX** — the outstanding M6 item: place/remove/craft-tick/research-complete/village-
+      level, wall-clock driven in the render/UI layer, sim-independent.
+- [ ] **Keybind polish** — configurable rebinds, a pinned build-bar favourites row, mouse-wheel to
+      cycle recipe/rotation. Reflect any additions in [HelpOverlay.tsx](../../apps/game/src/HelpOverlay.tsx).
+
+**Suggested sequence:** undo → drag-delete → config pipette → alert-jump → overlays, then the rest.
+
+---
+
 # Post-slice (M8–M9)
 
 ## M8 — Modding platform maturation

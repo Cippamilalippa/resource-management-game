@@ -10,6 +10,7 @@ import {
   enqueueSetRecipe,
   enqueueSetPortFilter,
   enqueueRemove,
+  dispatchCommand,
   projectBelt,
   terrainTypeOf,
   terrainTypeAt,
@@ -23,6 +24,7 @@ import {
   type GameState,
 } from './gameLogic.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
+import { historyStore, type HistoryCommand } from './historyStore.ts'
 import { blueprintStore } from './blueprintStore.ts'
 import {
   captureBlueprint,
@@ -91,6 +93,44 @@ export function installPlacement(
   const colorAt = (x: number, y: number): number | null => {
     const info = resolveInspect(world, grid, state.buildings, state.villages, registry, x, y)
     return info ? info.color : null
+  }
+
+  // Undo/redo replays and reverses recorded gestures through the ordinary command queue, so the
+  // sim only ever sees regular place/remove commands and determinism is untouched. Reset history
+  // here: a fresh placement install means a fresh session, so any stale inverses must be dropped.
+  historyStore.setDispatch((cmd) => dispatchCommand(world, cmd))
+  historyStore.reset()
+
+  /** One placement within a gesture: the command that (re)creates it and the tiles it fills. */
+  interface PlacedStep {
+    readonly cmd: HistoryCommand
+    readonly tiles: readonly { readonly x: number; readonly y: number }[]
+    /** Build cost charged, so undo can refund the same amount it spent (absent when free). */
+    readonly refund?: Cost | undefined
+  }
+
+  /**
+   * Record a completed build gesture as one undoable step. Replaying re-sends each placement's
+   * command; undoing removes every filled tile in reverse placement order, crediting each
+   * placement's refund on its first tile so the treasury nets out across an undo/redo cycle.
+   */
+  const recordGesture = (label: string, steps: readonly PlacedStep[]): void => {
+    if (steps.length === 0) return
+    const redo: HistoryCommand[] = steps.map((s) => s.cmd)
+    const undo: HistoryCommand[] = []
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const s = steps[i]!
+      for (let j = 0; j < s.tiles.length; j++) {
+        const t = s.tiles[j]!
+        undo.push({
+          type: 'remove',
+          x: t.x,
+          y: t.y,
+          ...(j === 0 && s.refund && s.refund.length > 0 ? { refund: s.refund } : {}),
+        })
+      }
+    }
+    historyStore.push({ label, undo, redo })
   }
 
   // The recipe picker (sidebar) drives recipe changes on the pinned crafter through here — only the
@@ -396,19 +436,22 @@ export function installPlacement(
     }
   }
 
-  /** Stamp the pending blueprint at the cursor: enqueue every placement and name each tile. */
+  /** Stamp the pending blueprint at the cursor: enqueue every placement and name each tile. The
+   * whole stamp is recorded as ONE undoable step, so a single Ctrl+Z tears the paste back out. */
   const stampPaste = (tile: GridCoord): void => {
     const bp = blueprintStore.get().pending
     if (!bp) return
     const o = pasteOrigin(tile, bp)
+    const steps: PlacedStep[] = []
     for (const p of blueprintPlacements(bp, o.x, o.y)) {
       // Paste works from placed colours, so each tile is charged the same cost the palette assigns
       // to that colour (a belt run scaled by its length) — pasting is never cheaper than building.
       const cost = costForColor(p.color)
       switch (p.kind) {
         case 'belt': {
-          const beltCost = scaleCost(cost, projectBelt(p.ax, p.ay, p.bx, p.by).length)
-          enqueuePlaceBelt(world, {
+          const run = projectBelt(p.ax, p.ay, p.bx, p.by)
+          const beltCost = scaleCost(cost, run.length)
+          const params = {
             ax: p.ax,
             ay: p.ay,
             bx: p.bx,
@@ -417,12 +460,17 @@ export function installPlacement(
             moveEvery: p.moveEvery,
             face: p.face,
             ...(beltCost ? { cost: beltCost } : {}),
-          })
+          }
+          enqueuePlaceBelt(world, params)
           registry.record(p.ax, p.ay, { name: pasteName(p), type: 'belt' })
+          const tiles: { x: number; y: number }[] = []
+          for (let i = 0; i < run.length; i++)
+            tiles.push({ x: p.ax + run.dx * i, y: p.ay + run.dy * i })
+          steps.push({ cmd: { type: 'place_belt', ...params }, tiles, refund: beltCost })
           break
         }
-        case 'port':
-          enqueuePlacePort(world, {
+        case 'port': {
+          const params = {
             x: p.x,
             y: p.y,
             port: p.port,
@@ -430,20 +478,29 @@ export function installPlacement(
             spawnEvery: p.spawnEvery,
             dir: p.dir,
             ...(cost ? { cost } : {}),
-          })
+          }
+          enqueuePlacePort(world, params)
           registry.record(p.x, p.y, { name: pasteName(p), type: p.port })
-          break
-        case 'splitter':
-          enqueuePlaceSplitter(world, {
-            x: p.x,
-            y: p.y,
-            color: p.color,
-            ...(cost ? { cost } : {}),
+          steps.push({
+            cmd: { type: 'place_port', ...params },
+            tiles: [{ x: p.x, y: p.y }],
+            refund: cost,
           })
-          registry.record(p.x, p.y, { name: pasteName(p), type: 'splitter' })
           break
-        case 'building':
-          enqueuePlaceBuilding(world, {
+        }
+        case 'splitter': {
+          const params = { x: p.x, y: p.y, color: p.color, ...(cost ? { cost } : {}) }
+          enqueuePlaceSplitter(world, params)
+          registry.record(p.x, p.y, { name: pasteName(p), type: 'splitter' })
+          steps.push({
+            cmd: { type: 'place_splitter', ...params },
+            tiles: [{ x: p.x, y: p.y }],
+            refund: cost,
+          })
+          break
+        }
+        case 'building': {
+          const params = {
             x: p.x,
             y: p.y,
             w: p.w,
@@ -452,11 +509,18 @@ export function installPlacement(
             accepts: p.accepts,
             ...(p.researchLab ? { researchLab: true } : {}),
             ...(cost ? { cost } : {}),
-          })
+          }
+          enqueuePlaceBuilding(world, params)
           registry.record(p.x, p.y, { name: pasteName(p), type: 'building' })
+          steps.push({
+            cmd: { type: 'place_building', ...params },
+            tiles: [{ x: p.x, y: p.y }],
+            refund: cost,
+          })
           break
-        case 'crafter':
-          enqueuePlaceCrafter(world, {
+        }
+        case 'crafter': {
+          const params = {
             x: p.x,
             y: p.y,
             w: p.w,
@@ -466,11 +530,19 @@ export function installPlacement(
             storageCap: p.storageCap,
             ...(p.recipe ? { recipe: p.recipe, inputs: p.inputs, outputs: p.outputs } : {}),
             ...(cost ? { cost } : {}),
-          })
+          }
+          enqueuePlaceCrafter(world, params)
           registry.record(p.x, p.y, { name: pasteName(p), type: 'producer' })
+          steps.push({
+            cmd: { type: 'place_crafter', ...params },
+            tiles: [{ x: p.x, y: p.y }],
+            refund: cost,
+          })
           break
+        }
       }
     }
+    recordGesture('Paste', steps)
   }
 
   /**
@@ -641,7 +713,7 @@ export function installPlacement(
     }
     pressTile = null
     if (item.kind === 'building') {
-      enqueuePlaceBuilding(world, {
+      const params = {
         x: tile.x,
         y: tile.y,
         w: item.w,
@@ -651,14 +723,18 @@ export function installPlacement(
         ...(item.researchLab ? { researchLab: true } : {}),
         ...(item.depot ? { depot: true } : {}),
         ...(item.cost ? { cost: item.cost } : {}),
-      })
+      }
+      enqueuePlaceBuilding(world, params)
       registry.record(tile.x, tile.y, { name: item.name, type: 'building' })
+      recordGesture(item.name, [
+        { cmd: { type: 'place_building', ...params }, tiles: [tile], refund: item.cost },
+      ])
       return
     }
     // Port: drops onto the belt tile under the cursor (ignored if there's no belt there); it
     // links to an adjacent building, draining/feeding it.
     if (item.kind === 'port' && item.port) {
-      enqueuePlacePort(world, {
+      const params = {
         x: tile.x,
         y: tile.y,
         port: item.port,
@@ -666,19 +742,27 @@ export function installPlacement(
         spawnEvery: item.spawnEvery,
         dir: placeDir,
         ...(item.cost ? { cost: item.cost } : {}),
-      })
+      }
+      enqueuePlacePort(world, params)
       registry.record(tile.x, tile.y, { name: item.name, type: item.port })
+      recordGesture(item.name, [
+        { cmd: { type: 'place_port', ...params }, tiles: [tile], refund: item.cost },
+      ])
       return
     }
     // Splitter: also drops onto the belt tile under the cursor (ignored off-belt).
     if (item.kind === 'splitter') {
-      enqueuePlaceSplitter(world, {
+      const params = {
         x: tile.x,
         y: tile.y,
         color: item.color,
         ...(item.cost ? { cost: item.cost } : {}),
-      })
+      }
+      enqueuePlaceSplitter(world, params)
       registry.record(tile.x, tile.y, { name: item.name, type: 'splitter' })
+      recordGesture(item.name, [
+        { cmd: { type: 'place_splitter', ...params }, tiles: [tile], refund: item.cost },
+      ])
       return
     }
     // Machine (mine/furnace/assembler…): an off-belt crafter placed EMPTY — the player picks its
@@ -692,7 +776,7 @@ export function installPlacement(
             (r) => r.requiresTerrainType === terrainTypeAt(state.terrain, tile.x, tile.y),
           )
         : undefined
-      enqueuePlaceCrafter(world, {
+      const params = {
         x: tile.x,
         y: tile.y,
         w: item.w,
@@ -702,8 +786,12 @@ export function installPlacement(
         storageCap: item.storage,
         ...(recipe ? { recipe: recipe.int, inputs: recipe.inputs, outputs: recipe.outputs } : {}),
         ...(item.cost ? { cost: item.cost } : {}),
-      })
+      }
+      enqueuePlaceCrafter(world, params)
       registry.record(tile.x, tile.y, { name: item.name, type: 'producer' })
+      recordGesture(item.name, [
+        { cmd: { type: 'place_crafter', ...params }, tiles: [tile], refund: item.cost },
+      ])
       return
     }
     // Belt: place the dragged segment, ignoring a zero-length (no-drag) gesture.
@@ -714,7 +802,7 @@ export function installPlacement(
     // the belt's per-tile cost into the all-or-nothing charge the sim applies.
     const { dx, dy, length } = projectBelt(start.x, start.y, tile.x, tile.y)
     const beltCost = scaleCost(item.cost, length)
-    enqueuePlaceBelt(world, {
+    const beltParams = {
       ax: start.x,
       ay: start.y,
       bx: tile.x,
@@ -722,10 +810,19 @@ export function installPlacement(
       color: item.color,
       moveEvery: item.moveEvery,
       ...(beltCost ? { cost: beltCost } : {}),
-    })
-    for (let i = 0; i < length; i++) {
-      registry.record(start.x + dx * i, start.y + dy * i, { name: item.name, type: 'belt' })
     }
+    enqueuePlaceBelt(world, beltParams)
+    // Undoing a belt run removes every tile along it; the whole run's cost refunds on the first.
+    const beltTiles: { x: number; y: number }[] = []
+    for (let i = 0; i < length; i++) {
+      const tx = start.x + dx * i
+      const ty = start.y + dy * i
+      registry.record(tx, ty, { name: item.name, type: 'belt' })
+      beltTiles.push({ x: tx, y: ty })
+    }
+    recordGesture(item.name, [
+      { cmd: { type: 'place_belt', ...beltParams }, tiles: beltTiles, refund: beltCost },
+    ])
   }
 
   // The sidebar's close button asks us to release the pin through the store.
