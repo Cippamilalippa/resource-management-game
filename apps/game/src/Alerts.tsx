@@ -10,6 +10,8 @@ const KIND: Record<AlertKind, { icon: IconName; severity: string; label: string 
   crafter_missing_input: { icon: 'PackageX', severity: 'warn', label: 'Starved crafter' },
   crafter_output_full: { icon: 'PackagePlus', severity: 'warn', label: 'Output backed up' },
   village_declining: { icon: 'TrendingDown', severity: 'bad', label: 'Village declining' },
+  cannon_no_target: { icon: 'Crosshair', severity: 'warn', label: 'Cannon has no target' },
+  cannon_out_of_range: { icon: 'Crosshair', severity: 'warn', label: 'Cannon target out of range' },
 }
 
 /** One alert row aggregated across every tile that raised the same kind+resource. */

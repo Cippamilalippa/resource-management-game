@@ -14,6 +14,7 @@ import {
   RESEARCH_NONE,
   VILLAGE_GROWTH_AFTER,
   VILLAGE_DECLINE_AFTER,
+  CANNON_RANGE,
   buildingAt,
   canAffordTreasury,
   type BuildingStore,
@@ -160,7 +161,12 @@ export function canAfford(state: GameState, cost: readonly CostEntry[]): boolean
 }
 
 /** Why a crafter is stalled, or a village is losing population. */
-export type AlertKind = 'crafter_missing_input' | 'crafter_output_full' | 'village_declining'
+export type AlertKind =
+  | 'crafter_missing_input'
+  | 'crafter_output_full'
+  | 'village_declining'
+  | 'cannon_no_target'
+  | 'cannon_out_of_range'
 
 /** A single actionable alert, anchored to the tile that raised it. */
 export interface Alert {
@@ -216,6 +222,20 @@ export function collectAlerts(state: GameState): Alert[] {
   for (let i = 0; i < v.count; i++) {
     if (v.declineTimer[i]! > 0) {
       alerts.push({ kind: 'village_declining', x: v.vx[i]!, y: v.vy[i]! })
+    }
+  }
+  // Cargo cannons that can never fire as configured: unlinked (no silo) or aimed out of range. Both
+  // are actionable — the player should link a silo, or move the cannon/silo closer.
+  const cannons = state.cannons
+  for (let c = 0; c < cannons.count; c++) {
+    const cx = cannons.cx[c]!
+    const cy = cannons.cy[c]!
+    if (cannons.tx[c]! < 0) {
+      alerts.push({ kind: 'cannon_no_target', x: cx, y: cy })
+    } else if (
+      Math.max(Math.abs(cannons.tx[c]! - cx), Math.abs(cannons.ty[c]! - cy)) > CANNON_RANGE
+    ) {
+      alerts.push({ kind: 'cannon_out_of_range', x: cx, y: cy })
     }
   }
   return alerts

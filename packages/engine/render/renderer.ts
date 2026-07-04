@@ -34,6 +34,18 @@ const SPAWN_MS = 160
 const REMOVE_MS = 150
 
 /**
+ * Top-of-panel silhouette motifs a building glyph can wear so different *kinds* of structure read
+ * apart at a glance (the specific machine is still identified by its centred icon). The engine
+ * assigns them no game meaning — content (the base game) maps its own categories onto these ids.
+ * `NONE` is the plain framed panel; the others add a distinct cap above the icon plate.
+ */
+const CAP_NONE = 0
+const CAP_DRILL = 1 // downward wedge — an extractor biting into the ground
+const CAP_DOME = 2 // rounded cap — a lab / research dome
+const CAP_ROOF = 3 // gabled roofline — a depot / warehouse
+const CAP_STACKS = 4 // twin chimneys — a raw producer
+
+/**
  * Shade a packed `0xRRGGBB` colour toward white (`f > 0`) or black (`f < 0`) by fraction `|f|`.
  * A pure, allocation-free helper the building glyph uses to fake a bezel + top-light without any
  * art assets — a darker frame, the base face, and a lighter top highlight are all derived from the
@@ -677,33 +689,95 @@ export class Renderer {
         g.stroke({ width: 1, color: 0x000000, alpha: 0.08 })
         return
       }
+      // Buildings — a framed panel wearing a kind-specific silhouette cap. The specific machine is
+      // identified by its centred icon; the cap distinguishes the broad category at a glance.
+      case 7:
+        this.#paintBuilding(g, color, wTiles, hTiles, CAP_DRILL) // extractor
+        return
+      case 8:
+        this.#paintBuilding(g, color, wTiles, hTiles, CAP_DOME) // lab
+        return
+      case 9:
+        this.#paintBuilding(g, color, wTiles, hTiles, CAP_ROOF) // depot / store
+        return
+      case 10:
+        this.#paintBuilding(g, color, wTiles, hTiles, CAP_STACKS) // raw producer
+        return
       default: {
-        // Building — a framed panel derived entirely from the entity's single colour: a soft drop
-        // shadow, a darker bezel, a lit face with a top highlight (fakes a top-down light), and a
-        // recessed icon plate the centred glyph sits on. No art assets; stays game-agnostic.
-        const fw = wTiles * TILE_SIZE
-        const fh = hTiles * TILE_SIZE
-        const r = 5
-        // Drop shadow, offset down-right.
-        g.roundRect(3, 4, fw - 4, fh - 4, r)
-        g.fill({ color: 0x000000, alpha: 0.25 })
-        // Bezel/frame: full footprint in a darkened shade.
-        g.roundRect(1, 1, fw - 2, fh - 2, r)
-        g.fill(shade(color, -0.35))
-        // Face: inset panel in the base colour.
-        const fi = 3
-        g.roundRect(fi, fi, fw - fi * 2, fh - fi * 2, r - 1)
-        g.fill(color)
-        // Top highlight band (fake top-down light).
-        g.roundRect(fi + 1, fi + 1, fw - fi * 2 - 2, (fh - fi * 2) * 0.4, r - 2)
-        g.fill({ color: shade(color, 0.22), alpha: 0.55 })
-        // Recessed icon plate: a soft dark rounded square so the white glyph reads on any colour.
-        const ps = Math.min(fw, fh) * 0.52
-        g.roundRect((fw - ps) / 2, (fh - ps) / 2, ps, ps, 4)
-        g.fill({ color: shade(color, -0.55), alpha: 0.45 })
-        // Crisp rim on the bezel edge.
-        g.roundRect(1, 1, fw - 2, fh - 2, r)
-        g.stroke({ width: 1, color: shade(color, 0.3), alpha: 0.6 })
+        // Plain building / crafter / scenery (shapes 0 and 5): the framed panel, no cap.
+        this.#paintBuilding(g, color, wTiles, hTiles, CAP_NONE)
+      }
+    }
+  }
+
+  /**
+   * Paint a building glyph: a framed panel derived entirely from the entity's single colour — a
+   * soft drop shadow, a darker bezel, a lit face with a top highlight (fakes a top-down light), and
+   * a recessed icon plate the centred glyph sits on — then an optional `cap` silhouette on top so
+   * the structure's kind reads at a glance. No art assets; the engine stays game-agnostic.
+   */
+  #paintBuilding(g: Graphics, color: number, wTiles: number, hTiles: number, cap: number): void {
+    const fw = wTiles * TILE_SIZE
+    const fh = hTiles * TILE_SIZE
+    const r = 5
+    // Drop shadow, offset down-right.
+    g.roundRect(3, 4, fw - 4, fh - 4, r)
+    g.fill({ color: 0x000000, alpha: 0.25 })
+    // Bezel/frame: full footprint in a darkened shade.
+    g.roundRect(1, 1, fw - 2, fh - 2, r)
+    g.fill(shade(color, -0.35))
+    // Face: inset panel in the base colour.
+    const fi = 3
+    g.roundRect(fi, fi, fw - fi * 2, fh - fi * 2, r - 1)
+    g.fill(color)
+    // Top highlight band (fake top-down light).
+    g.roundRect(fi + 1, fi + 1, fw - fi * 2 - 2, (fh - fi * 2) * 0.4, r - 2)
+    g.fill({ color: shade(color, 0.22), alpha: 0.55 })
+    // Recessed icon plate: a soft dark rounded square so the white glyph reads on any colour.
+    const ps = Math.min(fw, fh) * 0.52
+    g.roundRect((fw - ps) / 2, (fh - ps) / 2, ps, ps, 4)
+    g.fill({ color: shade(color, -0.55), alpha: 0.45 })
+    if (cap !== CAP_NONE) this.#buildingCap(g, color, fw, cap)
+    // Crisp rim on the bezel edge.
+    g.roundRect(1, 1, fw - 2, fh - 2, r)
+    g.stroke({ width: 1, color: shade(color, 0.3), alpha: 0.6 })
+  }
+
+  /**
+   * Draw a building's category `cap` — a small silhouette motif in the top strip of the panel,
+   * above the icon plate. All are derived from the base colour (a lighter shade + a dark outline)
+   * so they read on any hue: a drill wedge (extractor), a dome (lab), a gabled roof (depot), or
+   * twin stacks (producer). `fw` is the footprint width in px; the cap is centred on it.
+   */
+  #buildingCap(g: Graphics, color: number, fw: number, cap: number): void {
+    const cx = fw / 2
+    const light = shade(color, 0.42)
+    const dark = shade(color, -0.5)
+    if (cap === CAP_DRILL) {
+      // Downward wedge biting toward the machine.
+      const w = TILE_SIZE * 0.22
+      g.poly([cx - w, 5, cx + w, 5, cx, 5 + w * 1.3])
+      g.fill({ color: light, alpha: 0.9 })
+      g.stroke({ width: 1, color: dark, alpha: 0.5 })
+    } else if (cap === CAP_DOME) {
+      // Rounded observatory cap.
+      const rr = TILE_SIZE * 0.2
+      g.arc(cx, 8, rr, Math.PI, 0)
+      g.fill({ color: light, alpha: 0.9 })
+      g.stroke({ width: 1, color: dark, alpha: 0.5 })
+    } else if (cap === CAP_ROOF) {
+      // Gabled warehouse roofline.
+      const w = TILE_SIZE * 0.28
+      g.poly([cx - w, 9, cx, 4, cx + w, 9])
+      g.fill({ color: light, alpha: 0.9 })
+      g.stroke({ width: 1, color: dark, alpha: 0.5 })
+    } else if (cap === CAP_STACKS) {
+      // Twin chimneys.
+      const s = TILE_SIZE * 0.09
+      const gap = TILE_SIZE * 0.16
+      for (const sx of [-gap, gap]) {
+        g.roundRect(cx + sx - s / 2, 4, s, TILE_SIZE * 0.22, 1)
+        g.fill({ color: dark, alpha: 0.85 })
       }
     }
   }

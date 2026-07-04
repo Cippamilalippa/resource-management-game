@@ -88,6 +88,14 @@ const SHAPE_PORT_ARROW = 3
 const SHAPE_SPLITTER = 4
 const SHAPE_CRAFTER = 5
 const SHAPE_TERRAIN = 6
+// Building silhouette variants (drawn by the engine as distinct top-caps; here the base game maps
+// its own machine categories onto them so a factory reads apart at a glance). Load-time entity
+// classification treats all of these as building footprints (they are none of the special shapes).
+const SHAPE_EXTRACTOR = 7
+const SHAPE_LAB = 8
+const SHAPE_DEPOT = 9
+const SHAPE_PRODUCER = 10
+const SHAPE_CANNON = 11
 function sprite(shape: number, orient: number): number {
   return shape * 4 + orient
 }
@@ -566,6 +574,12 @@ export interface BuildingStore {
    */
   depot: Int8Array
   /**
+   * 1 if this building is a *silo* — the dedicated receiver a cargo cannon fires into. A cannon may
+   * only target a silo (never a generic store/depot), and only when the silo is empty. Structurally
+   * it is still a store (a deposit+drain slot the shell fills and output ports drain). 0 otherwise.
+   */
+  silo: Int8Array
+  /**
    * The recipe a crafter is currently set to, as an opaque integer id (see {@link recipeTypeOf}),
    * or 0 for an empty crafter with no recipe yet. Drives no sim logic (the slots do) — it is kept
    * so the UI can show/highlight the chosen recipe and so it survives save/load.
@@ -601,6 +615,7 @@ export function createBuildingStore(): BuildingStore {
     bh: new Int32Array(cap),
     crafts: new Int8Array(cap),
     depot: new Int8Array(cap),
+    silo: new Int8Array(cap),
     recipe: new Int32Array(cap),
     craftEvery: new Int32Array(cap).fill(1),
     craftTimer: new Int32Array(cap),
@@ -626,6 +641,7 @@ function ensureBuildingCapacity(s: BuildingStore, need: number): void {
   s.bh = grow(s.bh, next, 0)
   s.crafts = grow8(s.crafts, next, 0)
   s.depot = grow8(s.depot, next, 0)
+  s.silo = grow8(s.silo, next, 0)
   s.recipe = grow(s.recipe, next, 0)
   s.craftEvery = grow(s.craftEvery, next, 1)
   s.craftTimer = grow(s.craftTimer, next, 0)
@@ -687,6 +703,7 @@ export function registerBuilding(
   craftEvery: number,
   slots: readonly BuildingSlot[],
   depot = 0,
+  silo = 0,
 ): number {
   ensureBuildingCapacity(store, store.count + 1)
   const b = store.count++
@@ -697,6 +714,7 @@ export function registerBuilding(
   store.bh[b] = h
   store.crafts[b] = crafts ? 1 : 0
   store.depot[b] = depot ? 1 : 0
+  store.silo[b] = silo ? 1 : 0
   store.recipe[b] = 0
   store.craftEvery[b] = Math.max(1, craftEvery)
   store.craftTimer[b] = 0
@@ -1639,6 +1657,10 @@ export interface GameState {
   readonly research: ResearchStore
   /** The global build-cost bank spent on placement and refilled by depots. */
   readonly treasury: TreasuryStore
+  /** Cargo cannons — long-haul artillery firing resource payloads to their linked silos. */
+  readonly cannons: CannonStore
+  /** Shells in flight from cannons to silos (transient projectiles). */
+  readonly shells: ShellStore
   /** New-game rule settings (build refund, …) — carried here so they save and stay deterministic. */
   readonly config: GameConfig
 }
@@ -1651,6 +1673,8 @@ export function createGameState(moveEvery = 60): GameState {
     villages: createVillageStore(),
     research: createResearchStore(),
     treasury: createTreasuryStore(),
+    cannons: createCannonStore(),
+    shells: createShellStore(),
     config: createGameConfig(),
   }
 }
@@ -1718,6 +1742,8 @@ export interface BuildingSnapshot {
   readonly crafts: number
   /** 1 if this building is a treasury depot. Absent in pre-treasury saves → treated as 0. */
   readonly depot?: number
+  /** 1 if this building is a cannon silo. Absent in pre-cannon saves → treated as 0. */
+  readonly silo?: number
   /** The crafter's recipe id (0 = empty machine). Absent in pre-recipe saves → treated as 0. */
   readonly recipe?: number
   readonly craftEvery: number
@@ -1826,6 +1852,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       bh: store.bh[b]!,
       crafts: store.crafts[b]!,
       depot: store.depot[b]!,
+      silo: store.silo[b]!,
       recipe: store.recipe[b]!,
       craftEvery: store.craftEvery[b]!,
       craftTimer: store.craftTimer[b]!,
@@ -1947,6 +1974,7 @@ export function loadGameState(
     store.bh[b] = bldg.bh
     store.crafts[b] = bldg.crafts
     store.depot[b] = bldg.depot ?? 0
+    store.silo[b] = bldg.silo ?? 0
     store.recipe[b] = bldg.recipe ?? 0
     store.craftEvery[b] = bldg.craftEvery
     store.craftTimer[b] = bldg.craftTimer
@@ -2050,6 +2078,11 @@ export interface PlaceBuildingCommand {
    * global {@link TreasuryStore} rather than stocked. Needs no `accepts`. Omitted/false otherwise.
    */
   readonly depot?: boolean
+  /**
+   * Register this store as a cannon *silo* (the only building a cargo cannon may target). Needs an
+   * `accepts` slot for the payload resource. Omitted/false for a plain store.
+   */
+  readonly silo?: boolean
   /** Build cost charged from the treasury; the placement is dropped if unaffordable. Omitted = free. */
   readonly cost?: readonly CostEntry[]
 }
@@ -2231,15 +2264,62 @@ export interface SetPortFilterCommand {
   readonly colors: readonly number[]
 }
 
+/**
+ * Place a cargo cannon (long-haul artillery) as a building with its top-left at (x, y). It is fed
+ * like any building: adjacent input ports fill its single deposit buffer with `itemColor`. Once the
+ * buffer holds a full `payload` and it has a linked silo (see {@link SetCannonTargetCommand}), it
+ * fires a shell every {@link CANNON_FIRE_EVERY} ticks that flies to the silo and unloads there.
+ * Cannons are meant to be expensive — pass a stiff `cost`.
+ */
+export interface PlaceCannonCommand {
+  readonly type: 'place_cannon'
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+  /** Colour of the cannon building's footprint. */
+  readonly color: number
+  /** The resource colour the cannon accepts + flings. */
+  readonly itemColor: number
+  /** Units flung per shot (also the deposit buffer's per-shot size). */
+  readonly payload: number
+  /** Build cost charged from the treasury; the cannon is dropped if unaffordable. Omitted = free. */
+  readonly cost?: readonly CostEntry[]
+}
+
+/**
+ * Link the cargo cannon whose footprint covers (x, y) to a receiving silo at (tx, ty). The cannon
+ * holds fire until linked; re-issuing re-aims it. A no-op if there is no cannon at (x, y).
+ */
+export interface SetCannonTargetCommand {
+  readonly type: 'set_cannon_target'
+  readonly x: number
+  readonly y: number
+  /** Silo tile to fire at, or {@link NONE} on both axes to clear the link. Non-silo tiles are ignored. */
+  readonly tx: number
+  readonly ty: number
+}
+
+/** Toggle auto-firing for the cargo cannon whose footprint covers (x, y). A no-op if none there. */
+export interface SetCannonEnabledCommand {
+  readonly type: 'set_cannon_enabled'
+  readonly x: number
+  readonly y: number
+  readonly enabled: boolean
+}
+
 export type GameCommand =
   | PlaceBuildingCommand
   | PlaceBeltCommand
   | PlacePortCommand
   | PlaceSplitterCommand
   | PlaceCrafterCommand
+  | PlaceCannonCommand
   | SetRecipeCommand
   | SetActiveResearchCommand
   | SetPortFilterCommand
+  | SetCannonTargetCommand
+  | SetCannonEnabledCommand
   | RemoveCommand
 
 /** Copy every per-tile field of the belt grid from index `src` to `dst` (swap-remove move). */
@@ -2294,6 +2374,7 @@ function copyBuilding(s: BuildingStore, src: number, dst: number): void {
   s.bh[dst] = s.bh[src]!
   s.crafts[dst] = s.crafts[src]!
   s.depot[dst] = s.depot[src]!
+  s.silo[dst] = s.silo[src]!
   s.recipe[dst] = s.recipe[src]!
   s.craftEvery[dst] = s.craftEvery[src]!
   s.craftTimer[dst] = s.craftTimer[src]!
@@ -2362,16 +2443,24 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
   switch (cmd.type) {
     case 'place_building': {
       if (!charge(state, cmd.cost)) return
+      const accepts = cmd.accepts ?? []
+      // A depot (treasury sink), a silo and a plain store all wear the warehouse roof; a research
+      // lab the dome. Plain scenery (no accepts, not a depot) stays the capless footprint (shape 0).
+      const buildShape = cmd.researchLab
+        ? SHAPE_LAB
+        : cmd.depot || accepts.length > 0
+          ? SHAPE_DEPOT
+          : 0
       const eid = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
+        sprite: sprite(buildShape, 0),
         color: cmd.color,
         width: cmd.w,
         height: cmd.h,
       })
-      const accepts = cmd.accepts ?? []
-      // A store, a lab or a depot is registered in the building store; plain scenery (no accepts,
-      // not a depot) just gets a footprint entity. A depot needs no accept slots (it banks to the
-      // treasury), so register it even with an empty accept list.
+      // A store, a lab, a depot or a silo is registered in the building store; plain scenery (no
+      // accepts, not a depot) just gets a footprint entity. A depot needs no accept slots (it banks
+      // to the treasury), so register it even with an empty accept list.
       if (accepts.length > 0 || cmd.depot) {
         registerBuilding(
           state.buildings,
@@ -2384,6 +2473,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
           1,
           storeSlots(accepts),
           cmd.depot ? 1 : 0,
+          cmd.silo ? 1 : 0,
         )
         relinkUnlinkedPorts(g, state.buildings)
         // A lab is a store the research system drains its packs from; anchor it by tile.
@@ -2454,9 +2544,17 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       const need = cmd.requiresTerrainType ?? TERRAIN_NONE
       if (need !== TERRAIN_NONE && terrainTypeAt(state.terrain, cmd.x, cmd.y) !== need) return
       if (!charge(state, cmd.cost)) return
+      // Pick the silhouette from the machine's role: one bound to a terrain type is an extractor
+      // (mine/derrick/farm), an input-less machine is a raw producer, anything else a crafter.
+      const craftShape =
+        need !== TERRAIN_NONE
+          ? SHAPE_EXTRACTOR
+          : (cmd.inputs?.length ?? 0) === 0
+            ? SHAPE_PRODUCER
+            : SHAPE_CRAFTER
       const eid = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
-        sprite: sprite(SHAPE_CRAFTER, 0),
+        sprite: sprite(craftShape, 0),
         color: cmd.color,
         width: cmd.w,
         height: cmd.h,
@@ -2497,6 +2595,54 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       )
       state.buildings.recipe[b] = cmd.recipe ?? 0
       relinkUnlinkedPorts(g, state.buildings)
+      return
+    }
+    case 'place_cannon': {
+      if (!charge(state, cmd.cost)) return
+      // A cannon is a building with a single deposit buffer (holding a couple of shots' worth) so
+      // input ports feed it; the CannonStore record carries its firing state.
+      const eid = api.spawn({
+        pos: { x: cmd.x, y: cmd.y },
+        sprite: sprite(SHAPE_CANNON, 0),
+        color: cmd.color,
+        width: cmd.w,
+        height: cmd.h,
+      })
+      registerBuilding(state.buildings, eid, cmd.x, cmd.y, cmd.w, cmd.h, 0, 1, [
+        {
+          color: cmd.itemColor,
+          cap: Math.max(1, cmd.payload) * CANNON_BUFFER_SHOTS,
+          role: ROLE_DEPOSIT,
+          amt: 0,
+        },
+      ])
+      const c = registerCannon(state.cannons, cmd.x, cmd.y, cmd.itemColor, cmd.payload)
+      // QoL: if a matching silo already sits within range, link to the nearest one automatically so
+      // a freshly-placed cannon just works. The player can always re-aim it later.
+      autoLinkCannon(state, c)
+      relinkUnlinkedPorts(g, state.buildings)
+      return
+    }
+    case 'set_cannon_target': {
+      const c = cannonAt(state.cannons, cmd.x, cmd.y)
+      if (c === NONE) return
+      // The target must be a defined silo (never a generic store/depot). A non-silo tile is rejected
+      // so the cannon keeps its previous target; passing NONE explicitly clears the link.
+      if (cmd.tx === NONE) {
+        state.cannons.tx[c] = NONE
+        state.cannons.ty[c] = NONE
+        return
+      }
+      const b = buildingAt(state.buildings, cmd.tx, cmd.ty)
+      if (b === NONE || !state.buildings.silo[b]) return
+      state.cannons.tx[c] = cmd.tx
+      state.cannons.ty[c] = cmd.ty
+      return
+    }
+    case 'set_cannon_enabled': {
+      const c = cannonAt(state.cannons, cmd.x, cmd.y)
+      if (c === NONE) return
+      state.cannons.enabled[c] = cmd.enabled ? 1 : 0
       return
     }
     case 'set_recipe': {
@@ -2551,11 +2697,367 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       }
       const b = buildingAt(state.buildings, cmd.x, cmd.y)
       if (b !== NONE) {
+        // A cannon is also a CannonStore record — drop it too (its footprint tile is its key). Any
+        // shell already in flight keeps going and lands (or is dropped if its silo is gone).
+        const c = cannonAt(state.cannons, cmd.x, cmd.y)
+        if (c !== NONE) removeCannon(state.cannons, c)
         removeBuilding(api, state.buildings, g, b)
         if (cmd.refund) refundTreasury(state.treasury, state.config, cmd.refund)
       }
       return
     }
+  }
+}
+
+// --- Cargo cannons ----------------------------------------------------------
+
+/**
+ * Cargo cannons: expensive artillery that lob a payload of one resource across the map to a linked
+ * receiving silo, letting a factory bridge huge distances no belt could span. A cannon is a normal
+ * building (fed by input ports into a single deposit buffer); this store adds only its *firing*
+ * state — the linked target tile, the payload colour/size and a cooldown. Shells in flight live in
+ * a parallel {@link ShellStore}. Fully deterministic: firing is gated on integer buffer counts and
+ * a tick timer, and a shell advances a fixed number of integer tiles per tick along a straight line
+ * to the silo (its logical tile is what's hashed; the render just interpolates between ticks).
+ */
+
+/** Ticks between shots once a cannon is loaded (a deliberate reload beat, so cannons pulse). */
+const CANNON_FIRE_EVERY = 30
+/** Tiles a shell advances per tick — fast, so a cannon is a long-haul express, not a slow drift. */
+const SHELL_SPEED = 3
+/** A cannon's deposit buffer holds this many shots, so it can reload while a shell is still flying. */
+const CANNON_BUFFER_SHOTS = 2
+/**
+ * A cannon's maximum firing range, in tiles (Chebyshev — a square reach). A silo further than this
+ * can be linked but the cannon holds fire; auto-linking only ever picks a silo inside this reach.
+ * Exported so the UI can draw the range footprint and warn on an out-of-range target.
+ */
+export const CANNON_RANGE = 40
+
+export interface CannonStore {
+  count: number
+  /** Cannon building's footprint top-left — how we find its buffer slot + render entity each tick. */
+  cx: Int32Array
+  cy: Int32Array
+  /** Linked silo tile, or {@link NONE} on both axes when unlinked (the cannon holds fire). */
+  tx: Int32Array
+  ty: Int32Array
+  /** Payload resource colour and units flung per shot. */
+  color: Int32Array
+  payload: Int32Array
+  /** Reload cooldown countdown between shots. */
+  timer: Int32Array
+  /** 1 if auto-firing is on (the default), 0 if the player has paused this cannon. */
+  enabled: Int8Array
+}
+
+export function createCannonStore(): CannonStore {
+  const cap = 4
+  return {
+    count: 0,
+    cx: new Int32Array(cap),
+    cy: new Int32Array(cap),
+    tx: new Int32Array(cap).fill(NONE),
+    ty: new Int32Array(cap).fill(NONE),
+    color: new Int32Array(cap),
+    payload: new Int32Array(cap).fill(1),
+    timer: new Int32Array(cap),
+    enabled: new Int8Array(cap).fill(1),
+  }
+}
+
+function ensureCannonCapacity(s: CannonStore, need: number): void {
+  const cap = s.cx.length
+  if (need <= cap) return
+  let next = cap
+  while (next < need) next *= 2
+  s.cx = grow(s.cx, next, 0)
+  s.cy = grow(s.cy, next, 0)
+  s.tx = grow(s.tx, next, NONE)
+  s.ty = grow(s.ty, next, NONE)
+  s.color = grow(s.color, next, 0)
+  s.payload = grow(s.payload, next, 1)
+  s.timer = grow(s.timer, next, 0)
+  s.enabled = grow8(s.enabled, next, 1)
+}
+
+/** Register a cannon at building tile (x, y) carrying `payload` units of `color`. Off the hot path. */
+export function registerCannon(
+  store: CannonStore,
+  x: number,
+  y: number,
+  color: number,
+  payload: number,
+): number {
+  ensureCannonCapacity(store, store.count + 1)
+  const c = store.count++
+  store.cx[c] = x
+  store.cy[c] = y
+  store.tx[c] = NONE
+  store.ty[c] = NONE
+  store.color[c] = color
+  store.payload[c] = Math.max(1, payload)
+  store.timer[c] = 0
+  store.enabled[c] = 1
+  return c
+}
+
+/**
+ * QoL auto-link: point cannon `c` at the nearest silo that accepts its payload colour and sits
+ * within {@link CANNON_RANGE}, if any. A no-op when none qualifies (the cannon stays unlinked and
+ * holds fire). Off the hot path (placement only) — a bounded scan over the building store.
+ */
+function autoLinkCannon(state: GameState, c: number): void {
+  const cannons = state.cannons
+  const buildings = state.buildings
+  const ox = cannons.cx[c]!
+  const oy = cannons.cy[c]!
+  const color = cannons.color[c]!
+  let bestDist = CANNON_RANGE + 1
+  let bestX = NONE
+  let bestY = NONE
+  for (let b = 0; b < buildings.count; b++) {
+    if (!buildings.silo[b]) continue
+    if (findSlot(buildings, b, color) === NONE) continue // silo doesn't accept this payload
+    const bx = buildings.bx[b]!
+    const by = buildings.by[b]!
+    const dist = Math.max(Math.abs(bx - ox), Math.abs(by - oy))
+    if (dist <= CANNON_RANGE && dist < bestDist) {
+      bestDist = dist
+      bestX = bx
+      bestY = by
+    }
+  }
+  if (bestX !== NONE) {
+    cannons.tx[c] = bestX
+    cannons.ty[c] = bestY
+  }
+}
+
+/** The cannon id at tile (x, y), or {@link NONE}. Linear scan (cannons are deliberately few). */
+function cannonAt(store: CannonStore, x: number, y: number): number {
+  for (let c = 0; c < store.count; c++) {
+    if (store.cx[c] === x && store.cy[c] === y) return c
+  }
+  return NONE
+}
+
+/** Drop cannon `c` by swap-removing it (order is not sim-significant). Off the hot path. */
+function removeCannon(store: CannonStore, c: number): void {
+  const last = --store.count
+  if (c !== last) {
+    store.cx[c] = store.cx[last]!
+    store.cy[c] = store.cy[last]!
+    store.tx[c] = store.tx[last]!
+    store.ty[c] = store.ty[last]!
+    store.color[c] = store.color[last]!
+    store.payload[c] = store.payload[last]!
+    store.timer[c] = store.timer[last]!
+    store.enabled[c] = store.enabled[last]!
+  }
+}
+
+/** Shells in flight: transient projectiles ferrying a cannon's payload to its silo. */
+export interface ShellStore {
+  count: number
+  /** Render entity id (a small item-shaped glyph tinted the payload colour). */
+  eid: Int32Array
+  /** Current logical tile (hashed). */
+  x: Int32Array
+  y: Int32Array
+  /** Origin (cannon) and destination (silo) tiles the straight flight runs between. */
+  ox: Int32Array
+  oy: Int32Array
+  dx: Int32Array
+  dy: Int32Array
+  /** Cargo colour + remaining units still to deposit at the silo. */
+  color: Int32Array
+  amount: Int32Array
+  /** Progress along the flight, in single-tile steps, and the total steps to the silo. */
+  step: Int32Array
+  steps: Int32Array
+}
+
+export function createShellStore(): ShellStore {
+  const cap = 8
+  return {
+    count: 0,
+    eid: new Int32Array(cap).fill(NONE),
+    x: new Int32Array(cap),
+    y: new Int32Array(cap),
+    ox: new Int32Array(cap),
+    oy: new Int32Array(cap),
+    dx: new Int32Array(cap),
+    dy: new Int32Array(cap),
+    color: new Int32Array(cap),
+    amount: new Int32Array(cap),
+    step: new Int32Array(cap),
+    steps: new Int32Array(cap).fill(1),
+  }
+}
+
+function ensureShellCapacity(s: ShellStore, need: number): void {
+  const cap = s.eid.length
+  if (need <= cap) return
+  let next = cap
+  while (next < need) next *= 2
+  s.eid = grow(s.eid, next, NONE)
+  s.x = grow(s.x, next, 0)
+  s.y = grow(s.y, next, 0)
+  s.ox = grow(s.ox, next, 0)
+  s.oy = grow(s.oy, next, 0)
+  s.dx = grow(s.dx, next, 0)
+  s.dy = grow(s.dy, next, 0)
+  s.color = grow(s.color, next, 0)
+  s.amount = grow(s.amount, next, 0)
+  s.step = grow(s.step, next, 0)
+  s.steps = grow(s.steps, next, 1)
+}
+
+/** Swap-remove shell `i`, despawning its render entity (order is not sim-significant). */
+function removeShell(api: ModApi, store: ShellStore, i: number): void {
+  const eid = store.eid[i]!
+  if (eid !== NONE) api.despawn(eid)
+  const last = --store.count
+  if (i !== last) {
+    store.eid[i] = store.eid[last]!
+    store.x[i] = store.x[last]!
+    store.y[i] = store.y[last]!
+    store.ox[i] = store.ox[last]!
+    store.oy[i] = store.oy[last]!
+    store.dx[i] = store.dx[last]!
+    store.dy[i] = store.dy[last]!
+    store.color[i] = store.color[last]!
+    store.amount[i] = store.amount[last]!
+    store.step[i] = store.step[last]!
+    store.steps[i] = store.steps[last]!
+  }
+}
+
+/** Units of `color` currently stocked in silo `b`'s deposit slot (0 if it has no such slot). */
+function siloStock(store: BuildingStore, b: number, color: number): number {
+  const k = findSlot(store, b, color)
+  if (k === NONE) return 0
+  return store.slotCount[b * MAX_SLOTS + k]!
+}
+
+/** Deposit up to `amount` of `color` into silo `b`'s deposit slot; returns how many units landed. */
+function depositIntoSilo(store: BuildingStore, b: number, color: number, amount: number): number {
+  const k = findSlot(store, b, color)
+  if (k === NONE) return 0
+  const i = b * MAX_SLOTS + k
+  const room = store.slotCap[i]! - store.slotCount[i]!
+  const take = room < amount ? room : amount
+  if (take > 0) store.slotCount[i] = store.slotCount[i]! + take
+  return take
+}
+
+/**
+ * Advance every shell one flight tick then fire every loaded, targeted cannon. Runs each tick; the
+ * per-shell/per-cannon work is bounded index loops with no allocation (firing/landing go through the
+ * stable {@link ModApi} lifecycle). A shell steps {@link SHELL_SPEED} tiles along its straight line;
+ * on arrival it deposits into the silo losslessly — anything that doesn't fit parks the shell at the
+ * silo and retries next tick, so a full silo backs cannons up rather than dropping cargo.
+ */
+function updateCannons(gw: GameWorld, api: ModApi, state: GameState): void {
+  const { Position } = gw.components
+  const cannons = state.cannons
+  const shells = state.shells
+  const buildings = state.buildings
+
+  // 1) Advance shells (iterate backwards so a swap-remove never skips the moved-down entry).
+  for (let i = shells.count - 1; i >= 0; i--) {
+    const eid = shells.eid[i]!
+    const next = shells.step[i]! + SHELL_SPEED
+    const total = shells.steps[i]!
+    if (next < total) {
+      // Still en route: interpolate the logical tile along the line (integer, deterministic).
+      shells.step[i] = next
+      const ox = shells.ox[i]!
+      const oy = shells.oy[i]!
+      const nx = ox + Math.round(((shells.dx[i]! - ox) * next) / total)
+      const ny = oy + Math.round(((shells.dy[i]! - oy) * next) / total)
+      Position.prevX[eid] = shells.x[i]!
+      Position.prevY[eid] = shells.y[i]!
+      Position.x[eid] = nx
+      Position.y[eid] = ny
+      shells.x[i] = nx
+      shells.y[i] = ny
+      continue
+    }
+    // Arrived at the silo tile: try to deposit, losslessly.
+    const dxT = shells.dx[i]!
+    const dyT = shells.dy[i]!
+    Position.prevX[eid] = shells.x[i]!
+    Position.prevY[eid] = shells.y[i]!
+    Position.x[eid] = dxT
+    Position.y[eid] = dyT
+    shells.x[i] = dxT
+    shells.y[i] = dyT
+    shells.step[i] = total
+    const b = buildingAt(buildings, dxT, dyT)
+    if (b === NONE) {
+      // Silo is gone — drop the shell (its cargo is lost with its destination).
+      removeShell(api, shells, i)
+      continue
+    }
+    const landed = depositIntoSilo(buildings, b, shells.color[i]!, shells.amount[i]!)
+    const left = shells.amount[i]! - landed
+    if (left <= 0) removeShell(api, shells, i)
+    else shells.amount[i] = left // silo full: park here and retry next tick
+  }
+
+  // 2) Fire loaded, targeted cannons.
+  for (let c = 0; c < cannons.count; c++) {
+    if (cannons.timer[c]! > 0) {
+      cannons.timer[c] = cannons.timer[c]! - 1
+      continue
+    }
+    if (!cannons.enabled[c]) continue // player paused this cannon
+    const tx = cannons.tx[c]!
+    const ty = cannons.ty[c]!
+    if (tx === NONE) continue // unlinked — no target yet
+    const ox = cannons.cx[c]!
+    const oy = cannons.cy[c]!
+    // Range gate: a silo beyond the cannon's reach can be linked but never fired at.
+    if (Math.max(Math.abs(tx - ox), Math.abs(ty - oy)) > CANNON_RANGE) continue
+    const cb = buildingAt(buildings, ox, oy)
+    if (cb === NONE) continue // cannon building removed out from under the record
+    const color = cannons.color[c]!
+    const need = cannons.payload[c]!
+    const k = findSlot(buildings, cb, color)
+    if (k === NONE) continue
+    const si = cb * MAX_SLOTS + k
+    if (buildings.slotCount[si]! < need) continue // not loaded yet
+    const sb = buildingAt(buildings, tx, ty)
+    if (sb === NONE || !buildings.silo[sb]) continue // target must be a live silo
+    // The silo must be EMPTY of the payload before the next shot lands (a burst-delivery model: one
+    // load sits there until output ports drain it, then the cannon tops it up again).
+    if (siloStock(buildings, sb, color) > 0) continue
+    // Fire: consume the payload, launch a shell, and start the reload timer.
+    buildings.slotCount[si] = buildings.slotCount[si]! - need
+    const dist = Math.max(Math.abs(tx - ox), Math.abs(ty - oy))
+    const eid = api.spawn({
+      pos: { x: ox, y: oy },
+      sprite: sprite(SHAPE_CIRCLE, 0),
+      color,
+      width: 1,
+      height: 1,
+    })
+    ensureShellCapacity(shells, shells.count + 1)
+    const s = shells.count++
+    shells.eid[s] = eid
+    shells.x[s] = ox
+    shells.y[s] = oy
+    shells.ox[s] = ox
+    shells.oy[s] = oy
+    shells.dx[s] = tx
+    shells.dy[s] = ty
+    shells.color[s] = color
+    shells.amount[s] = need
+    shells.step[s] = 0
+    shells.steps[s] = Math.max(1, dist)
+    cannons.timer[c] = CANNON_FIRE_EVERY
   }
 }
 
@@ -2590,5 +3092,9 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
     updateResearch(state)
   }
 
-  return [commandSystem, beltSystem, villageSystem, researchSystem]
+  const cannonSystem: System = (gw) => {
+    updateCannons(gw, api, state)
+  }
+
+  return [commandSystem, beltSystem, cannonSystem, villageSystem, researchSystem]
 }

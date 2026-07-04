@@ -13,6 +13,8 @@ import {
   collectAlerts,
   productionFlows,
   gameObjectives,
+  registerCannon,
+  CANNON_RANGE,
   VILLAGE_GROWTH_AFTER,
   VILLAGE_DECLINE_AFTER,
   type GameState,
@@ -178,6 +180,20 @@ describe('collectAlerts', () => {
     state.villages.declineTimer[0] = 60
 
     expect(collectAlerts(state)).toEqual([{ kind: 'village_declining', x: 0, y: 0 }])
+  })
+
+  it('raises a no-target alert for an unlinked cannon', () => {
+    const state = createGameState()
+    registerCannon(state.cannons, 4, 4, GRAIN, 3)
+    expect(collectAlerts(state)).toEqual([{ kind: 'cannon_no_target', x: 4, y: 4 }])
+  })
+
+  it('raises an out-of-range alert for a cannon aimed beyond its reach', () => {
+    const state = createGameState()
+    const c = registerCannon(state.cannons, 0, 0, GRAIN, 3)
+    state.cannons.tx[c] = CANNON_RANGE + 10
+    state.cannons.ty[c] = 0
+    expect(collectAlerts(state)).toEqual([{ kind: 'cannon_out_of_range', x: 0, y: 0 }])
   })
 })
 

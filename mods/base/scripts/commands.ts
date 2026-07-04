@@ -16,9 +16,12 @@ import type {
   PlacePortCommand,
   PlaceSplitterCommand,
   PlaceCrafterCommand,
+  PlaceCannonCommand,
   SetRecipeCommand,
   SetActiveResearchCommand,
   SetPortFilterCommand,
+  SetCannonTargetCommand,
+  SetCannonEnabledCommand,
   RemoveCommand,
 } from './sim.ts'
 
@@ -45,6 +48,27 @@ export function enqueuePlaceSplitter(gw: GameWorld, cmd: Omit<PlaceSplitterComma
 /** Queue a crafter placement (applied next tick) — the general recipe-driven form. */
 export function enqueuePlaceCrafter(gw: GameWorld, cmd: Omit<PlaceCrafterCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'place_crafter', ...cmd })
+}
+
+/** Queue a cargo-cannon placement (applied next tick) — a long-haul artillery building. */
+export function enqueuePlaceCannon(gw: GameWorld, cmd: Omit<PlaceCannonCommand, 'type'>): void {
+  enqueueCommand(gw, { type: 'place_cannon', ...cmd })
+}
+
+/** Queue a cannon→silo link (applied next tick) for the cannon at (x, y). */
+export function enqueueSetCannonTarget(
+  gw: GameWorld,
+  cmd: Omit<SetCannonTargetCommand, 'type'>,
+): void {
+  enqueueCommand(gw, { type: 'set_cannon_target', ...cmd })
+}
+
+/** Queue an auto-fire on/off toggle (applied next tick) for the cannon at (x, y). */
+export function enqueueSetCannonEnabled(
+  gw: GameWorld,
+  cmd: Omit<SetCannonEnabledCommand, 'type'>,
+): void {
+  enqueueCommand(gw, { type: 'set_cannon_enabled', ...cmd })
 }
 
 /** Queue a recipe (re)assignment for the crafter at (x, y) (applied next tick). */
