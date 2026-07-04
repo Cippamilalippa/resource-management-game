@@ -1,6 +1,7 @@
 import {
   spawnEntity,
   despawnEntity,
+  setRenderActive,
   type GameWorld,
   type System,
   type SpawnOptions,
@@ -40,6 +41,14 @@ export interface ModApi {
 
   /** Remove an entity the mod spawned (e.g. an item consumed off a belt). */
   despawn(eid: number): void
+
+  /**
+   * Set an entity's transient "active" render hint — a purely cosmetic one-way sim→render
+   * signal (the renderer pulses active entities, e.g. a crafter mid-recipe). It is never
+   * serialized or hashed, so toggling it can never affect determinism or save compatibility;
+   * a load simply re-derives it on the next tick. Safe to call every tick.
+   */
+  setActive(eid: number, on: boolean): void
 
   /** Subscribe to an engine/game event. Returns an unsubscribe function. */
   on(event: string, listener: (payload: unknown) => void): () => void
@@ -88,6 +97,7 @@ export function createModApi(modId: string, host: ModApiHost): ModApi {
     registerSystem: (system) => host.addSystem(system),
     spawn: (opts) => spawnEntity(host.world, opts),
     despawn: (eid) => despawnEntity(host.world, eid),
+    setActive: (eid, on) => setRenderActive(host.world, eid, on),
     on: (event, listener) => host.world.events.on(event, listener),
     emit: (event, payload) => host.world.events.emit(event, payload),
     log: (...args) => console.log(`[mod:${modId}]`, ...args),

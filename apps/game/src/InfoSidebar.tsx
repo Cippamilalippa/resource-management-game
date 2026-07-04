@@ -3,6 +3,7 @@ import { inspectStore } from './inspectStore.ts'
 import type { InspectStat } from './inspect.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
 import { RecipePanel } from './RecipePanel.tsx'
+import { FilterPanel } from './FilterPanel.tsx'
 
 /** 0xRRGGBB packed color -> CSS hex string. */
 function cssColor(color: number): string {
@@ -83,6 +84,8 @@ export function InfoSidebar(): React.JSX.Element | null {
       </div>
       {/* Recipe picker for a pinned crafter (self-hides when the selection isn't a crafter). */}
       <RecipePanel />
+      {/* Colour-filter editor for a pinned input/output port (self-hides otherwise). */}
+      <FilterPanel />
       <div className="sidebar-foot">
         {state.pinned ? 'Pinned — click again to release' : 'Click to pin'}
       </div>

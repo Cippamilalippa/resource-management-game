@@ -2,6 +2,15 @@ import { Application, Container, Graphics, Sprite, type Texture } from 'pixi.js'
 import { lerp, type GridCoord } from '@factory/shared'
 import { TILE_SIZE, renderableEntities, type GameWorld } from '../core/index.ts'
 import { Camera } from './camera.ts'
+import {
+  minimapPanel,
+  minimapFit,
+  minimapToWorld,
+  inMinimap,
+  padBounds,
+  type MinimapRect,
+  type WorldBounds,
+} from './minimap.ts'
 
 /**
  * The belt flow-arrow sign as a path of `[forward, lateral]` points in tile-fraction units,
@@ -18,6 +27,11 @@ const BELT_ARROW: readonly (readonly [number, number])[] = [
   [-0.4, -0.4],
   [0, -0.4],
 ]
+
+/** Duration (ms) of the scale+fade "pop" when an entity first appears. */
+const SPAWN_MS = 160
+/** Duration (ms) of the scale+fade dissolve when an entity is removed. */
+const REMOVE_MS = 150
 
 export interface RendererOptions {
   /** Existing canvas to render into. */
@@ -91,11 +105,42 @@ export class Renderer {
   #world = new Container()
   #gridLayer = new Graphics()
   #entityLayer = new Container()
+  /** Pulsing "working" halos, one redraw per frame, framed just above the entities they ring. */
+  #pulseLayer = new Graphics()
   #iconLayer = new Container()
   #ghostLayer = new Graphics()
   #highlightLayer = new Graphics()
   #camera: Camera
   #sprites = new Map<number, Graphics>()
+  /**
+   * Entities mid "pop-in": eid → elapsed ms. While present the sprite scales up from a shrunk,
+   * translucent state to full size; cleared once the animation completes. Purely cosmetic.
+   */
+  #spawnAnim = new Map<number, number>()
+  /**
+   * Entities animating OUT after their sim entity vanished. We keep the graphics (and its icon)
+   * alive a beat longer to fade+shrink them, then destroy. Keyed by the now-dead eid; a recycled
+   * id reused before the fade finishes cancels the fade (see the top of {@link render}).
+   */
+  #dying = new Map<number, { g: Graphics; icon: Sprite | null; t: number }>()
+  /** Free-running clock (ms) driving the active-crafter pulse; advanced by real frame time. */
+  #pulseClock = 0
+  /** `performance.now()` of the previous {@link render} call, for a wall-clock frame delta. */
+  #lastRenderMs = 0
+  /**
+   * Screen-space overview map, pinned to a corner (a direct stage child, so the camera transform
+   * that pans/zooms {@link #world} never moves it). Redrawn each frame from live entity positions.
+   */
+  #minimapLayer = new Graphics()
+  /** Panel geometry + world bounds from the last minimap draw, reused to hit-test/navigate clicks. */
+  #minimapPanel: MinimapRect | null = null
+  #minimapWorld: WorldBounds | null = null
+  #minimapConfig = { size: 180, margin: 12 }
+  /**
+   * When false the minimap is hidden and stops handling clicks. The app flips this off while a
+   * modal (save menu, help) is up or in the menu shell, mirroring {@link edgeScroll}.
+   */
+  minimap = true
   /**
    * Optional per-entity overlay glyph, keyed by the entity's packed `color`. The engine stays
    * game-agnostic: the app supplies whatever textures it likes (here, the build-bar lucide
@@ -162,10 +207,13 @@ export class Renderer {
     this.#gridExtent = gridExtent
     this.#world.addChild(this.#gridLayer)
     this.#world.addChild(this.#entityLayer)
+    this.#world.addChild(this.#pulseLayer)
     this.#world.addChild(this.#iconLayer)
     this.#world.addChild(this.#ghostLayer)
     this.#world.addChild(this.#highlightLayer)
     this.#app.stage.addChild(this.#world)
+    // The minimap lives on the stage (not #world) so it stays fixed to the screen corner.
+    this.#app.stage.addChild(this.#minimapLayer)
     this.#camera = new Camera(this.#world)
     this.#drawGrid()
     this.#camera.centerOn(0, 0, app.screen.width, app.screen.height)
@@ -195,50 +243,218 @@ export class Renderer {
    * the last two ticks. Reads sim state only.
    */
   render(gw: GameWorld, alpha: number): void {
-    const { Position, Renderable } = gw.components
+    const { Position, Renderable, RenderHints } = gw.components
     const ents = renderableEntities(gw)
     const seen = new Set<number>()
+
+    // Wall-clock frame delta drives the (sim-independent) cosmetic animations. Clamp so a
+    // stall or a backgrounded tab can't fast-forward a pop, and seed the first frame at ~60fps.
+    const now = performance.now()
+    const dt = this.#lastRenderMs === 0 ? 16 : Math.min(100, now - this.#lastRenderMs)
+    this.#lastRenderMs = now
+    this.#pulseClock += dt
+    // Shared pulse phase (0..1) for every active entity this frame.
+    const pulse = 0.5 - 0.5 * Math.cos(this.#pulseClock * 0.006)
+
+    this.#pulseLayer.clear()
+    let anyPulse = false
 
     for (let i = 0; i < ents.length; i++) {
       const eid = ents[i]!
       seen.add(eid)
 
+      // A recycled id that is still mid-fade-out: kill the fading ghost before reusing the id.
+      const dead = this.#dying.get(eid)
+      if (dead) {
+        dead.g.destroy()
+        if (dead.icon) dead.icon.destroy()
+        this.#dying.delete(eid)
+      }
+
       const spr = Renderable.sprite[eid]!
       const color = Renderable.color[eid]!
+      const wTiles = Renderable.width[eid]!
+      const hTiles = Renderable.height[eid]!
       let g = this.#sprites.get(eid)
       if (!g) {
         g = new Graphics()
         this.#sprites.set(eid, g)
         this.#entityLayer.addChild(g)
-        this.#paintSprite(g, spr, color, Renderable.width[eid]!, Renderable.height[eid]!)
+        this.#paintSprite(g, spr, color, wTiles, hTiles)
         this.#spriteVals.set(eid, spr)
         this.#colorVals.set(eid, color)
+        this.#spawnAnim.set(eid, 0)
       } else if (this.#spriteVals.get(eid) !== spr || this.#colorVals.get(eid) !== color) {
         // The glyph or colour changed — e.g. a belt tile re-aimed by redrawing over it, or
         // a recycled entity id now hosting a different item: repaint so the cached graphics
         // never keeps a stale glyph/colour from the entity that previously held this id.
-        this.#paintSprite(g, spr, color, Renderable.width[eid]!, Renderable.height[eid]!)
+        this.#paintSprite(g, spr, color, wTiles, hTiles)
         this.#spriteVals.set(eid, spr)
         this.#colorVals.set(eid, color)
       }
 
       const x = lerp(Position.prevX[eid]!, Position.x[eid]!, alpha) * TILE_SIZE
       const y = lerp(Position.prevY[eid]!, Position.y[eid]!, alpha) * TILE_SIZE
-      g.position.set(x, y)
+      const cw = wTiles * TILE_SIZE
+      const ch = hTiles * TILE_SIZE
+      // Anchor the graphics by its footprint centre so the pop scales in place.
+      g.pivot.set(cw / 2, ch / 2)
+      g.position.set(x + cw / 2, y + ch / 2)
 
-      this.#updateIcon(eid, color, x, y, Renderable.width[eid]!, spr)
+      // Pop-in: ease scale 0.55→1 and alpha 0→1 over SPAWN_MS.
+      let spriteAlpha = 1
+      const born = this.#spawnAnim.get(eid)
+      if (born !== undefined) {
+        const t = born + dt
+        if (t >= SPAWN_MS) {
+          this.#spawnAnim.delete(eid)
+          g.scale.set(1)
+        } else {
+          this.#spawnAnim.set(eid, t)
+          const p = t / SPAWN_MS
+          const e = 1 - (1 - p) * (1 - p) // ease-out quad
+          g.scale.set(0.55 + 0.45 * e)
+          spriteAlpha = e
+        }
+      } else {
+        g.scale.set(1)
+      }
+      g.alpha = spriteAlpha
+
+      this.#updateIcon(eid, color, x, y, wTiles, spr)
+      const icon = this.#iconSprites.get(eid)
+      if (icon) icon.alpha = spriteAlpha
+
+      // Working pulse: ring the footprint of any entity content flagged active this tick.
+      if (RenderHints.active[eid]) {
+        this.#pulseLayer.roundRect(x + 1, y + 1, cw - 2, ch - 2, 4)
+        anyPulse = true
+      }
     }
 
-    // Drop graphics for entities that no longer exist.
+    // One stroke for the whole batch — every ring shares the frame's pulse phase.
+    if (anyPulse) {
+      this.#pulseLayer.stroke({ width: 2, color: 0xffe08a, alpha: 0.25 + 0.5 * pulse })
+    }
+
+    // Entities whose sim entity vanished: hand them to the fade-out pool instead of destroying.
     for (const [eid, g] of this.#sprites) {
       if (!seen.has(eid)) {
-        g.destroy()
+        const icon = this.#iconSprites.get(eid) ?? null
+        this.#iconSprites.delete(eid) // keep the sprite alive for the fade; drop it from the live map
+        this.#dying.set(eid, { g, icon, t: 0 })
         this.#sprites.delete(eid)
         this.#spriteVals.delete(eid)
         this.#colorVals.delete(eid)
-        this.#removeIcon(eid)
+        this.#spawnAnim.delete(eid)
       }
     }
+
+    // Advance the fade-out pool: shrink+fade in place, then destroy when done.
+    for (const [eid, d] of this.#dying) {
+      d.t += dt
+      const p = d.t / REMOVE_MS
+      if (p >= 1) {
+        d.g.destroy()
+        if (d.icon) d.icon.destroy()
+        this.#dying.delete(eid)
+        continue
+      }
+      const a = 1 - p
+      d.g.scale.set(1 - 0.3 * p)
+      d.g.alpha = a
+      if (d.icon) d.icon.alpha = a
+    }
+
+    this.#drawMinimap(gw)
+  }
+
+  /**
+   * Redraw the corner overview map from live entity positions: a translucent panel, every
+   * (non-item) entity plotted as a dot in its own colour, and the current viewport as a "you are
+   * here" rectangle. Read-only — like the rest of the renderer it never mutates the sim. The
+   * panel geometry + world bounds are cached so a click can be mapped back to a world point
+   * ({@link #minimapNav}). Skipped (and cleared) when {@link minimap} is off or the world is empty.
+   */
+  #drawMinimap(gw: GameWorld): void {
+    const g = this.#minimapLayer
+    g.clear()
+    this.#minimapPanel = null
+    this.#minimapWorld = null
+    if (!this.minimap) return
+
+    const { Position, Renderable } = gw.components
+    const ents = renderableEntities(gw)
+    // Pass 1: world-pixel bounds over the plotted set (skip transient belt items, shape 1).
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (let i = 0; i < ents.length; i++) {
+      const eid = ents[i]!
+      if (Renderable.sprite[eid]! >> 2 === 1) continue
+      const x = Position.x[eid]! * TILE_SIZE
+      const y = Position.y[eid]! * TILE_SIZE
+      const w = Renderable.width[eid]! * TILE_SIZE
+      const h = Renderable.height[eid]! * TILE_SIZE
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x + w > maxX) maxX = x + w
+      if (y + h > maxY) maxY = y + h
+    }
+    if (!Number.isFinite(minX)) return
+
+    const panel = minimapPanel(this.#app.screen.width, this.#app.screen.height, this.#minimapConfig)
+    if (panel.w <= 0 || panel.h <= 0) return
+    const world = padBounds({ minX, minY, maxX, maxY }, TILE_SIZE * 3)
+
+    // Backdrop.
+    g.roundRect(panel.x, panel.y, panel.w, panel.h, 4)
+    g.fill({ color: 0x0b0d14, alpha: 0.72 })
+    g.stroke({ width: 1, color: 0x3d4452, alpha: 0.9 })
+
+    const { scale, contentX, contentY } = minimapFit(world, panel)
+    const dot = Math.max(1.5, TILE_SIZE * scale)
+
+    // Pass 2: plot each non-item entity as a small dot in its own colour.
+    for (let i = 0; i < ents.length; i++) {
+      const eid = ents[i]!
+      if (Renderable.sprite[eid]! >> 2 === 1) continue
+      const px = contentX + (Position.x[eid]! * TILE_SIZE - world.minX) * scale
+      const py = contentY + (Position.y[eid]! * TILE_SIZE - world.minY) * scale
+      g.rect(px, py, dot, dot)
+      g.fill(Renderable.color[eid]!)
+    }
+
+    // The current viewport as a rectangle, clamped to the world bounds so it never leaves the panel.
+    const vb = this.#camera.worldViewBounds()
+    const vx0 = contentX + (Math.max(vb.minX, world.minX) - world.minX) * scale
+    const vy0 = contentY + (Math.max(vb.minY, world.minY) - world.minY) * scale
+    const vx1 = contentX + (Math.min(vb.maxX, world.maxX) - world.minX) * scale
+    const vy1 = contentY + (Math.min(vb.maxY, world.maxY) - world.minY) * scale
+    g.rect(vx0, vy0, Math.max(1, vx1 - vx0), Math.max(1, vy1 - vy0))
+    g.stroke({ width: 1, color: 0xffffff, alpha: 0.85 })
+
+    this.#minimapPanel = panel
+    this.#minimapWorld = world
+  }
+
+  /**
+   * If (clientX, clientY) falls on the minimap, glide the camera to the world point it maps to and
+   * return true (so the caller suppresses the placement gesture). A pure view action — it drives
+   * the same eased follow as the F key and never mutates the sim.
+   */
+  #minimapNav(clientX: number, clientY: number): boolean {
+    const panel = this.#minimapPanel
+    const world = this.#minimapWorld
+    if (!this.minimap || !panel || !world) return false
+    const rect = this.#app.canvas.getBoundingClientRect()
+    const px = clientX - rect.left
+    const py = clientY - rect.top
+    if (!inMinimap(px, py, panel)) return false
+    const point = minimapToWorld(px, py, world, panel)
+    this.#camera.follow(() => point)
+    return true
   }
 
   /**
@@ -385,6 +601,8 @@ export class Renderer {
     this.#app.destroy(false, { children: true })
     this.#sprites.clear()
     this.#iconSprites.clear()
+    this.#dying.clear()
+    this.#spawnAnim.clear()
   }
 
   /**
@@ -525,6 +743,8 @@ export class Renderer {
   #installInput(): void {
     const canvas = this.#app.canvas
     let pressed = false
+    // A press that began on the minimap drives camera navigation, not a placement gesture.
+    let minimapPanning = false
 
     const tileAt = (clientX: number, clientY: number): GridCoord => {
       const rect = canvas.getBoundingClientRect()
@@ -536,6 +756,11 @@ export class Renderer {
     canvas.addEventListener('pointerdown', (e) => {
       // Only the left button drives placement gestures; the right button cancels (below).
       if (e.button !== 0) return
+      // A click on the minimap glides the camera there instead of placing.
+      if (this.#minimapNav(e.clientX, e.clientY)) {
+        minimapPanning = true
+        return
+      }
       pressed = true
       if (this.onDragStart) this.onDragStart(tileAt(e.clientX, e.clientY))
     })
@@ -545,12 +770,21 @@ export class Renderer {
       if (this.onCancel) this.onCancel()
     })
     globalThis.addEventListener('pointerup', (e) => {
+      if (minimapPanning) {
+        minimapPanning = false
+        return
+      }
       if (pressed && this.onDragEnd) this.onDragEnd(tileAt(e.clientX, e.clientY))
       pressed = false
     })
     globalThis.addEventListener('pointermove', (e) => {
       this.#lastClientX = e.clientX
       this.#lastClientY = e.clientY
+      // Dragging on the minimap keeps re-aiming the camera; skip placement/hover.
+      if (minimapPanning) {
+        this.#minimapNav(e.clientX, e.clientY)
+        return
+      }
       const tile = tileAt(e.clientX, e.clientY)
       if (pressed && this.onDragMove) this.onDragMove(tile)
       if (this.onTileHover) this.onTileHover(tile)

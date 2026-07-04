@@ -61,6 +61,19 @@ describe('createModApi', () => {
     expect(entityCount(host.world)).toBe(after - 1)
   })
 
+  it('setActive toggles the transient render hint without touching serialized state', () => {
+    const { host } = makeHost()
+    const api = createModApi('base', host)
+    const eid = api.spawn({ pos: { x: 1, y: 1 } })
+    const { RenderHints } = host.world.components
+    // Spawn clears the hint so a recycled id never inherits a stale pulse.
+    expect(RenderHints.active[eid]).toBe(0)
+    api.setActive(eid, true)
+    expect(RenderHints.active[eid]).toBe(1)
+    api.setActive(eid, false)
+    expect(RenderHints.active[eid]).toBe(0)
+  })
+
   it('emit dispatches to world-bus listeners, and on() subscribes', () => {
     const { host } = makeHost()
     const api = createModApi('base', host)

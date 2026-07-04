@@ -11,11 +11,13 @@ export {
   type Components,
   type PositionStore,
   type RenderableStore,
+  type RenderHintsStore,
 } from './components.ts'
 export {
   createGameWorld,
   spawnEntity,
   despawnEntity,
+  setRenderActive,
   renderableEntities,
   entityCount,
   enqueueCommand,

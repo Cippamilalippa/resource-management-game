@@ -87,7 +87,7 @@ export interface SpawnOptions {
  * by content/mods; the engine attaches no game meaning to the values.
  */
 export function spawnEntity(gw: GameWorld, opts: SpawnOptions): number {
-  const { Position, Renderable } = gw.components
+  const { Position, Renderable, RenderHints } = gw.components
   const eid = addEntity(gw.world)
 
   addComponent(gw.world, eid, Position)
@@ -102,12 +102,26 @@ export function spawnEntity(gw: GameWorld, opts: SpawnOptions): number {
   Renderable.width[eid] = opts.width ?? 1
   Renderable.height[eid] = opts.height ?? 1
 
+  // Clear the transient render hint: bitecs recycles entity ids, so a reused id must not
+  // inherit the previous occupant's "active" pulse.
+  RenderHints.active[eid] = 0
+
   return eid
 }
 
 /** Remove an entity from the world. */
 export function despawnEntity(gw: GameWorld, eid: number): void {
   removeEntity(gw.world, eid)
+}
+
+/**
+ * Set an entity's transient "active" render hint (see {@link RenderHintsStore}). A purely
+ * cosmetic one-way sim→render signal the renderer reads to pulse working entities; it is never
+ * serialized or hashed, so it can never perturb determinism. Content reaches this via
+ * `ModApi.setActive`.
+ */
+export function setRenderActive(gw: GameWorld, eid: number, on: boolean): void {
+  gw.components.RenderHints.active[eid] = on ? 1 : 0
 }
 
 /**

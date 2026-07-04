@@ -1447,6 +1447,65 @@ input:focus-visible,
   gap: 1px;
 }
 
+/* ── Port colour-filter editor (multi-output routing) ───────────────────────── */
+.filter-modes {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.filter-mode {
+  flex: 1;
+  padding: 5px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: rgba(var(--inset-rgb), 0.5);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+.filter-mode:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.filter-mode.active {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.18);
+  color: var(--text);
+  cursor: default;
+}
+.filter-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.filter-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: rgba(var(--inset-rgb), 0.5);
+  cursor: pointer;
+}
+.filter-item:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.16);
+}
+.filter-item.active {
+  border-color: var(--good);
+  background: rgba(82, 192, 122, 0.18);
+}
+.filter-item:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.filter-hint {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* ── Main menu / new-game setup shells (M5) ─────────────────────────────────── */
 .menu-screen {
   position: fixed;

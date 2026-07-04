@@ -35,10 +35,11 @@ function bufferOf(store: BuildingStore, b: number, color: number): number {
 /** One demand of a village's current stage, paired with what its buffer currently holds. */
 export interface VillageDemandStatus {
   readonly color: number
-  /** Units consumed per {@link VILLAGE_CADENCE}. */
-  readonly need: number
+  /** Authored consumption rate in units per in-game minute. */
+  readonly ratePerMin: number
   /** Units of this resource currently stocked in the village buffer. */
   readonly have: number
+  /** True while the buffer holds stock to draw from (a demanded good at zero is a starved miss). */
   readonly met: boolean
 }
 
@@ -77,7 +78,12 @@ export function villageStatuses(state: GameState): VillageStatus[] {
       for (let d = 0; d < cfg.demands.length; d++) {
         const dem = cfg.demands[d]!
         const have = b >= 0 ? bufferOf(state.buildings, b, dem.color) : 0
-        demands.push({ color: dem.color, need: dem.need, have, met: have >= dem.need })
+        demands.push({
+          color: dem.color,
+          ratePerMin: dem.ratePerMin,
+          have,
+          met: dem.ratePerMin === 0 || have > 0,
+        })
       }
     }
     out.push({

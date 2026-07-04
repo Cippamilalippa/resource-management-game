@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   createGameWorld,
   spawnEntity,
+  setRenderActive,
   Scheduler,
   counterSystem,
   entityCount,
@@ -51,6 +52,18 @@ describe('persistence save/load round-trip', () => {
   it('rejects an unsupported snapshot version', () => {
     const snap = { ...serialize(populated(1)), version: SNAPSHOT_VERSION + 1 }
     expect(() => deserialize(snap)).toThrow(/version/)
+  })
+
+  it('transient render hints never leak into the hash or snapshot', () => {
+    // RenderHints.active is a cosmetic sim→render channel; toggling it must not perturb the
+    // serialized snapshot or its hash, or it would break determinism and save compatibility.
+    const gw = populated(7)
+    const baseHash = hashState(gw)
+    const baseSnap = serialize(gw)
+    const ents = Array.from({ length: entityCount(gw) }, (_, i) => i + 1)
+    for (const eid of ents) setRenderActive(gw, eid, true)
+    expect(hashState(gw)).toBe(baseHash)
+    expect(serialize(gw)).toEqual(baseSnap)
   })
 })
 

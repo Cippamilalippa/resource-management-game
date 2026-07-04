@@ -12,6 +12,7 @@
     "build": "pnpm --filter @factory/game build",
     "headless": "pnpm --filter @factory/headless start",
     "kpi": "pnpm --filter @factory/headless kpi",
+    "stress": "pnpm --filter @factory/headless stress",
     "balance": "pnpm --filter @factory/balance start",
     "balance:aero": "pnpm --filter @factory/balance start --data apps/balance/sandbox/aerospace",
     "test": "vitest run",

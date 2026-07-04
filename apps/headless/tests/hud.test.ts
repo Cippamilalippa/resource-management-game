@@ -60,12 +60,12 @@ describe('villageStatuses', () => {
     setCount(state, b, 0, 50) // grain
     setCount(state, b, 1, 5) // bread
     state.villages.stages = [
-      { population: 10, demands: [{ color: GRAIN, need: 20 }] },
+      { population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] },
       {
         population: 25,
         demands: [
-          { color: GRAIN, need: 20 },
-          { color: BREAD, need: 10 },
+          { color: GRAIN, ratePerMin: 20 },
+          { color: BREAD, ratePerMin: 10 },
         ],
       },
     ]
@@ -77,7 +77,7 @@ describe('villageStatuses', () => {
     expect(v!.level).toBe(1)
     expect(v!.maxStage).toBe(1)
     expect(v!.population).toBe(10)
-    expect(v!.demands).toEqual([{ color: GRAIN, need: 20, have: 50, met: true }])
+    expect(v!.demands).toEqual([{ color: GRAIN, ratePerMin: 20, have: 50, met: true }])
     expect(v!.growthNeeded).toBe(VILLAGE_GROWTH_AFTER)
     expect(v!.declineNeeded).toBe(VILLAGE_DECLINE_AFTER)
   })
@@ -89,14 +89,14 @@ describe('villageStatuses', () => {
       { color: BREAD, cap: 1000, role: ROLE_DEPOSIT | ROLE_DRAIN, amt: 0 },
     ])
     setCount(state, b, 0, 50) // grain met
-    setCount(state, b, 1, 3) // bread short of its need of 10
+    setCount(state, b, 1, 0) // bread starved — a demanded good at zero is an unmet miss
     state.villages.stages = [
-      { population: 10, demands: [{ color: GRAIN, need: 20 }] },
+      { population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] },
       {
         population: 25,
         demands: [
-          { color: GRAIN, need: 20 },
-          { color: BREAD, need: 10 },
+          { color: GRAIN, ratePerMin: 20 },
+          { color: BREAD, ratePerMin: 10 },
         ],
       },
     ]
@@ -106,8 +106,8 @@ describe('villageStatuses', () => {
     const [v] = villageStatuses(state)
     expect(v!.level).toBe(2)
     expect(v!.demands).toEqual([
-      { color: GRAIN, need: 20, have: 50, met: true },
-      { color: BREAD, need: 10, have: 3, met: false },
+      { color: GRAIN, ratePerMin: 20, have: 50, met: true },
+      { color: BREAD, ratePerMin: 10, have: 0, met: false },
     ])
   })
 })
@@ -173,7 +173,7 @@ describe('collectAlerts', () => {
 
   it('raises a declining-village alert once its decline timer accrues', () => {
     const state = createGameState()
-    state.villages.stages = [{ population: 10, demands: [{ color: GRAIN, need: 20 }] }]
+    state.villages.stages = [{ population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] }]
     registerVillage(state.villages, 0, 0)
     state.villages.declineTimer[0] = 60
 

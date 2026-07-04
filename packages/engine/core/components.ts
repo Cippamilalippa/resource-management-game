@@ -26,9 +26,22 @@ export interface RenderableStore {
   readonly height: Uint16Array
 }
 
+/**
+ * Purely cosmetic, TRANSIENT render hints — a one-way sim→render channel that is
+ * deliberately NOT part of the snapshot: it is never serialized and never hashed, so
+ * changing it can never affect determinism or save compatibility. Content sets it (via
+ * `ModApi.setActive`) to drive frame-only flourishes; on load it simply re-derives from
+ * the restored sim state on the next tick, so nothing is lost by leaving it out of saves.
+ */
+export interface RenderHintsStore {
+  /** 1 while an entity is "working" (e.g. a crafter mid-recipe) — the renderer pulses it; 0 otherwise. */
+  readonly active: Uint8Array
+}
+
 export interface Components {
   readonly Position: PositionStore
   readonly Renderable: RenderableStore
+  readonly RenderHints: RenderHintsStore
 }
 
 /** Allocate a fresh, isolated set of component stores for one world. */
@@ -45,6 +58,9 @@ export function createComponents(): Components {
       color: new Uint32Array(MAX_ENTITIES),
       width: new Uint16Array(MAX_ENTITIES),
       height: new Uint16Array(MAX_ENTITIES),
+    },
+    RenderHints: {
+      active: new Uint8Array(MAX_ENTITIES),
     },
   }
 }

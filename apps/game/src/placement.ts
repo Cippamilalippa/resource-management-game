@@ -8,6 +8,7 @@ import {
   enqueuePlaceCrafter,
   enqueuePlaceSplitter,
   enqueueSetRecipe,
+  enqueueSetPortFilter,
   enqueueRemove,
   projectBelt,
   terrainTypeOf,
@@ -17,6 +18,8 @@ import {
   KIND_OUTPUT,
   KIND_INPUT,
   KIND_SPLITTER,
+  MAX_PORT_FILTER,
+  FILTER_EMPTY,
   type GameState,
 } from './gameLogic.ts'
 import { buildStore, type BuildItem } from './buildStore.ts'
@@ -31,6 +34,7 @@ import {
 import { resolveInspect, type InspectInfo, type InspectRegistry } from './inspect.ts'
 import { inspectStore } from './inspectStore.ts'
 import { recipeStore } from './recipeStore.ts'
+import { filterStore } from './filterStore.ts'
 import type { MachineIndex, RecipeChoice } from './machines.ts'
 
 /** Whether two footprints describe the same object (same anchor and size). */
@@ -107,6 +111,15 @@ export function installPlacement(
     },
   })
 
+  // The port-filter editor (sidebar) drives colour-filter changes on the pinned port through here.
+  filterStore.setController({
+    set: (mode, colors) => {
+      const sel = filterStore.get()
+      if (!sel) return
+      enqueueSetPortFilter(world, { x: sel.x, y: sel.y, mode, colors: [...colors] })
+    },
+  })
+
   /**
    * Publish (or clear) the recipe picker for the object described by `info`. A crafter (a building
    * whose footprint colour maps to a {@link MachineDef}) exposes its recipe options; an extraction
@@ -135,6 +148,36 @@ export function installPlacement(
       extraction: def.extraction,
       currentInt: state.buildings.recipe[b]!,
       options,
+    })
+  }
+
+  /**
+   * Publish (or clear) the port colour-filter editor for `info`. A pinned input/output port exposes
+   * its live filter (mode + colours); anything else clears the editor. Read-only — the actual change
+   * flows through the wired controller as a `set_port_filter` command.
+   */
+  const publishFilter = (info: InspectInfo | null): void => {
+    const t = info ? grid.index.get(tileKey(info.footprint.x, info.footprint.y)) : undefined
+    if (t === undefined) {
+      filterStore.set(null)
+      return
+    }
+    const kind = grid.kind[t]!
+    if (kind !== KIND_OUTPUT && kind !== KIND_INPUT) {
+      filterStore.set(null)
+      return
+    }
+    const colors: number[] = []
+    for (let j = 0; j < MAX_PORT_FILTER; j++) {
+      const c = grid.filterColor[t * MAX_PORT_FILTER + j]!
+      if (c !== FILTER_EMPTY) colors.push(c)
+    }
+    filterStore.set({
+      x: info!.footprint.x,
+      y: info!.footprint.y,
+      port: kind === KIND_OUTPUT ? 'output' : 'input',
+      mode: grid.filterMode[t]!,
+      colors,
     })
   }
   // Ghost tint for a placement the sim would reject (off-belt or wrong terrain), and the
@@ -222,6 +265,7 @@ export function installPlacement(
         inspectStore.set({ info, pinned: true })
         renderer.setHighlight({ ...info.footprint, color: info.color, selected: true })
         publishRecipe(info) // recipe picker follows the pinned crafter
+        publishFilter(info) // filter editor follows the pinned port
         return
       }
       pinned = null // the pinned object vanished — fall through to hover.
@@ -240,6 +284,7 @@ export function installPlacement(
     inspectStore.set({ info, pinned: false })
     renderer.setHighlight(info ? { ...info.footprint, color: info.color, selected: false } : null)
     publishRecipe(null) // nothing pinned → no recipe picker
+    publishFilter(null) // nothing pinned → no filter editor
   }
 
   /** Clear all inspect state (entering build mode, or nothing under the cursor). */
@@ -249,6 +294,7 @@ export function installPlacement(
     inspectStore.set({ info: null, pinned: false })
     renderer.setHighlight(null)
     recipeStore.set(null)
+    filterStore.set(null)
   }
 
   /** A click in inspect mode: pin the object under the cursor, or unpin (toggle / empty). */

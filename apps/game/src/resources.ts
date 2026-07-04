@@ -24,6 +24,7 @@ export interface Resource {
 }
 
 let byColor: ReadonlyMap<number, Resource> = new Map()
+let all: readonly Resource[] = []
 
 /**
  * Build the colour→resource lookup from the loaded item prototypes and install it as the active
@@ -43,10 +44,16 @@ export function setResources(prototypes: readonly ClientPrototype[]): readonly R
     list.push(res)
   }
   byColor = map
+  all = list
   return list
 }
 
 /** The resource (icon + name) a packed colour denotes, or `undefined` if no item claims it. */
 export function resourceByColor(color: number): Resource | undefined {
   return byColor.get(color >>> 0)
+}
+
+/** Every loaded resource, in prototype order — used by the port-filter picker to list items. */
+export function allResources(): readonly Resource[] {
+  return all
 }

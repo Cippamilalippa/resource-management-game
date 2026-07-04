@@ -164,9 +164,10 @@ function VillageCard({ v }: { v: VillageStatus }): React.JSX.Element {
       {v.demands.map((d, i) => (
         <div key={i} className="hud-progress-row">
           <ResourceLabel color={d.color} size={14} showName={false} />
-          <Bar frac={d.need > 0 ? d.have / d.need : 1} tone={d.met ? 'good' : 'bad'} />
+          <Bar frac={d.ratePerMin > 0 ? d.have / d.ratePerMin : 1} tone={d.met ? 'good' : 'bad'} />
           <span className="hud-progress-num">
-            {d.have}/{d.need}
+            {d.have}
+            <span className="hud-sub">/{d.ratePerMin}/min</span>
           </span>
         </div>
       ))}

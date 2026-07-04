@@ -6,6 +6,7 @@
   "scripts": {
     "start": "tsx index.ts",
     "kpi": "tsx kpi-run.ts",
+    "stress": "tsx stress-run.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

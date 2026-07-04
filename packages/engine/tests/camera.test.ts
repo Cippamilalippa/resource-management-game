@@ -61,6 +61,32 @@ describe('Camera', () => {
     expect(cam.screenToTile(400 - 1, 300, 32)).toEqual({ x: -1, y: 0 })
   })
 
+  it('reports the world-pixel bounds framed by the viewport', () => {
+    const world = fakeWorld()
+    const cam = new Camera(world)
+    cam.centerOn(0, 0, 800, 600) // origin world point sits at the viewport centre
+    const b = cam.worldViewBounds()
+    // At zoom 1 the visible world spans ±half the viewport around the centred origin.
+    expect(b).toEqual({ minX: -400, minY: -300, maxX: 400, maxY: 300 })
+    // Its centre is the world point under the viewport centre.
+    expect((b.minX + b.maxX) / 2).toBe(0)
+    expect((b.minY + b.maxY) / 2).toBe(0)
+  })
+
+  it('shrinks the framed world bounds as it zooms in', () => {
+    const world = fakeWorld()
+    const cam = new Camera(world)
+    cam.centerOn(0, 0, 800, 600)
+    cam.zoomTo(400, 300, 2) // zoom about the viewport centre
+    settle(cam)
+    const b = cam.worldViewBounds()
+    // Zoomed 2× about the centre → half the world width/height is visible, still centred on origin.
+    expect(b.minX).toBeCloseTo(-200, 6)
+    expect(b.maxX).toBeCloseTo(200, 6)
+    expect(b.minY).toBeCloseTo(-150, 6)
+    expect(b.maxY).toBeCloseTo(150, 6)
+  })
+
   it('eases zoom toward its target and clamps to the range', () => {
     const world = fakeWorld()
     const cam = new Camera(world)

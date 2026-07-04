@@ -119,6 +119,20 @@ export class Camera {
   }
 
   /**
+   * The world-pixel rectangle currently framed by the viewport (the inverse of the view
+   * transform applied to the two viewport corners). Used by the minimap to draw the "you are
+   * here" box. A pure view→world read; never mutates the sim.
+   */
+  worldViewBounds(): { minX: number; minY: number; maxX: number; maxY: number } {
+    return {
+      minX: -this.#x / this.#zoom,
+      minY: -this.#y / this.#zoom,
+      maxX: (this.#viewW - this.#x) / this.#zoom,
+      maxY: (this.#viewH - this.#y) / this.#zoom,
+    }
+  }
+
+  /**
    * Convert a canvas-space pixel (e.g. a pointer position relative to the canvas) into the
    * integer tile under it. A pure view→world read; never mutates the sim.
    */

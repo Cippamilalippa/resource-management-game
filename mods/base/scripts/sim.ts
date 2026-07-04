@@ -51,6 +51,20 @@ export const KIND_OUTPUT = 1
 export const KIND_INPUT = 2
 export const KIND_SPLITTER = 3
 
+/**
+ * Per-port colour filter. An output port drains only slots whose colour passes its filter (so a
+ * multi-output machine can split its products onto separate belts); an input port only ingests
+ * items whose colour passes (others back the belt up, exactly like an unaccepted resource). A port
+ * carries up to {@link MAX_PORT_FILTER} colours and a mode: none (default — everything passes),
+ * whitelist (only the listed colours) or blacklist (everything except them). Empty slots hold
+ * {@link FILTER_EMPTY} so colour 0 (black) is still a distinguishable, filterable colour.
+ */
+export const FILTER_NONE = 0
+export const FILTER_WHITELIST = 1
+export const FILTER_BLACKLIST = 2
+export const MAX_PORT_FILTER = 4
+export const FILTER_EMPTY = -1
+
 /** No item / no neighbour / no link sentinel for the Int32 slot, neighbour and link arrays. */
 const NONE = -1
 
@@ -182,6 +196,10 @@ export interface BeltGrid {
   portEvery: Int32Array
   /** Output/input tiles: dense building id this port is linked to, or NONE. */
   portBuilding: Int32Array
+  /** Port tiles: colour-filter mode (FILTER_NONE | FILTER_WHITELIST | FILTER_BLACKLIST). */
+  filterMode: Int8Array
+  /** Port tiles: the filter's colours, `filterColor[t * MAX_PORT_FILTER + j]`; unused slots hold {@link FILTER_EMPTY}. */
+  filterColor: Int32Array
   /** Splitter tiles: round-robin cursor (next direction to try). */
   rr: Int8Array
   /** Track entity id drawn under each tile (re-oriented when a tile's facing changes). */
@@ -238,6 +256,8 @@ export function createBeltGrid(moveEvery: number): BeltGrid {
     portTimer: new Int32Array(cap),
     portEvery: new Int32Array(cap),
     portBuilding: new Int32Array(cap).fill(NONE),
+    filterMode: new Int8Array(cap),
+    filterColor: new Int32Array(cap * MAX_PORT_FILTER).fill(FILTER_EMPTY),
     rr: new Int8Array(cap),
     trackEid: new Int32Array(cap).fill(NONE),
     markEid: new Int32Array(cap).fill(NONE),
@@ -299,6 +319,8 @@ function ensureCapacity(g: BeltGrid, need: number): void {
   g.portTimer = grow(g.portTimer, next, 0)
   g.portEvery = grow(g.portEvery, next, 0)
   g.portBuilding = grow(g.portBuilding, next, NONE)
+  g.filterMode = grow8(g.filterMode, next, 0)
+  g.filterColor = grow(g.filterColor, next * MAX_PORT_FILTER, FILTER_EMPTY)
   g.rr = grow8(g.rr, next, 0)
   g.trackEid = grow(g.trackEid, next, NONE)
   g.markEid = grow(g.markEid, next, NONE)
@@ -368,6 +390,8 @@ function addOrAimTile(
   g.rr[t] = 0
   g.period[t] = period
   g.markEid[t] = NONE
+  // Clear any port filter left in this (possibly swap-reused) slot, so a future port here starts clean.
+  clearPortFilter(g, t)
   g.trackEid[t] = api.spawn({
     pos: { x, y },
     sprite: sprite(SHAPE_BELT_ARROW, face),
@@ -761,16 +785,45 @@ function findSlot(store: BuildingStore, b: number, color: number): number {
   return NONE
 }
 
+/** Reset belt tile `t`'s port filter to "none" (empty colour slots). Off the hot path. */
+function clearPortFilter(g: BeltGrid, t: number): void {
+  g.filterMode[t] = FILTER_NONE
+  const base = t * MAX_PORT_FILTER
+  for (let j = 0; j < MAX_PORT_FILTER; j++) g.filterColor[base + j] = FILTER_EMPTY
+}
+
+/** Whether `color` passes port tile `t`'s colour filter (always true for an unfiltered port). */
+function portFilterPasses(g: BeltGrid, t: number, color: number): boolean {
+  const mode = g.filterMode[t]!
+  if (mode === FILTER_NONE) return true
+  const base = t * MAX_PORT_FILTER
+  let listed = false
+  for (let j = 0; j < MAX_PORT_FILTER; j++) {
+    if (g.filterColor[base + j] === color) {
+      listed = true
+      break
+    }
+  }
+  return mode === FILTER_WHITELIST ? listed : !listed
+}
+
 /**
- * First drainable slot of building `b` that holds at least one unit, or NONE. Only slots an
- * output port may pull (role {@link ROLE_DRAIN}) count, so an output on a crafter drains its
- * product, never its raw inputs. Fixed slot order.
+ * First drainable slot of building `b` whose colour passes output-port tile `t`'s filter and holds
+ * at least one unit, or NONE. Only slots an output port may pull (role {@link ROLE_DRAIN}), so an
+ * output on a crafter drains its product, never its raw inputs; the filter further lets it pull one
+ * specific product off a multi-output machine. Fixed slot order, bounded scan.
  */
-function firstNonEmptySlot(store: BuildingStore, b: number): number {
+function firstDrainableForPort(store: BuildingStore, b: number, g: BeltGrid, t: number): number {
   const n = store.slotN[b]!
   for (let k = 0; k < n; k++) {
     const i = b * MAX_SLOTS + k
-    if (store.slotRole[i]! & ROLE_DRAIN && store.slotCount[i]! > 0) return k
+    if (
+      store.slotRole[i]! & ROLE_DRAIN &&
+      store.slotCount[i]! > 0 &&
+      portFilterPasses(g, t, store.slotColor[i]!)
+    ) {
+      return k
+    }
   }
   return NONE
 }
@@ -824,16 +877,18 @@ export const VILLAGE_TICKS_PER_MIN = 3600
 export const VILLAGE_GROWTH_AFTER = 600
 /** Sustained cadences of unmet demand before a village drops a stage (10s at 60 tps). */
 export const VILLAGE_DECLINE_AFTER = 600
+/** Max demands a single stage may carry — sizes the per-village fractional-demand accumulators. */
+export const MAX_VILLAGE_DEMANDS = 8
 
-/** Convert a demand's `ratePerMin` into the integer amount consumed per {@link VILLAGE_CADENCE}. */
-export function villageDemandNeed(ratePerMin: number): number {
-  return Math.max(1, Math.round((ratePerMin * VILLAGE_CADENCE) / VILLAGE_TICKS_PER_MIN))
-}
-
-/** One demand of a village stage: a resource colour and the integer units it eats per cadence. */
+/**
+ * One demand of a village stage: a resource colour and the authored consumption rate in units per
+ * in-game minute. The rate is honoured exactly via a per-village fractional accumulator (see
+ * {@link updateVillages}) rather than rounded to a per-cadence integer — a low rate like 6/min
+ * genuinely consumes one unit every ten seconds instead of collapsing to the 1-per-cadence floor.
+ */
 export interface VillageDemand {
   readonly color: number
-  readonly need: number
+  readonly ratePerMin: number
 }
 
 /** A village stage: its (cumulative) demands and a flavour population figure. */
@@ -862,6 +917,14 @@ export interface VillageStore {
   growthTimer: Int32Array
   /** Cadences of sustained unmet demand (toward decline). */
   declineTimer: Int32Array
+  /**
+   * Per-village fractional-demand accumulators, flat `[village * MAX_VILLAGE_DEMANDS + demand]`, in
+   * units of "unit·ticks": each cadence a demand accrues `ratePerMin * VILLAGE_CADENCE`, and every
+   * whole {@link VILLAGE_TICKS_PER_MIN} accrued is one integer unit due. This is what lets a demand
+   * consume a sub-per-cadence rate exactly. Reset when a village changes stage (the active demand
+   * set changes, so stale carry-over would be meaningless). Serialized so saves are exact.
+   */
+  demandAcc: Int32Array
   /** Shared cadence countdown (ticks since the last evaluation). */
   timer: number
   /** The stage ladder, shared by every village (from the village prototype). */
@@ -877,6 +940,7 @@ export function createVillageStore(): VillageStore {
     stage: new Int32Array(cap),
     growthTimer: new Int32Array(cap),
     declineTimer: new Int32Array(cap),
+    demandAcc: new Int32Array(cap * MAX_VILLAGE_DEMANDS),
     timer: 0,
     stages: [],
   }
@@ -893,6 +957,7 @@ export function registerVillage(v: VillageStore, x: number, y: number): number {
     v.stage = grow(v.stage, next, 0)
     v.growthTimer = grow(v.growthTimer, next, 0)
     v.declineTimer = grow(v.declineTimer, next, 0)
+    v.demandAcc = grow(v.demandAcc, next * MAX_VILLAGE_DEMANDS, 0)
   }
   const i = v.count++
   v.vx[i] = x
@@ -900,6 +965,7 @@ export function registerVillage(v: VillageStore, x: number, y: number): number {
   v.stage[i] = 0
   v.growthTimer[i] = 0
   v.declineTimer[i] = 0
+  for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++) v.demandAcc[i * MAX_VILLAGE_DEMANDS + d] = 0
   return i
 }
 
@@ -907,6 +973,16 @@ export function registerVillage(v: VillageStore, x: number, y: number): number {
 export function villageStageAt(v: VillageStore, x: number, y: number): number {
   for (let i = 0; i < v.count; i++) if (v.vx[i] === x && v.vy[i] === y) return v.stage[i]!
   return NONE
+}
+
+/** Units of `color` currently stocked in building `b`'s buffer (0 if it stocks none). Bounded scan. */
+function villageBufferAmount(store: BuildingStore, b: number, color: number): number {
+  const n = store.slotN[b]!
+  for (let k = 0; k < n; k++) {
+    const i = b * MAX_SLOTS + k
+    if (store.slotColor[i] === color) return store.slotCount[i]!
+  }
+  return 0
 }
 
 /** Consume `need` of `color` from building `b`'s buffer; returns true if the buffer covered it. */
@@ -926,13 +1002,21 @@ function consumeFromBuffer(store: BuildingStore, b: number, color: number, need:
   return false // the village doesn't even stock this resource yet.
 }
 
+/** Zero every fractional-demand accumulator of village `i` (on a stage change). */
+function resetDemandAcc(v: VillageStore, i: number): void {
+  const base = i * MAX_VILLAGE_DEMANDS
+  for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++) v.demandAcc[base + d] = 0
+}
+
 /**
- * Advance every village once per {@link VILLAGE_CADENCE} ticks: consume the current stage's
- * demands from the village buffer, then move a growth/decline timer. All current-stage demands
- * met (the stages list demands cumulatively, so a missing low-tier good starves the higher
- * tiers too) accrues the growth timer and clears decline; any unmet accrues decline and clears
- * growth. A full growth timer advances a stage (capped at the top); a full decline timer drops
- * one (floored at 0 — never removed). Integer math, no RNG; runs off the per-tick hot path.
+ * Advance every village once per {@link VILLAGE_CADENCE} ticks: accrue each current-stage demand's
+ * fractional need, consume any whole units now due from the village buffer, then move a growth/decline
+ * timer. A demand accrues `ratePerMin * VILLAGE_CADENCE` unit·ticks each cadence and owes one unit per
+ * {@link VILLAGE_TICKS_PER_MIN} accrued, so its rate is honoured exactly (a cadence with nothing yet due
+ * counts as met). The stages list demands cumulatively, so a missing low-tier good starves the higher
+ * tiers too; every current demand met accrues the growth timer and clears decline, any unmet accrues
+ * decline and clears growth. A full growth timer advances a stage (capped at the top); a full decline
+ * timer drops one (floored at 0 — never removed); either resets the accumulators. Integer math, no RNG.
  */
 function updateVillages(state: GameState): void {
   const v = state.villages
@@ -944,10 +1028,23 @@ function updateVillages(state: GameState): void {
     const b = buildingAt(store, v.vx[i]!, v.vy[i]!)
     if (b === NONE) continue // the village building was removed — leave the entry inert.
     const cfg = v.stages[v.stage[i]!]!
+    const accBase = i * MAX_VILLAGE_DEMANDS
     let allMet = true
-    for (let d = 0; d < cfg.demands.length; d++) {
+    for (let d = 0; d < cfg.demands.length && d < MAX_VILLAGE_DEMANDS; d++) {
       const dem = cfg.demands[d]!
-      if (!consumeFromBuffer(store, b, dem.color, dem.need)) allMet = false
+      const ai = accBase + d
+      const acc = v.demandAcc[ai]! + dem.ratePerMin * VILLAGE_CADENCE
+      const due = Math.floor(acc / VILLAGE_TICKS_PER_MIN)
+      // Advance the clock by the whole units owed regardless of coverage (bounded — no runaway debt).
+      v.demandAcc[ai] = acc - due * VILLAGE_TICKS_PER_MIN
+      if (due > 0) {
+        // A unit fell due this cadence: draw it, and a shortfall is a miss.
+        if (!consumeFromBuffer(store, b, dem.color, due)) allMet = false
+      } else if (dem.ratePerMin > 0 && villageBufferAmount(store, b, dem.color) === 0) {
+        // Nothing due yet, but an empty buffer of a demanded good is a starved miss — otherwise a
+        // low rate (whole units due only every few cadences) would look satisfied while starving.
+        allMet = false
+      }
     }
     if (allMet) {
       v.declineTimer[i] = 0
@@ -960,10 +1057,12 @@ function updateVillages(state: GameState): void {
       v.stage[i] = v.stage[i]! + 1
       v.growthTimer[i] = 0
       v.declineTimer[i] = 0
+      resetDemandAcc(v, i)
     } else if (v.declineTimer[i]! >= VILLAGE_DECLINE_AFTER && v.stage[i]! > 0) {
       v.stage[i] = v.stage[i]! - 1
       v.growthTimer[i] = 0
       v.declineTimer[i] = 0
+      resetDemandAcc(v, i)
     }
   }
 }
@@ -1212,15 +1311,19 @@ function stepBelts(
     const b = portBuilding[t]!
     if (b === NONE) continue
     const eid = slot[t]!
+    const color = Renderable.color[eid]!
+    // A filtered input only ingests colours its whitelist/blacklist admits; a rejected item stays
+    // put and backs the belt up (same as an unaccepted resource) so the player can sort a mixed line.
+    if (!portFilterPasses(g, t, color)) continue
     // A depot is a wildcard treasury sink: any arriving item is banked by its colour (no slot,
     // no capacity), refilling the build-cost pool. Depots hold no stock, so this never blocks.
     if (store.depot[b]) {
-      depositTreasury(treasury, Renderable.color[eid]!, 1)
+      depositTreasury(treasury, color, 1)
       api.despawn(eid)
       slot[t] = NONE
       continue
     }
-    const k = findSlot(store, b, Renderable.color[eid]!)
+    const k = findSlot(store, b, color)
     if (k === NONE) continue
     const si = b * MAX_SLOTS + k
     if (store.slotCount[si]! >= store.slotCap[si]!) continue
@@ -1283,12 +1386,19 @@ function stepBelts(
  * craft cannot fire the timer holds at the cadence so it retries as soon as inputs arrive / room
  * frees. Runs every tick, independent of the belt move cadence; allocation-free.
  */
-function runCrafters(store: BuildingStore): void {
+function runCrafters(api: ModApi, store: BuildingStore): void {
   const n = store.count
   for (let b = 0; b < n; b++) {
-    if (!store.crafts[b]) continue
+    // A pure store (no recipe) never "works": make sure it carries no leftover active pulse
+    // (e.g. a crafter whose recipe was just cleared).
+    if (!store.crafts[b]) {
+      api.setActive(store.eid[b]!, false)
+      continue
+    }
     const timer = store.craftTimer[b]! + 1
     if (timer < store.craftEvery[b]!) {
+      // Mid-cycle: leave the active pulse as the last fire set it, so a working crafter keeps
+      // pulsing between cadence ticks instead of flickering.
       store.craftTimer[b] = timer
       continue
     }
@@ -1314,6 +1424,8 @@ function runCrafters(store: BuildingStore): void {
     if (!canCraft) {
       // Hold the timer at the cadence so we retry next tick without re-accumulating.
       store.craftTimer[b] = store.craftEvery[b]!
+      // Starved/backed-up: stop the working pulse so the machine reads as stalled.
+      api.setActive(store.eid[b]!, false)
       continue
     }
     store.craftTimer[b] = 0
@@ -1324,6 +1436,8 @@ function runCrafters(store: BuildingStore): void {
       if (store.slotRole[i]! & ROLE_DEPOSIT) store.slotCount[i] = store.slotCount[i]! - amt
       else store.slotCount[i] = store.slotCount[i]! + amt
     }
+    // Fired this cadence: mark it working. Stays set through the accumulation ticks above.
+    api.setActive(store.eid[b]!, true)
   }
 }
 
@@ -1350,7 +1464,7 @@ function extractFromOutputs(api: ModApi, g: BeltGrid, store: BuildingStore): voi
     if (slot[t] !== NONE) continue
     const b = portBuilding[t]!
     if (b === NONE) continue
-    const k = firstNonEmptySlot(store, b)
+    const k = firstDrainableForPort(store, b, g, t)
     if (k === NONE) continue
     const si = b * MAX_SLOTS + k
     store.slotCount[si] = store.slotCount[si]! - 1
@@ -1382,7 +1496,7 @@ function updateBelts(
     stepBelts(gw, api, g, store, treasury)
     g.moveCount++
   }
-  runCrafters(store)
+  runCrafters(api, store)
   extractFromOutputs(api, g, store)
 }
 
@@ -1573,6 +1687,10 @@ export interface BeltTileSnapshot {
   readonly portEvery: number
   readonly rr: number
   readonly period: number
+  /** Port colour-filter mode; absent in pre-filter saves → treated as FILTER_NONE. */
+  readonly filterMode?: number
+  /** Port filter colours (length {@link MAX_PORT_FILTER}); absent in pre-filter saves → no filter. */
+  readonly filterColor?: readonly number[]
 }
 
 /** The belt grid: its live tiles plus the mid-cadence move counters that pace them. */
@@ -1607,13 +1725,15 @@ export interface BuildingSnapshot {
   readonly slots: readonly SlotSnapshot[]
 }
 
-/** One village's anchor tile, current stage and growth/decline timers. */
+/** One village's anchor tile, current stage, growth/decline timers, and fractional-demand accumulators. */
 export interface VillageEntrySnapshot {
   readonly vx: number
   readonly vy: number
   readonly stage: number
   readonly growthTimer: number
   readonly declineTimer: number
+  /** Per-demand accumulators (length {@link MAX_VILLAGE_DEMANDS}) so consumption resumes exactly. */
+  readonly demandAcc: readonly number[]
 }
 
 /** The villages: the shared stage ladder, the cadence countdown, and the per-village entries. */
@@ -1666,6 +1786,9 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
   const g = state.grid
   const tiles: BeltTileSnapshot[] = []
   for (let t = 0; t < g.count; t++) {
+    const filterColor: number[] = []
+    for (let j = 0; j < MAX_PORT_FILTER; j++)
+      filterColor.push(g.filterColor[t * MAX_PORT_FILTER + j]!)
     tiles.push({
       tx: g.tx[t]!,
       ty: g.ty[t]!,
@@ -1676,6 +1799,8 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       portEvery: g.portEvery[t]!,
       rr: g.rr[t]!,
       period: g.period[t]!,
+      filterMode: g.filterMode[t]!,
+      filterColor,
     })
   }
 
@@ -1715,12 +1840,16 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
   const v = state.villages
   const entries: VillageEntrySnapshot[] = []
   for (let i = 0; i < v.count; i++) {
+    const demandAcc: number[] = []
+    for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++)
+      demandAcc.push(v.demandAcc[i * MAX_VILLAGE_DEMANDS + d]!)
     entries.push({
       vx: v.vx[i]!,
       vy: v.vy[i]!,
       stage: v.stage[i]!,
       growthTimer: v.growthTimer[i]!,
       declineTimer: v.declineTimer[i]!,
+      demandAcc,
     })
   }
 
@@ -1791,6 +1920,11 @@ export function loadGameState(
     g.portEvery[t] = tile.portEvery
     g.rr[t] = tile.rr
     g.period[t] = tile.period
+    g.filterMode[t] = tile.filterMode ?? FILTER_NONE
+    const fc = tile.filterColor
+    for (let j = 0; j < MAX_PORT_FILTER; j++) {
+      g.filterColor[t * MAX_PORT_FILTER + j] = fc && j < fc.length ? fc[j]! : FILTER_EMPTY
+    }
     const key = tileKey(tile.tx, tile.ty)
     g.trackEid[t] = trackByTile.get(key) ?? NONE
     g.markEid[t] = markByTile.get(key) ?? NONE
@@ -1853,7 +1987,7 @@ export function loadGameState(
   v.count = 0
   v.stages = snap.villages.stages.map((s) => ({
     population: s.population,
-    demands: s.demands.map((d) => ({ color: d.color, need: d.need })),
+    demands: s.demands.map((d) => ({ color: d.color, ratePerMin: d.ratePerMin })),
   }))
   for (let i = 0; i < snap.villages.entries.length; i++) {
     const entry = snap.villages.entries[i]!
@@ -1861,6 +1995,10 @@ export function loadGameState(
     v.stage[idx] = entry.stage
     v.growthTimer[idx] = entry.growthTimer
     v.declineTimer[idx] = entry.declineTimer
+    const acc = entry.demandAcc ?? []
+    for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++) {
+      v.demandAcc[idx * MAX_VILLAGE_DEMANDS + d] = acc[d] ?? 0
+    }
   }
   v.timer = snap.villages.timer
 
@@ -2078,6 +2216,21 @@ export interface SetActiveResearchCommand {
   readonly cost: readonly { readonly color: number; readonly amount: number }[]
 }
 
+/**
+ * Set (or clear) the colour filter on the port at tile (x, y). `mode` is FILTER_NONE (clear),
+ * FILTER_WHITELIST or FILTER_BLACKLIST; `colors` lists the filtered colours (up to
+ * {@link MAX_PORT_FILTER}; extras are ignored). A no-op if the tile is not an input/output port.
+ * An output port then drains only slots the filter admits, an input port ingests only such items —
+ * so a multi-output machine's products can be split onto separate belts, or a mixed line sorted.
+ */
+export interface SetPortFilterCommand {
+  readonly type: 'set_port_filter'
+  readonly x: number
+  readonly y: number
+  readonly mode: number
+  readonly colors: readonly number[]
+}
+
 export type GameCommand =
   | PlaceBuildingCommand
   | PlaceBeltCommand
@@ -2086,6 +2239,7 @@ export type GameCommand =
   | PlaceCrafterCommand
   | SetRecipeCommand
   | SetActiveResearchCommand
+  | SetPortFilterCommand
   | RemoveCommand
 
 /** Copy every per-tile field of the belt grid from index `src` to `dst` (swap-remove move). */
@@ -2099,6 +2253,10 @@ function copyTile(g: BeltGrid, src: number, dst: number): void {
   g.portTimer[dst] = g.portTimer[src]!
   g.portEvery[dst] = g.portEvery[src]!
   g.portBuilding[dst] = g.portBuilding[src]!
+  g.filterMode[dst] = g.filterMode[src]!
+  for (let j = 0; j < MAX_PORT_FILTER; j++) {
+    g.filterColor[dst * MAX_PORT_FILTER + j] = g.filterColor[src * MAX_PORT_FILTER + j]!
+  }
   g.rr[dst] = g.rr[src]!
   g.trackEid[dst] = g.trackEid[src]!
   g.markEid[dst] = g.markEid[src]!
@@ -2354,6 +2512,19 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         cmd.storageCap,
       )
       relinkUnlinkedPorts(g, state.buildings)
+      return
+    }
+    case 'set_port_filter': {
+      const t = tileAt(g, cmd.x, cmd.y)
+      if (t === NONE) return // no belt tile there
+      if (g.kind[t] !== KIND_OUTPUT && g.kind[t] !== KIND_INPUT) return // only ports carry a filter
+      const mode =
+        cmd.mode === FILTER_WHITELIST || cmd.mode === FILTER_BLACKLIST ? cmd.mode : FILTER_NONE
+      g.filterMode[t] = mode
+      const base = t * MAX_PORT_FILTER
+      for (let j = 0; j < MAX_PORT_FILTER; j++) {
+        g.filterColor[base + j] = j < cmd.colors.length ? cmd.colors[j]! : FILTER_EMPTY
+      }
       return
     }
     case 'set_active_research': {

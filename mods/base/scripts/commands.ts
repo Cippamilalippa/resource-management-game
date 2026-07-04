@@ -18,6 +18,7 @@ import type {
   PlaceCrafterCommand,
   SetRecipeCommand,
   SetActiveResearchCommand,
+  SetPortFilterCommand,
   RemoveCommand,
 } from './sim.ts'
 
@@ -49,6 +50,11 @@ export function enqueuePlaceCrafter(gw: GameWorld, cmd: Omit<PlaceCrafterCommand
 /** Queue a recipe (re)assignment for the crafter at (x, y) (applied next tick). */
 export function enqueueSetRecipe(gw: GameWorld, cmd: Omit<SetRecipeCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'set_recipe', ...cmd })
+}
+
+/** Queue a colour-filter (re)assignment for the port at (x, y) (applied next tick). */
+export function enqueueSetPortFilter(gw: GameWorld, cmd: Omit<SetPortFilterCommand, 'type'>): void {
+  enqueueCommand(gw, { type: 'set_port_filter', ...cmd })
 }
 
 /**

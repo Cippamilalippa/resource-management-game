@@ -171,16 +171,34 @@ world's seeded RNG), so mods keep their no-`Math.random` guarantee._
 
 ## M6 — Feedback & polish
 
-- [ ] Placement/removal, craft-tick, research-complete, and village-level SFX.
-- [ ] Visual juice: build/remove animations, active-crafter indicators, belt item motion.
-- [~] Camera: smooth pan/zoom, edge scroll, follow, minimap (reads sim only — never mutates).
+- [ ] Placement/removal, craft-tick, research-complete, and village-level SFX. _(Postponed.)_
+- [x] Visual juice: build/remove animations, active-crafter indicators, belt item motion.
+      _Entities pop in (ease scale+fade) on placement and dissolve out on removal, driven by a
+      wall-clock frame delta in the read-only [renderer.ts](../../packages/engine/render/renderer.ts)
+      (sim-independent, so determinism is untouched). Active crafters pulse a halo: the base
+      crafter flags "working" per entity via a new additive `ModApi.setActive`
+      ([modApi.ts](../../packages/engine/scripting/modApi.ts)) that writes a **transient**
+      `RenderHints.active` channel ([components.ts](../../packages/engine/core/components.ts)) —
+      never serialized or hashed, so it can't perturb saves (guarded by
+      [persistence.test.ts](../../packages/engine/tests/persistence.test.ts) and
+      [modApi.test.ts](../../packages/engine/tests/modApi.test.ts)). Belt item motion already
+      glides one tile per move-cycle via `beltMoveAlpha`._
+- [x] Camera: smooth pan/zoom, edge scroll, follow, minimap (reads sim only — never mutates).
       _Smooth eased zoom (target-tracked, focal-stable), screen-edge panning, and a follow/focus
       glide (F re-centers on the cursor tile) landed in [camera.ts](../../packages/engine/render/camera.ts),
       driven off the render ticker in [renderer.ts](../../packages/engine/render/renderer.ts) and gated
       by `renderer.edgeScroll` while a modal/menu is up. Covered by
       [camera.test.ts](../../packages/engine/tests/camera.test.ts) (the Camera stays pure — its only
       runtime dep is `@factory/shared`, so the pan/zoom/follow math is unit-tested without a GPU).
-      **Minimap still to come.**_
+      The **minimap** is a screen-space corner overview drawn each frame in the renderer from live
+      entity positions (a direct stage child, so the camera transform never moves it): every non-item
+      entity is plotted in its own colour with a live "you are here" viewport rectangle, and a
+      click/drag glides the camera there via the same eased follow as F. The projection math lives in a
+      pure [minimap.ts](../../packages/engine/render/minimap.ts) (aspect-preserving fit + forward/inverse
+      projection) alongside a pure `Camera.worldViewBounds()`, both unit-tested without a GPU
+      ([minimap.test.ts](../../packages/engine/tests/minimap.test.ts),
+      [camera.test.ts](../../packages/engine/tests/camera.test.ts)); the app gates `renderer.minimap`
+      with the same phase/menu rule as edge-scroll._
 - [ ] Icon/art pass for the expanded content set (build on `iconTextures` / `buildIcons`).
 
 ## M7 — Balancing & playtest harness (gates the slice)

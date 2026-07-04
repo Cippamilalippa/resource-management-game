@@ -27,7 +27,6 @@ import {
   terrainTypeOf,
   registerBuilding,
   registerVillage,
-  villageDemandNeed,
   depositTreasury,
   MAX_SLOTS,
   TERRAIN_SPRITE,
@@ -204,8 +203,9 @@ function acceptSlotsOf(
 
 /**
  * Parse a village prototype's `stages` into the sim's stage ladder: each stage's `demands`
- * (item id + `ratePerMin`) become {@link VillageDemand}s with the demanded item's colour and the
- * integer per-cadence amount. Returns an empty ladder for a building with no stages.
+ * (item id + `ratePerMin`) become {@link VillageDemand}s with the demanded item's colour and its
+ * authored per-minute rate (honoured exactly by the sim's fractional accumulator, not pre-rounded).
+ * Returns an empty ladder for a building with no stages.
  */
 function villageStagesOf(
   getProto: (id: string) => SceneProto | undefined,
@@ -221,7 +221,7 @@ function villageStagesOf(
       const item = getProto(String(dem.item))
       return {
         color: typeof item?.color === 'number' ? item.color : 0xffffff,
-        need: villageDemandNeed(typeof dem.ratePerMin === 'number' ? dem.ratePerMin : 0),
+        ratePerMin: typeof dem.ratePerMin === 'number' ? dem.ratePerMin : 0,
       }
     })
     return { population: typeof s.population === 'number' ? s.population : 0, demands }

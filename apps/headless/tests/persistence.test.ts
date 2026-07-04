@@ -95,6 +95,9 @@ describe('full-sim save/load round-trip', () => {
     const lab = buildingAt(src.state.buildings, 40, 40)
     expect(src.state.research.completed).toContain(SMELTING) // 40 of 200 packs drained
     expect(src.state.buildings.slotCount[lab * MAX_SLOTS]).toBe(160)
+    // ...including a mid-accrual village demand accumulator (the fractional-demand state), so the
+    // round-trip above genuinely exercises it rather than round-tripping all-zero accumulators.
+    expect(src.state.villages.demandAcc.some((x) => x !== 0)).toBe(true)
   })
 })
 
