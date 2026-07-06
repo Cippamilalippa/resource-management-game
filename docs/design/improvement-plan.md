@@ -178,12 +178,16 @@ The plan below is ordered around fixing those five things.
       (was explicitly left as an extension).
 - [ ] **Q2. Copy/paste machine settings.** S — Shift+Q copies recipe already; extend to
       port filters (noted as a later extension in the roadmap) and cannon targets.
-- [ ] **Q3. Save slot thumbnails + play-time.** S — Capture a downscaled canvas screenshot
+- [x] **Q3. Save slot thumbnails + play-time.** S — _Shipped: canvas-captured JPEG + h:mm
+      play time in every slot, additive save meta (old saves fine)._ Capture a downscaled canvas screenshot
       into the save envelope meta; show in `SaveMenu`.
-- [ ] **Q4. "Where is it used / made?"** S — Click any item anywhere (treasury bar,
+- [x] **Q4. "Where is it used / made?"** S — _Shipped: clickable resource labels
+      (treasury/inspector/recipe rows) open the encyclopedia split into produces/consumes._ Click any item anywhere (treasury bar,
       inspector, alerts) → encyclopedia filtered to recipes producing/consuming it.
-- [ ] **Q5. Undo depth indicator + history panel.** S — The stack exists; show it.
-- [ ] **Q6. Pause-on-menu-blur / focus safety.** S — Pause when the window loses focus
+- [x] **Q5. Undo depth indicator + history panel.** S — _Shipped: undo/redo toast with
+      remaining depth + hoverable recent-steps panel._ The stack exists; show it.
+- [x] **Q6. Pause-on-menu-blur / focus safety.** S — _Shipped with X1 (settings toggle;
+      only lifts a pause it set itself)._ Pause when the window loses focus
       (optional, X1 setting).
 
 ## 7. Presentation — art, audio, juice
