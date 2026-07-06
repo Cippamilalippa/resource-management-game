@@ -6,7 +6,13 @@ import {
   minimapToWorld,
   inMinimap,
   padBounds,
+  mapBaseScale,
+  mapScale,
+  projectToMap,
+  mapToWorld,
+  zoomMapAround,
   type WorldBounds,
+  type MapView,
 } from '../render/minimap.ts'
 
 describe('minimapPanel', () => {
@@ -83,5 +89,82 @@ describe('padBounds', () => {
   it('grows the bounds by pad on every side', () => {
     const b: WorldBounds = { minX: 0, minY: 0, maxX: 10, maxY: 10 }
     expect(padBounds(b, 5)).toEqual({ minX: -5, minY: -5, maxX: 15, maxY: 15 })
+  })
+})
+
+describe('full-screen map projection', () => {
+  const panel = { x: 0, y: 0, w: 200, h: 200 }
+  const world: WorldBounds = { minX: 0, minY: 0, maxX: 100, maxY: 100 }
+
+  it('base scale is the aspect fit of the world into the panel', () => {
+    // 100 world px into 200 panel px → 2×.
+    expect(mapBaseScale(world, panel)).toBe(2)
+  })
+
+  it('effective scale multiplies the base fit by the map zoom', () => {
+    expect(mapScale(world, panel, { focusX: 0, focusY: 0, zoom: 3 })).toBe(6)
+    expect(mapScale(world, panel, { focusX: 0, focusY: 0, zoom: 0.5 })).toBe(1)
+  })
+
+  it('projects the focus point to the panel centre', () => {
+    const view: MapView = { focusX: 40, focusY: 60, zoom: 1 }
+    expect(projectToMap(40, 60, world, panel, view)).toEqual({ x: 100, y: 100 })
+  })
+
+  it('scales offsets from the focus by the effective scale', () => {
+    // focus at (50,50), zoom 2 → base 2 × zoom 2 = 4 px per world px.
+    const view: MapView = { focusX: 50, focusY: 50, zoom: 2 }
+    expect(projectToMap(60, 50, world, panel, view)).toEqual({ x: 100 + 10 * 4, y: 100 })
+  })
+
+  it('round-trips project → inverse for an off-centre point at a non-unit zoom', () => {
+    const view: MapView = { focusX: 20, focusY: 70, zoom: 2.5 }
+    const wp = { x: 33, y: 88 }
+    const sp = projectToMap(wp.x, wp.y, world, panel, view)
+    const back = mapToWorld(sp.x, sp.y, world, panel, view)
+    expect(back.x).toBeCloseTo(wp.x, 6)
+    expect(back.y).toBeCloseTo(wp.y, 6)
+  })
+
+  it('does not clamp the inverse to the world bounds (the map pans freely)', () => {
+    const view: MapView = { focusX: 50, focusY: 50, zoom: 1 }
+    // A point far outside the panel maps past the world bounds, unlike the clamped minimap.
+    const wp = mapToWorld(-400, -400, world, panel, view)
+    expect(wp.x).toBeLessThan(world.minX)
+    expect(wp.y).toBeLessThan(world.minY)
+  })
+})
+
+describe('zoomMapAround', () => {
+  const panel = { x: 0, y: 0, w: 200, h: 200 }
+  const world: WorldBounds = { minX: 0, minY: 0, maxX: 100, maxY: 100 }
+
+  it('keeps the world point under the anchor fixed while zooming in', () => {
+    const view: MapView = { focusX: 50, focusY: 50, zoom: 1 }
+    const anchor = { x: 30, y: 160 }
+    const before = mapToWorld(anchor.x, anchor.y, world, panel, view)
+    const next = zoomMapAround(anchor.x, anchor.y, world, panel, view, 2, 0.25, 8)
+    expect(next.zoom).toBe(2)
+    const after = mapToWorld(anchor.x, anchor.y, world, panel, next)
+    expect(after.x).toBeCloseTo(before.x, 6)
+    expect(after.y).toBeCloseTo(before.y, 6)
+  })
+
+  it('clamps the zoom to [minZoom, maxZoom] and pins the anchor at the clamp', () => {
+    const view: MapView = { focusX: 50, focusY: 50, zoom: 7 }
+    const anchor = { x: 200, y: 0 }
+    const before = mapToWorld(anchor.x, anchor.y, world, panel, view)
+    // A ×4 request past maxZoom 8 clamps to 8.
+    const next = zoomMapAround(anchor.x, anchor.y, world, panel, view, 4, 0.25, 8)
+    expect(next.zoom).toBe(8)
+    const after = mapToWorld(anchor.x, anchor.y, world, panel, next)
+    expect(after.x).toBeCloseTo(before.x, 6)
+    expect(after.y).toBeCloseTo(before.y, 6)
+  })
+
+  it('a no-op factor (past the max) leaves the focus unchanged', () => {
+    const view: MapView = { focusX: 12, focusY: 34, zoom: 8 }
+    const next = zoomMapAround(100, 100, world, panel, view, 2, 0.25, 8)
+    expect(next).toEqual(view)
   })
 })

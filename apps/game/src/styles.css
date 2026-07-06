@@ -233,6 +233,10 @@ input:focus-visible,
   color: var(--text);
   border-color: var(--accent, #66ccff);
 }
+/* Full-screen map toggle — shares .overlay-btn styling, sits one slot left of Status. */
+.map-btn {
+  right: 328px;
+}
 
 /* ── Recipe encyclopedia ─────────────────────────────────────────────────── */
 .enc-btn {

@@ -10,6 +10,7 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
       ['Screen edge', 'Pan'],
       ['Scroll', 'Zoom'],
       ['F', 'Focus on cursor'],
+      ['M', 'Full-screen map'],
     ],
   },
   {
@@ -32,7 +33,7 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
     keys: [
       ['Space', 'Pause'],
       ['[  /  ]', 'Speed down / up'],
-      ['M', 'Mute / unmute sound'],
+      ['Shift+M', 'Mute / unmute sound'],
     ],
   },
   {

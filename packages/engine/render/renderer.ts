@@ -8,8 +8,13 @@ import {
   minimapToWorld,
   inMinimap,
   padBounds,
+  mapScale,
+  projectToMap,
+  mapToWorld,
+  zoomMapAround,
   type MinimapRect,
   type WorldBounds,
+  type MapView,
 } from './minimap.ts'
 
 /**
@@ -37,6 +42,12 @@ const GHOST_INVALID = 0xff5555
 const SPAWN_MS = 160
 /** Duration (ms) of the scale+fade dissolve when an entity is removed. */
 const REMOVE_MS = 150
+
+/** Zoom clamp for the full-screen map view (a factor on the aspect-fit base scale). */
+const MAP_ZOOM_MIN = 0.4
+const MAP_ZOOM_MAX = 12
+/** Padding (world px) around the plotted content when framing the full-screen map. */
+const MAP_PADDING = TILE_SIZE * 4
 
 /**
  * Top-of-panel silhouette motifs a building glyph can wear so different *kinds* of structure read
@@ -198,6 +209,30 @@ export class Renderer {
    */
   minimap = true
   /**
+   * Full-screen map view (Factorio's M), a direct stage child drawn over the (hidden) world. Its
+   * own focus+zoom {@link MapView} is independent of the world camera, so leaving map mode returns
+   * the player exactly where the camera was. Toggled via {@link setMapMode}; redrawn each frame from
+   * live entity positions while on. The last panel/world used, cached to hit-test pointer gestures.
+   */
+  #mapLayer = new Graphics()
+  /** Hover-coordinate readout (tile under the cursor) shown while the map is up. */
+  #mapText = new Text({
+    text: '',
+    style: { fill: 0xdfe6f2, fontSize: 13, fontFamily: 'monospace', fontWeight: 'bold' },
+  })
+  #mapMode = false
+  #mapView: MapView = { focusX: 0, focusY: 0, zoom: 1 }
+  /** True until the first draw after entering map mode centres the view on the plotted world. */
+  #mapInit = false
+  #mapPanel: MinimapRect | null = null
+  #mapWorld: WorldBounds | null = null
+  /**
+   * Last status-overlay marks handed in via {@link setStatusOverlay}. Stored (not just drawn into
+   * the world layer) so the full-screen map can re-plot the same trouble spots at map scale — the
+   * engine stays generic: it only draws the coloured markers the app supplies.
+   */
+  #statusMarks: readonly StatusMark[] | null = null
+  /**
    * Optional per-entity overlay glyph, keyed by the entity's packed `color`. The engine stays
    * game-agnostic: the app supplies whatever textures it likes (here, the build-bar lucide
    * icon rasterized per building/producer colour) via {@link setIcons}; the renderer just draws
@@ -281,6 +316,11 @@ export class Renderer {
     this.#app.stage.addChild(this.#world)
     // The minimap lives on the stage (not #world) so it stays fixed to the screen corner.
     this.#app.stage.addChild(this.#minimapLayer)
+    // The full-screen map (and its coordinate readout) draw over everything, in screen space too.
+    this.#mapLayer.visible = false
+    this.#mapText.visible = false
+    this.#app.stage.addChild(this.#mapLayer)
+    this.#app.stage.addChild(this.#mapText)
     this.#camera = new Camera(this.#world)
     this.#drawGrid()
     this.#camera.centerOn(0, 0, app.screen.width, app.screen.height)
@@ -433,7 +473,9 @@ export class Renderer {
       if (d.icon) d.icon.alpha = a
     }
 
-    this.#drawMinimap(gw)
+    // The full-screen map replaces the corner minimap while it is up (the world layer is hidden).
+    if (this.#mapMode) this.#drawMap(gw)
+    else this.#drawMinimap(gw)
   }
 
   /**
@@ -522,6 +564,186 @@ export class Renderer {
     const point = minimapToWorld(px, py, world, panel)
     this.#camera.follow(() => point)
     return true
+  }
+
+  /**
+   * Enter (or leave) the full-screen map view. On entry the world layer and the corner minimap hide
+   * and the map draws over the whole viewport from live entity positions; the map's own focus+zoom
+   * is independent of the world camera, so on exit the world reappears exactly where the camera was
+   * (or where a click-to-glide sent it). A pure view toggle — it never mutates the sim. The first
+   * draw after entry centres the view on the plotted world (see {@link #drawMap}).
+   */
+  setMapMode(on: boolean): void {
+    if (this.#mapMode === on) return
+    this.#mapMode = on
+    this.#world.visible = !on
+    this.#mapLayer.visible = on
+    this.#minimapLayer.visible = !on
+    this.#mapText.visible = false
+    if (on) {
+      this.#mapInit = true
+      this.#mapView = { focusX: 0, focusY: 0, zoom: 1 }
+    } else {
+      this.#mapLayer.clear()
+      this.#mapPanel = null
+      this.#mapWorld = null
+    }
+  }
+
+  /** Whether the full-screen map view is currently up. */
+  get mapMode(): boolean {
+    return this.#mapMode
+  }
+
+  /**
+   * Redraw the full-screen map from live entity positions: a dimmed backdrop, every (non-item)
+   * entity plotted as a chunky rect in its own colour (bigger than the minimap's dots), the
+   * app-supplied status-overlay markers scaled up so trouble spots read at map scale, the world
+   * camera's current viewport as a "you are here" rectangle, and the tile coordinate under the
+   * cursor. Read-only — like the rest of the renderer it never mutates the sim. The panel + world
+   * bounds are cached so a pointer gesture can be mapped back to a world point.
+   */
+  #drawMap(gw: GameWorld): void {
+    const g = this.#mapLayer
+    g.clear()
+    this.#mapPanel = null
+    this.#mapWorld = null
+    this.#mapText.visible = false
+
+    const panel: MinimapRect = { x: 0, y: 0, w: this.#app.screen.width, h: this.#app.screen.height }
+    // Dimmed backdrop over the hidden world.
+    g.rect(0, 0, panel.w, panel.h)
+    g.fill({ color: 0x0b0d14, alpha: 0.92 })
+
+    const { Position, Renderable } = gw.components
+    const ents = renderableEntities(gw)
+    // Pass 1: world-pixel bounds over the plotted set (skip transient belt items, shape 1).
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (let i = 0; i < ents.length; i++) {
+      const eid = ents[i]!
+      if (Renderable.sprite[eid]! >> 2 === 1) continue
+      const x = Position.x[eid]! * TILE_SIZE
+      const y = Position.y[eid]! * TILE_SIZE
+      const w = Renderable.width[eid]! * TILE_SIZE
+      const h = Renderable.height[eid]! * TILE_SIZE
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x + w > maxX) maxX = x + w
+      if (y + h > maxY) maxY = y + h
+    }
+    if (!Number.isFinite(minX)) return
+    const world = padBounds({ minX, minY, maxX, maxY }, MAP_PADDING)
+
+    // On the first frame after entering map mode, centre the view on the plotted world (zoom 1 fits
+    // it edge-to-edge, Factorio-style); subsequent frames keep the player's own pan/zoom.
+    if (this.#mapInit) {
+      this.#mapView = {
+        focusX: (world.minX + world.maxX) / 2,
+        focusY: (world.minY + world.maxY) / 2,
+        zoom: 1,
+      }
+      this.#mapInit = false
+    }
+    const view = this.#mapView
+    const s = mapScale(world, panel, view)
+    this.#mapPanel = panel
+    this.#mapWorld = world
+
+    // Pass 2: plot each non-item entity as a chunky rect in its own colour (its footprint, floored
+    // to a readable minimum so a single tile never vanishes).
+    const minPlot = 4
+    for (let i = 0; i < ents.length; i++) {
+      const eid = ents[i]!
+      if (Renderable.sprite[eid]! >> 2 === 1) continue
+      const p = projectToMap(
+        Position.x[eid]! * TILE_SIZE,
+        Position.y[eid]! * TILE_SIZE,
+        world,
+        panel,
+        view,
+      )
+      const pw = Math.max(minPlot, Renderable.width[eid]! * TILE_SIZE * s)
+      const ph = Math.max(minPlot, Renderable.height[eid]! * TILE_SIZE * s)
+      g.rect(p.x, p.y, pw, ph)
+      g.fill(Renderable.color[eid]!)
+    }
+
+    // App-supplied status markers (alert tints), scaled up so trouble spots read at map scale.
+    const marks = this.#statusMarks
+    if (marks) {
+      for (let i = 0; i < marks.length; i++) {
+        const m = marks[i]!
+        const p = projectToMap(m.x * TILE_SIZE, m.y * TILE_SIZE, world, panel, view)
+        const mw = Math.max(10, (m.w ?? 1) * TILE_SIZE * s)
+        const mh = Math.max(10, (m.h ?? 1) * TILE_SIZE * s)
+        g.rect(p.x, p.y, mw, mh)
+        g.fill({ color: m.color, alpha: 0.35 })
+        g.stroke({ width: 2, color: m.color, alpha: 0.95 })
+      }
+    }
+
+    // The world camera's current viewport as a "you are here" rectangle.
+    const vb = this.#camera.worldViewBounds()
+    const a = projectToMap(vb.minX, vb.minY, world, panel, view)
+    const b = projectToMap(vb.maxX, vb.maxY, world, panel, view)
+    g.rect(a.x, a.y, b.x - a.x, b.y - a.y)
+    g.stroke({ width: 2, color: 0xffffff, alpha: 0.9 })
+
+    // Hover coordinate readout: the tile under the cursor, tracked next to it.
+    if (this.#pointerInside) {
+      const rect = this.#app.canvas.getBoundingClientRect()
+      const px = this.#lastClientX - rect.left
+      const py = this.#lastClientY - rect.top
+      const wp = mapToWorld(px, py, world, panel, view)
+      this.#mapText.text = `${Math.floor(wp.x / TILE_SIZE)}, ${Math.floor(wp.y / TILE_SIZE)}`
+      this.#mapText.position.set(px + 14, py + 14)
+      this.#mapText.visible = true
+    }
+  }
+
+  /** Pan the map focus by a screen-space drag delta (world moves with the cursor). */
+  #panMap(dxScreen: number, dyScreen: number): void {
+    const panel = this.#mapPanel
+    const world = this.#mapWorld
+    if (!panel || !world) return
+    const s = mapScale(world, panel, this.#mapView)
+    this.#mapView = {
+      focusX: this.#mapView.focusX - dxScreen / s,
+      focusY: this.#mapView.focusY - dyScreen / s,
+      zoom: this.#mapView.zoom,
+    }
+  }
+
+  /** Zoom the map around a client-space cursor point (independent of the world camera zoom). */
+  #zoomMap(clientX: number, clientY: number, deltaY: number): void {
+    const panel = this.#mapPanel
+    const world = this.#mapWorld
+    if (!panel || !world) return
+    const rect = this.#app.canvas.getBoundingClientRect()
+    const factor = deltaY < 0 ? 1.15 : 1 / 1.15
+    this.#mapView = zoomMapAround(
+      clientX - rect.left,
+      clientY - rect.top,
+      world,
+      panel,
+      this.#mapView,
+      factor,
+      MAP_ZOOM_MIN,
+      MAP_ZOOM_MAX,
+    )
+  }
+
+  /** Glide the world camera to the world point under a map click (the same eased follow as F). */
+  #mapClickGlide(clientX: number, clientY: number): void {
+    const panel = this.#mapPanel
+    const world = this.#mapWorld
+    if (!panel || !world) return
+    const rect = this.#app.canvas.getBoundingClientRect()
+    const point = mapToWorld(clientX - rect.left, clientY - rect.top, world, panel, this.#mapView)
+    this.#camera.follow(() => point)
   }
 
   /**
@@ -657,6 +879,8 @@ export class Renderer {
    * selectors; the renderer never mutates sim state.
    */
   setStatusOverlay(marks: readonly StatusMark[] | null): void {
+    // Stash the marks so the full-screen map can re-plot the same trouble spots at map scale.
+    this.#statusMarks = marks
     const g = this.#overlayLayer
     g.clear()
     if (!marks) return
@@ -939,6 +1163,13 @@ export class Renderer {
     let pressed = false
     // A press that began on the minimap drives camera navigation, not a placement gesture.
     let minimapPanning = false
+    // Full-screen-map gesture state: whether a press is down, whether it has moved (a drag pans the
+    // map focus; a press+release without movement is a click that glides the camera), and the last
+    // pointer position for the per-move drag delta.
+    let mapPressed = false
+    let mapMoved = false
+    let mapPrevX = 0
+    let mapPrevY = 0
 
     const tileAt = (clientX: number, clientY: number): GridCoord => {
       const rect = canvas.getBoundingClientRect()
@@ -950,6 +1181,14 @@ export class Renderer {
     canvas.addEventListener('pointerdown', (e) => {
       // Only the left button drives placement gestures; the right button cancels (below).
       if (e.button !== 0) return
+      // In the full-screen map, a press begins either a drag-pan or (if it doesn't move) a click.
+      if (this.#mapMode) {
+        mapPressed = true
+        mapMoved = false
+        mapPrevX = e.clientX
+        mapPrevY = e.clientY
+        return
+      }
       // A click on the minimap glides the camera there instead of placing.
       if (this.#minimapNav(e.clientX, e.clientY)) {
         minimapPanning = true
@@ -964,6 +1203,14 @@ export class Renderer {
       if (this.onCancel) this.onCancel()
     })
     globalThis.addEventListener('pointerup', (e) => {
+      // Map gesture: a press+release that never moved is a click → glide the camera there.
+      if (this.#mapMode) {
+        if (mapPressed) {
+          mapPressed = false
+          if (!mapMoved) this.#mapClickGlide(e.clientX, e.clientY)
+        }
+        return
+      }
       if (minimapPanning) {
         minimapPanning = false
         return
@@ -974,6 +1221,21 @@ export class Renderer {
     globalThis.addEventListener('pointermove', (e) => {
       this.#lastClientX = e.clientX
       this.#lastClientY = e.clientY
+      // In the full-screen map, a held drag pans the map focus (the coordinate readout follows in
+      // #drawMap); a bare move just re-aims the readout. Placement/hover are suppressed entirely.
+      if (this.#mapMode) {
+        if (mapPressed) {
+          const dx = e.clientX - mapPrevX
+          const dy = e.clientY - mapPrevY
+          mapPrevX = e.clientX
+          mapPrevY = e.clientY
+          if (dx !== 0 || dy !== 0) {
+            mapMoved = true
+            this.#panMap(dx, dy)
+          }
+        }
+        return
+      }
       // Dragging on the minimap keeps re-aiming the camera; skip placement/hover.
       if (minimapPanning) {
         this.#minimapNav(e.clientX, e.clientY)
@@ -990,6 +1252,12 @@ export class Renderer {
       'wheel',
       (e) => {
         e.preventDefault()
+        // In the full-screen map the wheel zooms the MAP scale around the cursor (a factor on the
+        // fit, independent of the world camera zoom), never the world.
+        if (this.#mapMode) {
+          this.#zoomMap(e.clientX, e.clientY, e.deltaY)
+          return
+        }
         // Let the app claim the wheel first (e.g. rotate an armed port instead of zooming). It
         // returns true when it handled the scroll; otherwise fall through to camera zoom.
         if (this.onWheel?.(e.deltaY)) return
