@@ -148,6 +148,30 @@ export interface StatusMark {
 }
 
 /**
+ * One detail-overlay annotation ("alt-mode"): what to stamp over an object's footprint so the
+ * whole factory reads at a glance. Purely declarative — the engine stays game-agnostic: the app
+ * decides which tiles to annotate and *what* each shows; the renderer just draws it.
+ *
+ * - `iconColor` resolves through the same icon-texture map {@link Renderer.setIcons} installs, so a
+ *   crafter's product glyph is drawn centred + enlarged over its footprint (reusing the app's
+ *   textures — the renderer owns none of them).
+ * - `chips` draws a small centred row of colour squares (e.g. a port's filter colours).
+ * - `warn` outlines the footprint and stamps an alert glyph (e.g. an unconfigured machine).
+ */
+export interface DetailMark {
+  readonly x: number
+  readonly y: number
+  readonly w: number
+  readonly h: number
+  /** Colour whose registered icon texture is drawn centred + enlarged over the footprint. */
+  readonly iconColor?: number
+  /** Colour chips drawn in a centred row (unused slots omitted by the caller). */
+  readonly chips?: readonly number[]
+  /** Alert colour: outlines the footprint and stamps an exclamation glyph. */
+  readonly warn?: number
+}
+
+/**
  * Read-only PixiJS renderer. It NEVER mutates sim state — every frame it reads the
  * Position/Renderable component arrays and draws colored-rectangle placeholders,
  * interpolating between the previous and current tick using `alpha`.
@@ -163,6 +187,11 @@ export class Renderer {
   #ghostLayer = new Graphics()
   #highlightLayer = new Graphics()
   #overlayLayer = new Graphics()
+  /** Detail-overlay ("alt-mode") chips + warn rings — one clear+redraw per {@link setDetailOverlay}. */
+  #detailLayer = new Graphics()
+  /** Detail-overlay product-icon sprites; a pool reused by index (see {@link setDetailOverlay}). */
+  #detailIconLayer = new Container()
+  #detailIcons: Sprite[] = []
   /** A small readout drawn at a ghost line's end (e.g. a drag length). Hidden unless a label is set. */
   #ghostLabel = new Text({
     text: '',
@@ -277,6 +306,8 @@ export class Renderer {
     this.#world.addChild(this.#ghostLayer)
     this.#world.addChild(this.#highlightLayer)
     this.#world.addChild(this.#overlayLayer)
+    this.#world.addChild(this.#detailLayer)
+    this.#world.addChild(this.#detailIconLayer)
     this.#ghostLabel.visible = false
     this.#ghostLabel.zIndex = 10
     this.#world.addChild(this.#ghostLabel)
@@ -673,6 +704,82 @@ export class Renderer {
   }
 
   /**
+   * Show (or clear, with `null`) the detail overlay ("alt-mode"): per-object annotations drawn in
+   * world space so they scale with zoom, making the whole factory legible at a glance. The app
+   * supplies the marks from read-only selectors (see {@link DetailMark}); the renderer resolves each
+   * `iconColor` through the same texture map {@link setIcons} installs and stamps it centred +
+   * enlarged, draws any `chips` as a colour row, and rings any `warn` footprint. Product-icon sprites
+   * are pooled and reused by index (mirroring {@link #iconSprites}); chips + rings are one Graphics
+   * redraw. A pure read — it never mutates sim state.
+   */
+  setDetailOverlay(marks: readonly DetailMark[] | null): void {
+    const g = this.#detailLayer
+    g.clear()
+    const icons = this.#detailIcons
+    if (!marks) {
+      for (let i = 0; i < icons.length; i++) icons[i]!.visible = false
+      return
+    }
+    let used = 0 // next free pooled icon sprite
+    for (let i = 0; i < marks.length; i++) {
+      const m = marks[i]!
+      const fx = m.x * TILE_SIZE
+      const fy = m.y * TILE_SIZE
+      const fw = m.w * TILE_SIZE
+      const fh = m.h * TILE_SIZE
+      // Product glyph: reuse the app's registered icon textures, centred + enlarged on the footprint.
+      if (m.iconColor !== undefined) {
+        const tex = this.#iconTextures.get(m.iconColor)
+        if (tex) {
+          const size = Math.min(fw, fh) * 0.62
+          let icon = icons[used]
+          if (!icon) {
+            icon = new Sprite(tex)
+            icons[used] = icon
+            this.#detailIconLayer.addChild(icon)
+          } else if (icon.texture !== tex) {
+            icon.texture = tex
+          }
+          icon.setSize(size, size)
+          icon.position.set(fx + (fw - size) / 2, fy + (fh - size) / 2)
+          icon.visible = true
+          used++
+        }
+      }
+      // Filter chips: a centred row of colour squares on a dark backing plate for contrast.
+      if (m.chips && m.chips.length > 0) {
+        const n = m.chips.length
+        const cs = TILE_SIZE * 0.2
+        const gap = TILE_SIZE * 0.06
+        const row = n * cs + (n - 1) * gap
+        const sx = fx + (fw - row) / 2
+        const cy = fy + fh - cs - TILE_SIZE * 0.12
+        g.roundRect(sx - gap, cy - gap, row + gap * 2, cs + gap * 2, 3)
+        g.fill({ color: 0x000000, alpha: 0.45 })
+        for (let j = 0; j < n; j++) {
+          g.roundRect(sx + j * (cs + gap), cy, cs, cs, 2)
+          g.fill({ color: m.chips[j]!, alpha: 0.95 })
+          g.stroke({ width: 1, color: 0xffffff, alpha: 0.55 })
+        }
+      }
+      // Warn: ring the footprint and stamp an exclamation (bar + dot) — an unconfigured machine.
+      if (m.warn !== undefined) {
+        const inset = TILE_SIZE * 0.18
+        g.roundRect(fx + inset, fy + inset, fw - inset * 2, fh - inset * 2, 4)
+        g.stroke({ width: 2.5, color: m.warn, alpha: 0.9 })
+        const cx = fx + fw / 2
+        const topY = fy + fh / 2 - TILE_SIZE * 0.16
+        g.roundRect(cx - TILE_SIZE * 0.04, topY, TILE_SIZE * 0.08, TILE_SIZE * 0.2, 2)
+        g.fill({ color: m.warn, alpha: 0.95 })
+        g.circle(cx, topY + TILE_SIZE * 0.3, TILE_SIZE * 0.05)
+        g.fill({ color: m.warn, alpha: 0.95 })
+      }
+    }
+    // Retire any pooled icon sprites this refresh didn't use (kept for the next, hidden meanwhile).
+    for (let i = used; i < icons.length; i++) icons[i]!.visible = false
+  }
+
+  /**
    * Show (or clear, with `null`) the hover/selection outline over an object's footprint.
    * A hover is a faint outline; a pinned selection is bold with corner ticks. Purely a
    * visual read of sim state — it never mutates the world.
@@ -712,6 +819,7 @@ export class Renderer {
     this.#app.destroy(false, { children: true })
     this.#sprites.clear()
     this.#iconSprites.clear()
+    this.#detailIcons.length = 0
     this.#dying.clear()
     this.#spawnAnim.clear()
   }

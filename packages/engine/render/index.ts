@@ -8,5 +8,6 @@ export {
   type Ghost,
   type Highlight,
   type StatusMark,
+  type DetailMark,
 } from './renderer.ts'
 export { Camera, type WorldPoint } from './camera.ts'

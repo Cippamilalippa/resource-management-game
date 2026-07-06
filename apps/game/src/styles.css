@@ -233,6 +233,10 @@ input:focus-visible,
   color: var(--text);
   border-color: var(--accent, #66ccff);
 }
+/* Detail overlay ("alt-mode") toggle — shares .overlay-btn styling, sits one slot left of Status. */
+.detail-btn {
+  right: 328px;
+}
 
 /* ── Recipe encyclopedia ─────────────────────────────────────────────────── */
 .enc-btn {
