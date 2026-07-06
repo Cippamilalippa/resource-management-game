@@ -25,7 +25,8 @@
       "building.science_press",
       "recipe.science_press",
       "recipe.science_materials",
-      "building.lab"
+      "building.lab",
+      "building.belt_underground"
     ]
   },
   {

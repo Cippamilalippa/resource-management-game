@@ -82,6 +82,8 @@ function toolKind(type: string): { kind: BuildItem['kind']; port?: 'input' | 'ou
       return { kind: 'belt' }
     case 'splitter':
       return { kind: 'splitter' }
+    case 'underground':
+      return { kind: 'underground' }
     case 'output':
       return { kind: 'port', port: 'output' }
     case 'input':

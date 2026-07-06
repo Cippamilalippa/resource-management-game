@@ -15,6 +15,8 @@ import {
   KIND_OUTPUT,
   KIND_INPUT,
   KIND_SPLITTER,
+  KIND_UNDER_IN,
+  KIND_UNDER_OUT,
   MAX_SLOTS,
   ROLE_DEPOSIT,
   ROLE_DRAIN,
@@ -126,6 +128,10 @@ function beltKindName(kind: number): string {
       return 'Input port'
     case KIND_SPLITTER:
       return 'Splitter'
+    case KIND_UNDER_IN:
+      return 'Underground entrance'
+    case KIND_UNDER_OUT:
+      return 'Underground exit'
     default:
       return 'Conveyor belt'
   }
@@ -207,6 +213,29 @@ function describeBeltTile(
         footprint: { x, y, w: 1, h: 1 },
         stats,
       }
+    case KIND_UNDER_IN:
+    case KIND_UNDER_OUT: {
+      const isIn = kind === KIND_UNDER_IN
+      const p = grid.partner[t]!
+      const span = p >= 0 ? Math.abs(grid.tx[p]! - x) + Math.abs(grid.ty[p]! - y) : 0
+      stats.push(
+        { kind: 'text', label: 'Facing', value: DIR_NAMES[face] ?? '—' },
+        {
+          kind: 'text',
+          label: isIn ? 'Surfaces at' : 'Enters at',
+          value: p >= 0 ? `${grid.tx[p]!}, ${grid.ty[p]!}` : 'unpaired',
+        },
+        { kind: 'text', label: 'Span', value: `${span} tiles` },
+        carryingStat(world, grid.slot[t]!),
+      )
+      return {
+        title,
+        subtitle: `${isIn ? 'Underground entrance' : 'Underground exit'} · ${facing}`,
+        color,
+        footprint: { x, y, w: 1, h: 1 },
+        stats,
+      }
+    }
     default: {
       // Plain belt: speed in tiles/sec from the tile's move period.
       const period = grid.period[t]!

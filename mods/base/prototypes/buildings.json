@@ -147,6 +147,16 @@
     "buildCost": [{ "item": "item.aluminum", "amount": 2 }]
   },
   {
+    "id": "building.belt_underground",
+    "type": "underground",
+    "name": "Underground Belt",
+    "icon": "Route",
+    "size": { "w": 1, "h": 1 },
+    "color": 4171168,
+    "moveEvery": 60,
+    "buildCost": [{ "item": "item.aluminum", "amount": 4 }]
+  },
+  {
     "id": "building.mining_drill",
     "type": "crafter",
     "name": "Mining Drill",

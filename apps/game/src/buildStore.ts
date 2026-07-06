@@ -9,7 +9,7 @@
 export interface BuildItem {
   readonly id: string
   readonly name: string
-  readonly kind: 'building' | 'belt' | 'port' | 'splitter' | 'producer'
+  readonly kind: 'building' | 'belt' | 'port' | 'splitter' | 'underground' | 'producer'
   /** Which port a 'port' tool places; undefined for other kinds. */
   readonly port?: 'input' | 'output'
   /** Lucide icon name (PascalCase) from the prototype; UI falls back per-kind when absent. */

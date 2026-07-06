@@ -50,6 +50,25 @@ export const KIND_PLAIN = 0
 export const KIND_OUTPUT = 1
 export const KIND_INPUT = 2
 export const KIND_SPLITTER = 3
+/**
+ * Underground-belt caps. An *entrance* ({@link KIND_UNDER_IN}) swallows the item riding it and, in a
+ * single move-cycle, hands it to its paired *exit* ({@link KIND_UNDER_OUT}) up to
+ * {@link UNDERGROUND_MAX_SPAN} tiles ahead along the cap facing — carrying the line under whatever
+ * belts/buildings sit in the gap between them without touching them. The pairing is expressed purely
+ * through the neighbour table (an entrance's forward neighbour is wired to its exit in
+ * {@link rebuildTopology} from {@link BeltGrid.partner}), so the back-pressure in {@link stepBelts}
+ * works unchanged: the item only hops when the exit tile is free, and a blocked exit backs the
+ * entrance — and the belt behind it — up. The exit feeds its own facing neighbour like any belt tile.
+ */
+export const KIND_UNDER_IN = 4
+export const KIND_UNDER_OUT = 5
+
+/**
+ * Maximum tile distance (along the cap facing) an underground tunnel may span, entrance to exit.
+ * Exported so the placement UI can clamp the drag and reject an over-long span before enqueuing.
+ * A span of 1 is a degenerate adjacent pair; the useful range is 2..N (at least one covered gap tile).
+ */
+export const UNDERGROUND_MAX_SPAN = 6
 
 /**
  * Per-port colour filter. An output port drains only slots whose colour passes its filter (so a
@@ -96,6 +115,10 @@ const SHAPE_LAB = 8
 const SHAPE_DEPOT = 9
 const SHAPE_PRODUCER = 10
 const SHAPE_CANNON = 11
+// Underground-belt cap glyphs: a down-ramp (entrance, item descends) and an up-ramp (exit, item
+// rises), each oriented along the cap facing. Drawn by the engine as two more generic ramp glyphs.
+const SHAPE_UNDER_IN = 12
+const SHAPE_UNDER_OUT = 13
 function sprite(shape: number, orient: number): number {
   return shape * 4 + orient
 }
@@ -276,6 +299,13 @@ export interface BeltGrid {
   markEid: Int32Array
   /** Neighbour belt-tile id per direction: nbr[t*4 + d], or NONE. Rebuilt on placement. */
   nbr: Int32Array
+  /**
+   * Underground-cap pairing: the belt-tile id of the tile's tunnel partner, or NONE for an ordinary
+   * tile. An entrance ({@link KIND_UNDER_IN}) stores its exit, an exit ({@link KIND_UNDER_OUT}) its
+   * entrance (both directions, so removing either cap finds the other). {@link rebuildTopology} wires
+   * an entrance's forward neighbour to this partner, which is what carries the item under the gap.
+   */
+  partner: Int32Array
   /** Processing order (downstream tiles first). Rebuilt on placement. */
   order: Int32Array
   /** Per-tile move period in ticks — the belt tier's `moveEvery`. Set at placement. */
@@ -326,6 +356,7 @@ export function createBeltGrid(moveEvery: number): BeltGrid {
     trackEid: new Int32Array(cap).fill(NONE),
     markEid: new Int32Array(cap).fill(NONE),
     nbr: new Int32Array(cap * 4).fill(NONE),
+    partner: new Int32Array(cap).fill(NONE),
     order: new Int32Array(cap),
     period: new Int32Array(cap).fill(Math.max(1, moveEvery)),
     dueEvery: new Int32Array(cap).fill(1),
@@ -466,6 +497,7 @@ function ensureCapacity(g: BeltGrid, need: number): void {
   g.trackEid = grow(g.trackEid, next, NONE)
   g.markEid = grow(g.markEid, next, NONE)
   g.nbr = grow(g.nbr, next * 4, NONE)
+  g.partner = grow(g.partner, next, NONE)
   g.order = grow(g.order, next, 0)
   g.period = grow(g.period, next, 1)
   g.dueEvery = grow(g.dueEvery, next, 1)
@@ -564,11 +596,22 @@ function addOrAimTile(
  */
 function rebuildTopology(g: BeltGrid): void {
   const n = g.count
-  const { nbr, order } = g
+  const { nbr, order, kind, face, partner } = g
   for (let t = 0; t < n; t++) {
     for (let d = 0; d < 4; d++) {
       nbr[t * 4 + d] = tileAt(g, g.tx[t]! + DX[d]!, g.ty[t]! + DY[d]!)
     }
+  }
+
+  // Underground tunnels: rewrite each entrance's *forward* neighbour to its paired exit tile (an
+  // arbitrary edge the neighbour table already expresses), so the item hops entrance→exit in one
+  // move-cycle and skips the buildable gap tiles entirely. The exit keeps its physical neighbours,
+  // feeding whatever it faces like any belt. A cap with no valid partner (a transient during removal)
+  // dead-ends, which is safe — it simply carries nothing rather than teleporting into a wrong tile.
+  for (let t = 0; t < n; t++) {
+    if (kind[t] !== KIND_UNDER_IN) continue
+    const p = partner[t]!
+    nbr[t * 4 + face[t]!] = p !== NONE && p < n ? p : NONE
   }
 
   // out-degree over successor edges (PLAIN/OUTPUT -> faced neighbour; SPLITTER -> all
@@ -1906,6 +1949,12 @@ export interface BeltTileSnapshot {
   readonly portEvery: number
   readonly rr: number
   readonly period: number
+  /**
+   * Underground-cap partner tile id (a dense belt-tile index, which is stable across a round-trip
+   * since tiles are serialized and rebuilt in the same dense order). NONE for an ordinary tile;
+   * absent in pre-underground saves → treated as NONE (no tunnel).
+   */
+  readonly partner?: number
   /** Port colour-filter mode; absent in pre-filter saves → treated as FILTER_NONE. */
   readonly filterMode?: number
   /** Port filter colours (length {@link MAX_PORT_FILTER}); absent in pre-filter saves → no filter. */
@@ -2032,6 +2081,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       portEvery: g.portEvery[t]!,
       rr: g.rr[t]!,
       period: g.period[t]!,
+      partner: g.partner[t]!,
       filterMode: g.filterMode[t]!,
       filterColor,
     })
@@ -2139,7 +2189,13 @@ export function loadGameState(
     const key = tileKey(e.x, e.y)
     const shape = e.sprite >> 2 // sprite = shape * 4 + orient
     if (shape === SHAPE_BELT_ARROW) trackByTile.set(key, eid)
-    else if (shape === SHAPE_PORT_ARROW || shape === SHAPE_SPLITTER) markByTile.set(key, eid)
+    else if (
+      shape === SHAPE_PORT_ARROW ||
+      shape === SHAPE_SPLITTER ||
+      shape === SHAPE_UNDER_IN ||
+      shape === SHAPE_UNDER_OUT
+    )
+      markByTile.set(key, eid)
     else if (shape === SHAPE_CIRCLE) itemByTile.set(key, eid)
     else if (shape === SHAPE_TERRAIN) terrainByTile.set(key, eid)
     else footprintByTopLeft.set(key, eid) // building footprint
@@ -2162,6 +2218,7 @@ export function loadGameState(
     g.portEvery[t] = tile.portEvery
     g.rr[t] = tile.rr
     g.period[t] = tile.period
+    g.partner[t] = tile.partner ?? NONE
     g.filterMode[t] = tile.filterMode ?? FILTER_NONE
     const fc = tile.filterColor
     for (let j = 0; j < MAX_PORT_FILTER; j++) {
@@ -2378,6 +2435,33 @@ export interface PlaceSplitterCommand {
   readonly cost?: readonly CostEntry[]
 }
 
+/**
+ * Place an underground belt: a pair of caps carrying items under the gap between them. The
+ * *entrance* sits at (x, y); the *exit* at (ex, ey), which must lie `1..`{@link UNDERGROUND_MAX_SPAN}
+ * tiles ahead of the entrance along `dir` (both endpoints share one axis — the facing). Each cap is
+ * laid as a belt tile facing `dir`; the tiles between them are untouched and stay buildable, so a
+ * crossing belt in the gap works normally and never interacts with the tunnel. Rejected (nothing
+ * placed, nothing charged) unless the axis/span is valid and both endpoints are clear of buildings
+ * and of any non-plain belt tile (a plain belt already there is converted into the cap).
+ */
+export interface PlaceUndergroundCommand {
+  readonly type: 'place_underground'
+  /** Entrance tile. */
+  readonly x: number
+  readonly y: number
+  /** Exit tile — must be `1..UNDERGROUND_MAX_SPAN` tiles from the entrance along `dir`. */
+  readonly ex: number
+  readonly ey: number
+  /** Facing 0..3 (N,E,S,W): the direction from entrance to exit, and the way both caps carry items. */
+  readonly dir: number
+  /** Colour of the caps' belt tiles. */
+  readonly color: number
+  /** Per-tile move period in ticks (the belt tier's `moveEvery`); both caps share it. */
+  readonly moveEvery: number
+  /** Build cost charged once for the whole pair; the tunnel is dropped if unaffordable. Omitted = free. */
+  readonly cost?: readonly CostEntry[]
+}
+
 /** One resource flow of a crafter recipe: a resource colour and its per-craft amount. */
 export interface CraftFlow {
   readonly color: number
@@ -2544,6 +2628,7 @@ export type GameCommand =
   | PlaceBeltCommand
   | PlacePortCommand
   | PlaceSplitterCommand
+  | PlaceUndergroundCommand
   | PlaceCrafterCommand
   | PlaceCannonCommand
   | SetRecipeCommand
@@ -2573,6 +2658,7 @@ function copyTile(g: BeltGrid, src: number, dst: number): void {
   g.markEid[dst] = g.markEid[src]!
   g.period[dst] = g.period[src]!
   g.dueEvery[dst] = g.dueEvery[src]!
+  g.partner[dst] = g.partner[src]!
   // nbr/order are rebuilt by the caller, so they need not be copied here.
 }
 
@@ -2592,6 +2678,13 @@ function removeBeltTile(api: ModApi, g: BeltGrid, t: number): void {
     g.index.set(tileKey(g.tx[t]!, g.ty[t]!), t)
   }
   g.count--
+  // Swap-remove moved the tile at `last` into slot `t`; repoint any underground partner that pointed
+  // at `last` to its new index so tunnel pairings survive compaction (mirrors the port repoint in
+  // removeBuilding). A partner that pointed at the removed tile `t` is left stale — the caller (the
+  // remove handler) removes the partner cap in the same gesture, so it never survives to be used.
+  if (t !== last) {
+    for (let s = 0; s < g.count; s++) if (g.partner[s] === last) g.partner[s] = t
+  }
   rebuildTopology(g)
   recomputeCadence(g)
 }
@@ -2685,6 +2778,33 @@ function footprintClear(state: GameState, x: number, y: number, w: number, h: nu
     }
   }
   return true
+}
+
+/**
+ * Demote underground cap `p` back to a plain belt: drop its ramp overlay and clear its kind/partner.
+ * Used when its paired cap is removed — the tunnel breaks and the surviving end becomes an ordinary
+ * belt tile (its track arrow already shows the belt glyph, so only the overlay is dropped). The caller
+ * rebuilds topology afterwards, restoring the tile's forward neighbour to its physical neighbour.
+ */
+function demoteCapToBelt(api: ModApi, g: BeltGrid, p: number): void {
+  g.kind[p] = KIND_PLAIN
+  g.partner[p] = NONE
+  if (g.markEid[p] !== NONE) {
+    api.despawn(g.markEid[p]!)
+    g.markEid[p] = NONE
+  }
+}
+
+/**
+ * Whether tile (x, y) may host an underground cap: it must be clear of any building and of any belt
+ * tile that is NOT a plain belt (a port/splitter/existing cap). A plain belt already there is allowed
+ * — the placement converts it into the cap. Mirrored by the app-side placement ghost so the preview
+ * agrees with what the sim accepts. Off the hot path (one player placement).
+ */
+function undergroundEndpointClear(state: GameState, x: number, y: number): boolean {
+  if (buildingAt(state.buildings, x, y) !== NONE) return false
+  const t = tileAt(state.grid, x, y)
+  return t === NONE || state.grid.kind[t] === KIND_PLAIN
 }
 
 function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCommand): void {
@@ -2788,6 +2908,48 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         width: 1,
         height: 1,
       })
+      return
+    }
+    case 'place_underground': {
+      const dir = cmd.dir & 3
+      // The exit must lie a positive 1..MAX span ahead of the entrance along the facing axis — same
+      // axis, correct direction. This rejects off-axis, reversed and over-long spans before charging.
+      const span = Math.abs(cmd.ex - cmd.x) + Math.abs(cmd.ey - cmd.y)
+      if (span < 1 || span > UNDERGROUND_MAX_SPAN) return
+      if (cmd.x + DX[dir]! * span !== cmd.ex || cmd.y + DY[dir]! * span !== cmd.ey) return
+      // Both caps must sit on clear ground (or a plain belt, which is converted). Mid-tunnel tiles are
+      // never touched, so a crossing belt in the gap keeps working — that is the whole point.
+      if (!undergroundEndpointClear(state, cmd.x, cmd.y)) return
+      if (!undergroundEndpointClear(state, cmd.ex, cmd.ey)) return
+      if (!charge(state, cmd.cost)) return
+      const period = Math.max(1, cmd.moveEvery)
+      const inT = addOrAimTile(gw, api, g, cmd.x, cmd.y, dir, cmd.color, period)
+      const outT = addOrAimTile(gw, api, g, cmd.ex, cmd.ey, dir, cmd.color, period)
+      g.kind[inT] = KIND_UNDER_IN
+      g.kind[outT] = KIND_UNDER_OUT
+      // Pair both ways so removing either cap can find and drop the other (see the remove handler).
+      g.partner[inT] = outT
+      g.partner[outT] = inT
+      // Stamp the ramp glyph on each cap (over the belt-arrow backdrop the track entity draws),
+      // mirroring how a port overlays its arrow; drop any overlay left from a converted tile first.
+      if (g.markEid[inT] !== NONE) api.despawn(g.markEid[inT]!)
+      g.markEid[inT] = api.spawn({
+        pos: { x: cmd.x, y: cmd.y },
+        sprite: sprite(SHAPE_UNDER_IN, dir),
+        color: cmd.color,
+        width: 1,
+        height: 1,
+      })
+      if (g.markEid[outT] !== NONE) api.despawn(g.markEid[outT]!)
+      g.markEid[outT] = api.spawn({
+        pos: { x: cmd.ex, y: cmd.ey },
+        sprite: sprite(SHAPE_UNDER_OUT, dir),
+        color: cmd.color,
+        width: 1,
+        height: 1,
+      })
+      rebuildTopology(g)
+      recomputeCadence(g)
       return
     }
     case 'place_crafter': {
@@ -2949,6 +3111,13 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       // buildings. Terrain and plain scenery are in neither store, so they are never removed.
       const t = tileAt(g, cmd.x, cmd.y)
       if (t !== NONE) {
+        // Removing one underground cap breaks the tunnel: demote its partner back to a plain belt
+        // (before the swap-remove shifts indices) so a lone cap never lingers, then remove this cap.
+        // removeBeltTile rebuilds topology, restoring the demoted belt's ordinary forward neighbour.
+        if (g.kind[t] === KIND_UNDER_IN || g.kind[t] === KIND_UNDER_OUT) {
+          const p = g.partner[t]!
+          if (p !== NONE) demoteCapToBelt(api, g, p)
+        }
         removeBeltTile(api, g, t)
         if (cmd.refund) refundTreasury(state.treasury, state.config, cmd.refund)
         return

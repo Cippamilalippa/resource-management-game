@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { buildStore, type BuildItem } from './buildStore.ts'
+import { UNDERGROUND_MAX_SPAN } from './gameLogic.ts'
 import { blueprintStore } from './blueprintStore.ts'
 import { Icon } from './Icon.tsx'
 import { GROUP_ICON, iconForItem } from './buildIcons.ts'
@@ -11,6 +12,7 @@ const GROUP_LABEL: Record<string, string> = {
   producer: 'Machines',
   building: 'Buildings',
   splitter: 'Splitters',
+  underground: 'Underground',
   port: 'Ports',
 }
 
@@ -20,6 +22,7 @@ const KIND_LABEL: Record<string, string> = {
   producer: 'Machine',
   building: 'Building',
   splitter: 'Splitter',
+  underground: 'Underground belt',
   port: 'Port',
 }
 
@@ -29,7 +32,8 @@ const GROUP_ORDER: Record<string, number> = {
   producer: 1,
   building: 2,
   splitter: 3,
-  port: 4,
+  underground: 4,
+  port: 5,
 }
 
 interface Group {
@@ -126,6 +130,12 @@ function itemRows(item: BuildItem): DetailRow[] {
       ]
     case 'splitter':
       return [{ label: 'Routes', value: 'evenly across outputs' }, ...costRow(item)]
+    case 'underground':
+      return [
+        { label: 'Carries under', value: 'belts & buildings in the gap' },
+        { label: 'Max span', value: `${UNDERGROUND_MAX_SPAN} tiles` },
+        ...costRow(item),
+      ]
     default:
       return []
   }
