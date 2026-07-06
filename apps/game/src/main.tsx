@@ -18,6 +18,8 @@ import { productionHistory } from './productionHistory.ts'
 import { sfx } from './sfx.ts'
 import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
 import { overlayStore } from './overlayStore.ts'
+import { detailOverlayStore } from './detailOverlayStore.ts'
+import { collectDetailMarks } from './detailOverlay.ts'
 import type { AlertKind } from './gameLogic.ts'
 
 /** Status-overlay marker colour per alert kind (starved = orange, backed up = amber, etc.). */
@@ -318,6 +320,10 @@ async function boot(): Promise<void> {
   // Clear the status overlay the moment it is toggled off (the boot loop repopulates when on).
   overlayStore.subscribe(() => {
     if (!overlayStore.get().on) renderer.setStatusOverlay(null)
+  })
+  // Same for the detail overlay ("alt-mode"): clear on toggle-off; the boot loop repopulates when on.
+  detailOverlayStore.subscribe(() => {
+    if (!detailOverlayStore.get().on) renderer.setDetailOverlay(null)
   })
   // Suppress edge-of-screen camera panning AND hide the minimap unless a session is actively on
   // screen and no save overlay is open, so nothing drifts under a modal or shows on the menu shell.
@@ -746,6 +752,13 @@ async function boot(): Promise<void> {
       renderer.setStatusOverlay(
         overlayStore.get().on
           ? alerts.map((a) => ({ x: a.x, y: a.y, color: ALERT_COLOR[a.kind] ?? 0xff5252 }))
+          : null,
+      )
+      // Detail overlay ("alt-mode"): stamp each machine's product / warn marker and port filter
+      // chips while it is toggled on. Computed read-only here on the throttle, never per frame.
+      renderer.setDetailOverlay(
+        detailOverlayStore.get().on
+          ? collectDetailMarks(sess.state.buildings, sess.state.grid, machines)
           : null,
       )
       hudStore.set({
