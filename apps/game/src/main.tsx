@@ -15,6 +15,7 @@ import { blueprintStore } from './blueprintStore.ts'
 import { historyStore } from './historyStore.ts'
 import { focusStore } from './focusStore.ts'
 import { productionHistory } from './productionHistory.ts'
+import { statsHistory } from './statsHistory.ts'
 import { sfx } from './sfx.ts'
 import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
 import { overlayStore } from './overlayStore.ts'
@@ -367,6 +368,7 @@ async function boot(): Promise<void> {
   const startSession = async (origin: SimOrigin): Promise<void> => {
     const sim = await createSim(prototypes, discovered, origin)
     productionHistory.reset() // a new world starts its production trend fresh
+    statsHistory.reset() // ...and its P-screen statistics history too
     prevVillageLevels = -1 // don't chime on the first sample of a freshly started/loaded session
     const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry, machines)
     session = {
@@ -736,6 +738,8 @@ async function boot(): Promise<void> {
       }))
       // Fold the per-resource make rate into the rolling history the sparklines chart.
       productionHistory.push(production)
+      // Same snapshot, but retained across the P-screen's three fine/medium/coarse windows.
+      statsHistory.push(production)
       const villages = villageStatuses(sess.state)
       // Chime when the total village level rises (a stage was gained since the last sample).
       const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)

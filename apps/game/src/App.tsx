@@ -14,6 +14,7 @@ import { HelpOverlay } from './HelpOverlay.tsx'
 import { DebugOverlay } from './DebugOverlay.tsx'
 import { BlueprintLibrary } from './BlueprintLibrary.tsx'
 import { Encyclopedia } from './Encyclopedia.tsx'
+import { StatsScreen } from './StatsScreen.tsx'
 import { StatusOverlay } from './StatusOverlay.tsx'
 
 /**
@@ -38,6 +39,7 @@ export function App(): React.JSX.Element {
           <InfoSidebar />
           <HelpOverlay />
           <Encyclopedia />
+          <StatsScreen />
           <StatusOverlay />
           <DebugOverlay />
         </>

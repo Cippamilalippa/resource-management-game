@@ -2009,3 +2009,198 @@ input:focus-visible,
 .objective.done .objective-check {
   color: var(--good-text);
 }
+
+/* ── Production statistics ("P-screen") ──────────────────────────────────── */
+/* Floating toggle button, left of the status-overlay button in the bottom-right row. */
+.stats-btn {
+  position: absolute;
+  right: 328px;
+  bottom: 16px;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition);
+}
+.stats-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.stats-btn[aria-pressed='true'] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Full-screen dimmer + centred modal, matching the save menu's "screen" treatment. */
+.stats-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 16, 0.55);
+  backdrop-filter: blur(2px);
+}
+.stats-modal {
+  width: 900px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  box-shadow: var(--elev-2);
+}
+.stats-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.stats-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+.stats-windows {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.stats-window-btn {
+  border: 1px solid var(--border);
+  background: rgba(var(--inset-rgb), 0.6);
+  color: var(--text-muted);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.stats-window-btn:hover {
+  color: var(--text);
+  background: rgba(var(--hover-rgb), 0.7);
+}
+.stats-window-btn.active {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.stats-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 12px 2px;
+}
+.stats-table-wrap {
+  overflow-y: auto;
+}
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.stats-th {
+  position: sticky;
+  top: 0;
+  background: rgba(var(--surface-rgb), 0.97);
+  text-align: right;
+  padding: 6px 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.stats-th-left {
+  text-align: left;
+}
+.stats-th-btn {
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.stats-th-left .stats-th-btn {
+  flex-direction: row;
+}
+.stats-th:not(.stats-th-left) .stats-th-btn {
+  flex-direction: row-reverse;
+}
+.stats-row {
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.stats-row:hover {
+  background: rgba(var(--hover-rgb), 0.35);
+}
+.stats-row.expanded {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+.stats-row td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.stats-td-icon {
+  width: 24px;
+}
+.stats-td-name {
+  color: var(--text);
+}
+.stats-td-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+.stats-td-trend {
+  text-align: center;
+  color: var(--text-muted);
+}
+.stats-detail-row td {
+  padding: 10px 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(var(--inset-rgb), 0.3);
+}
+.stats-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+.stats-chart {
+  display: block;
+  max-width: 100%;
+}
+.stats-chart-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.stats-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stats-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.stats-swatch-bad {
+  background: var(--bad);
+}
