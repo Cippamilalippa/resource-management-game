@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { encyclopediaStore, type EncyclopediaEntry } from './encyclopedia.ts'
+import {
+  encyclopediaStore,
+  filterEncyclopediaByItem,
+  type EncyclopediaEntry,
+} from './encyclopedia.ts'
 import { Icon } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
 
@@ -40,13 +44,45 @@ function EntryCard({ entry }: { entry: EncyclopediaEntry }): React.JSX.Element {
   )
 }
 
+/** A named group of recipe cards (e.g. "Produces" / "Consumes" for an item filter). Hidden when empty. */
+function EntryGroup({
+  label,
+  entries,
+}: {
+  label: string
+  entries: readonly EncyclopediaEntry[]
+}): React.JSX.Element | null {
+  if (entries.length === 0) return null
+  return (
+    <div className="enc-group">
+      <div className="enc-group-head">{label}</div>
+      {entries.map((e) => (
+        <EntryCard key={e.id} entry={e} />
+      ))}
+    </div>
+  )
+}
+
+/** Apply the free-text search within an already item-filtered group, or pass it through unfiltered. */
+function bySearch(entries: readonly EncyclopediaEntry[], q: string): readonly EncyclopediaEntry[] {
+  if (!q) return entries
+  return entries.filter(
+    (e) => e.name.toLowerCase().includes(q) || e.machineName.toLowerCase().includes(q),
+  )
+}
+
 /**
  * The recipe encyclopedia: a floating "Recipes" button (also on the `E` key) that opens a
  * searchable modal listing every recipe — its machine, ingredients, products and craft time —
  * built read-only from the loaded prototypes. Search matches a recipe/product or machine name.
+ *
+ * Clicking a resource swatch/label elsewhere in the UI (the treasury bar, the inspector's
+ * accepts/produces rows, a recipe's ingredients) calls {@link encyclopediaStore.openForItem},
+ * which narrows this panel to just the recipes that produce OR consume that item, labelled as two
+ * groups — the "click through to the encyclopedia" path (Q4).
  */
 export function Encyclopedia(): React.JSX.Element {
-  const { entries, open } = useSyncExternalStore(
+  const { entries, open, itemFilter } = useSyncExternalStore(
     encyclopediaStore.subscribe,
     encyclopediaStore.get,
     encyclopediaStore.get,
@@ -69,14 +105,10 @@ export function Encyclopedia(): React.JSX.Element {
   }, [open])
 
   const q = query.trim().toLowerCase()
-  const shown = useMemo(
-    () =>
-      q
-        ? entries.filter(
-            (e) => e.name.toLowerCase().includes(q) || e.machineName.toLowerCase().includes(q),
-          )
-        : entries,
-    [q, entries],
+  const shown = useMemo(() => bySearch(entries, q), [q, entries])
+  const filtered = useMemo(
+    () => (itemFilter !== null ? filterEncyclopediaByItem(entries, itemFilter) : null),
+    [entries, itemFilter],
   )
 
   return (
@@ -105,11 +137,38 @@ export function Encyclopedia(): React.JSX.Element {
               ×
             </button>
           </div>
+          {itemFilter !== null && (
+            <div className="enc-filter-chip">
+              <span>Filtered on</span>
+              <ResourceLabel color={itemFilter} size={14} />
+              <button
+                className="enc-filter-clear"
+                onClick={() => encyclopediaStore.clearItemFilter()}
+                title="Show all recipes"
+                aria-label="Clear item filter"
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div className="enc-list">
-            {shown.length === 0 && <div className="enc-empty">No matching recipes.</div>}
-            {shown.map((e) => (
-              <EntryCard key={e.id} entry={e} />
-            ))}
+            {filtered ? (
+              <>
+                <EntryGroup label="Produces" entries={bySearch(filtered.produces, q)} />
+                <EntryGroup label="Consumes" entries={bySearch(filtered.consumes, q)} />
+                {bySearch(filtered.produces, q).length === 0 &&
+                  bySearch(filtered.consumes, q).length === 0 && (
+                    <div className="enc-empty">No matching recipes.</div>
+                  )}
+              </>
+            ) : (
+              <>
+                {shown.length === 0 && <div className="enc-empty">No matching recipes.</div>}
+                {shown.map((e) => (
+                  <EntryCard key={e.id} entry={e} />
+                ))}
+              </>
+            )}
           </div>
         </div>
       )}

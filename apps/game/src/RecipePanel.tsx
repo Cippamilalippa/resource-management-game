@@ -3,21 +3,40 @@ import { recipeStore } from './recipeStore.ts'
 import type { RecipeChoice } from './machines.ts'
 import { Icon } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
+import { encyclopediaStore } from './encyclopedia.ts'
 
-/** A recipe's I/O as swatch rows: inputs → output(s). */
+/**
+ * A recipe's I/O as swatch rows: inputs → output(s). Each swatch click-throughs to the
+ * encyclopedia filtered on that item (Q4); `stopPropagation` keeps the click from also firing the
+ * enclosing recipe-row button's "set recipe" handler.
+ */
 function RecipeFlows({ recipe }: { recipe: RecipeChoice }): React.JSX.Element {
+  const openItem = (e: React.MouseEvent, color: number): void => {
+    e.stopPropagation()
+    encyclopediaStore.openForItem(color)
+  }
   return (
     <span className="recipe-flows">
       {recipe.inputs.map((f, i) => (
         <span key={`i${i}`} className="recipe-flow">
-          <ResourceLabel color={f.color} size={13} showName={false} />
+          <ResourceLabel
+            color={f.color}
+            size={13}
+            showName={false}
+            onClick={(e) => openItem(e, f.color)}
+          />
           {f.amount}
         </span>
       ))}
       <Icon name="ArrowRight" size={12} />
       {recipe.outputs.map((f, i) => (
         <span key={`o${i}`} className="recipe-flow">
-          <ResourceLabel color={f.color} size={13} showName={false} />
+          <ResourceLabel
+            color={f.color}
+            size={13}
+            showName={false}
+            onClick={(e) => openItem(e, f.color)}
+          />
           {f.amount}
         </span>
       ))}

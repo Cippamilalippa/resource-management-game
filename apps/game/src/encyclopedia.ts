@@ -39,12 +39,35 @@ export function buildEncyclopedia(machines: MachineIndex): EncyclopediaEntry[] {
   return entries
 }
 
+/** The two recipe groups for an item filter: what makes it vs. what uses it up. */
+export interface ItemFilterResult {
+  readonly produces: readonly EncyclopediaEntry[]
+  readonly consumes: readonly EncyclopediaEntry[]
+}
+
+/**
+ * Split the catalogue into recipes that produce vs. consume a given resource colour — the
+ * "click a resource, see the recipes around it" path (Q4). A recipe with the item on both sides
+ * (a byproduct loop) appears in both groups; each group keeps the catalogue's A→Z order.
+ */
+export function filterEncyclopediaByItem(
+  entries: readonly EncyclopediaEntry[],
+  color: number,
+): ItemFilterResult {
+  return {
+    produces: entries.filter((e) => e.outputs.some((f) => f.color === color)),
+    consumes: entries.filter((e) => e.inputs.some((f) => f.color === color)),
+  }
+}
+
 interface EncyclopediaState {
   readonly entries: readonly EncyclopediaEntry[]
   readonly open: boolean
+  /** When set, the panel shows only recipes touching this resource colour (see {@link ItemFilterResult}). */
+  readonly itemFilter: number | null
 }
 
-let state: EncyclopediaState = { entries: [], open: false }
+let state: EncyclopediaState = { entries: [], open: false, itemFilter: null }
 const listeners = new Set<() => void>()
 
 function set(next: EncyclopediaState): void {
@@ -60,6 +83,14 @@ export const encyclopediaStore = {
   },
   /** Load the catalogue for the current session (called at boot from the derived machine index). */
   setEntries: (entries: readonly EncyclopediaEntry[]): void => set({ ...state, entries }),
-  toggle: (): void => set({ ...state, open: !state.open }),
+  /** Open on the full unfiltered list (the "Recipes" button / E key); closing preserves any
+   *  in-progress item filter so re-opening with E doesn't lose it mid-session. */
+  toggle: (): void =>
+    set({ ...state, open: !state.open, itemFilter: state.open ? state.itemFilter : null }),
   close: (): void => set({ ...state, open: false }),
+  /** Open (or re-filter) the panel to just the recipes that produce or consume this resource colour —
+   *  the click-through target for a resource swatch/label elsewhere in the UI. */
+  openForItem: (color: number): void => set({ ...state, open: true, itemFilter: color }),
+  /** Drop back to the full unfiltered list without closing the panel. */
+  clearItemFilter: (): void => set({ ...state, itemFilter: null }),
 }

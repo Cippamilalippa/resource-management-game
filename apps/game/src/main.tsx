@@ -308,6 +308,38 @@ async function boot(): Promise<void> {
   const resourceTextures = await resourceIconTextures(setResources(prototypes))
 
   const canvas = document.getElementById('stage') as HTMLCanvasElement
+
+  // ── Save-slot thumbnail + play-time capture ─────────────────────────────────────────────────
+  // Downscale the live Pixi canvas (drawn onto `canvas` above) to a small JPEG data-URL for the
+  // save-slot list. Captured synchronously from the click/timer handler that triggers a save — the
+  // frame loop only ever runs between rAF callbacks, never interleaved with this synchronous read,
+  // so the last-presented frame is still on the canvas.
+  const THUMBNAIL_WIDTH = 192
+  const captureThumbnail = (): string | undefined => {
+    try {
+      if (canvas.width === 0 || canvas.height === 0) return undefined
+      const targetH = Math.max(1, Math.round((canvas.height / canvas.width) * THUMBNAIL_WIDTH))
+      const off = document.createElement('canvas')
+      off.width = THUMBNAIL_WIDTH
+      off.height = targetH
+      const ctx = off.getContext('2d')
+      if (!ctx) return undefined
+      ctx.drawImage(canvas, 0, 0, THUMBNAIL_WIDTH, targetH)
+      return off.toDataURL('image/jpeg', 0.72)
+    } catch {
+      return undefined // best-effort — a save should never fail because the thumbnail couldn't be read.
+    }
+  }
+  // Accumulated wall-clock seconds played this session, seeded from a loaded save's own total and
+  // reset to 0 on a fresh game; only ticks up while the sim is actually advancing (see the frame
+  // loop below), so time spent paused/menued/in the save overlay doesn't count.
+  let playTimeMs = 0
+  /** Bundle the two optional save-slot extras a `saveGame` call should carry. */
+  const saveExtras = (): { thumbnail?: string; playTimeSec: number } => {
+    const thumbnail = captureThumbnail()
+    return { ...(thumbnail ? { thumbnail } : {}), playTimeSec: Math.round(playTimeMs / 1000) }
+  }
+
   const renderer = await Renderer.create({
     canvas,
     width: globalThis.innerWidth,
@@ -383,11 +415,16 @@ async function boot(): Promise<void> {
     renderer.setIcons(new Map([...resourceTextures, ...(await buildIconTextures(items))]))
   }
 
-  /** Build a fresh sim from an origin (new game or restored save) and make it the live session. */
-  const startSession = async (origin: SimOrigin): Promise<void> => {
+  /**
+   * Build a fresh sim from an origin (new game or restored save) and make it the live session.
+   * `initialPlayTimeSec` seeds the wall-clock play-time accumulator — 0 for a new game, or the
+   * loaded slot's own total so Continue/Load carries it forward instead of resetting the clock.
+   */
+  const startSession = async (origin: SimOrigin, initialPlayTimeSec = 0): Promise<void> => {
     const sim = await createSim(prototypes, discovered, origin)
     productionHistory.reset() // a new world starts its production trend fresh
     prevVillageLevels = -1 // don't chime on the first sample of a freshly started/loaded session
+    playTimeMs = Math.max(0, initialPlayTimeSec) * 1000
     const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry, machines)
     session = {
       world: sim.world,
@@ -489,7 +526,10 @@ async function boot(): Promise<void> {
       )
     }
     const payload = await bridge.loadGame(meta.id)
-    await startSession({ kind: 'load', snapshot: payload.snapshot as WorldSnapshot })
+    await startSession(
+      { kind: 'load', snapshot: payload.snapshot as WorldSnapshot },
+      payload.meta.playTimeSec ?? 0,
+    )
     saveStore.set({ open: false, activeId: meta.id })
     flashToast(`Loaded "${meta.name}"`)
   }
@@ -504,7 +544,7 @@ async function boot(): Promise<void> {
     quickSave: () =>
       withBusy(async () => {
         if (!bridge || !session) return
-        await bridge.saveGame({ kind: 'quick', snapshot: session.serialize() })
+        await bridge.saveGame({ kind: 'quick', snapshot: session.serialize(), ...saveExtras() })
         await refreshSaves()
         flashToast('Quicksaved')
       }),
@@ -522,7 +562,12 @@ async function boot(): Promise<void> {
     saveNew: (name: string) =>
       withBusy(async () => {
         if (!bridge || !session) return
-        const meta = await bridge.saveGame({ kind: 'manual', name, snapshot: session.serialize() })
+        const meta = await bridge.saveGame({
+          kind: 'manual',
+          name,
+          snapshot: session.serialize(),
+          ...saveExtras(),
+        })
         await refreshSaves()
         saveStore.set({ activeId: meta.id })
         flashToast(`Saved "${meta.name}"`)
@@ -535,6 +580,7 @@ async function boot(): Promise<void> {
           id: meta.id,
           name: meta.name,
           snapshot: session.serialize(),
+          ...saveExtras(),
         })
         await refreshSaves()
         saveStore.set({ activeId: meta.id })
@@ -563,7 +609,7 @@ async function boot(): Promise<void> {
   // older ones). Shared by the cadence timer, the quit/back-to-menu paths, and page unload.
   const autosave = async (): Promise<void> => {
     if (!bridge || !session) return
-    await bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
+    await bridge.saveGame({ kind: 'auto', snapshot: session.serialize(), ...saveExtras() })
     await refreshSaves()
   }
 
@@ -633,7 +679,8 @@ async function boot(): Promise<void> {
   applyAutosaveInterval()
   globalThis.addEventListener('beforeunload', () => {
     // Fire-and-forget: the page is going away, so we can't await the IPC round-trip.
-    if (bridge && session) void bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
+    if (bridge && session)
+      void bridge.saveGame({ kind: 'auto', snapshot: session.serialize(), ...saveExtras() })
   })
 
   // Q6 — auto-pause when the window loses focus (opt-in). We only pause a *running, not-already-
@@ -763,6 +810,9 @@ async function boot(): Promise<void> {
       const subTickAlpha = sess.scheduler.advance(sess.world, deltaMs * simControlStore.get().speed)
       lastAlpha = beltMoveAlpha(sess.state, subTickAlpha)
       renderer.render(sess.world, lastAlpha)
+      // Wall-clock play time — real elapsed time (not sim-speed-scaled), only while the sim is
+      // actually advancing (matches this branch exactly: not paused, not menued, save menu closed).
+      playTimeMs += deltaMs
     }
 
     // Throttle React updates to ~4 Hz so the overlay never gates the frame rate.

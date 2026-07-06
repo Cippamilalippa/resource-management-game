@@ -39,6 +39,10 @@ export type Dispatch = (cmd: HistoryCommand) => void
 
 /** Cap the retained history so a long session can't grow the stacks without bound. */
 const MAX_HISTORY = 100
+/** How many past steps the hoverable mini-panel lists (most-recent-first). */
+const RECENT_COUNT = 5
+/** How long a "Undid: …" / "Redid: …" toast stays up before auto-clearing (Q5). */
+const TOAST_MS = 2200
 
 export interface HistoryView {
   readonly canUndo: boolean
@@ -47,23 +51,66 @@ export interface HistoryView {
   readonly undoLabel: string | null
   /** Label of the entry Ctrl+Shift+Z would replay, or null. */
   readonly redoLabel: string | null
+  /** Transient confirmation shown after an undo/redo ("Undid: Belt — 4 more"); auto-clears. */
+  readonly toast: string | null
+  /** Labels of the last few undoable steps, most-recent-first — backs a small hover panel. */
+  readonly recentLabels: readonly string[]
+}
+
+/**
+ * Toast text for a completed undo/redo: the step's label and how many more steps remain in that
+ * direction. Exported for testing; used by {@link historyStore}'s `undo`/`redo`.
+ */
+export function formatHistoryToast(
+  action: 'undo' | 'redo',
+  label: string,
+  remaining: number,
+): string {
+  const verb = action === 'undo' ? 'Undid' : 'Redid'
+  return remaining > 0 ? `${verb}: ${label} — ${remaining} more` : `${verb}: ${label}`
 }
 
 const past: HistoryEntry[] = []
 const future: HistoryEntry[] = []
 let dispatch: Dispatch | null = null
+let toastMsg: string | null = null
+let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-let view: HistoryView = { canUndo: false, canRedo: false, undoLabel: null, redoLabel: null }
+let view: HistoryView = {
+  canUndo: false,
+  canRedo: false,
+  undoLabel: null,
+  redoLabel: null,
+  toast: null,
+  recentLabels: [],
+}
 const listeners = new Set<() => void>()
 
 function refresh(): void {
+  const recentLabels: string[] = []
+  for (let i = past.length - 1; i >= 0 && recentLabels.length < RECENT_COUNT; i--) {
+    recentLabels.push(past[i]!.label)
+  }
   view = {
     canUndo: past.length > 0,
     canRedo: future.length > 0,
     undoLabel: past.length > 0 ? past[past.length - 1]!.label : null,
     redoLabel: future.length > 0 ? future[future.length - 1]!.label : null,
+    toast: toastMsg,
+    recentLabels,
   }
   for (const l of listeners) l()
+}
+
+/** Show a transient toast (auto-clearing) and refresh subscribers. */
+function flashToast(msg: string): void {
+  toastMsg = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastMsg = null
+    refresh()
+  }, TOAST_MS)
+  refresh()
 }
 
 export const historyStore = {
@@ -96,7 +143,7 @@ export const historyStore = {
     if (!entry) return false
     if (dispatch) for (const cmd of entry.undo) dispatch(cmd)
     future.push(entry)
-    refresh()
+    flashToast(formatHistoryToast('undo', entry.label, past.length))
     return true
   },
 
@@ -106,7 +153,7 @@ export const historyStore = {
     if (!entry) return false
     if (dispatch) for (const cmd of entry.redo) dispatch(cmd)
     past.push(entry)
-    refresh()
+    flashToast(formatHistoryToast('redo', entry.label, future.length))
     return true
   },
 
@@ -115,6 +162,9 @@ export const historyStore = {
   reset: (): void => {
     past.length = 0
     future.length = 0
+    if (toastTimer) clearTimeout(toastTimer)
+    toastTimer = undefined
+    toastMsg = null
     refresh()
   },
 }
