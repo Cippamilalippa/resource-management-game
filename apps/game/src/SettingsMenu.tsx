@@ -7,6 +7,8 @@ import {
   UI_SCALE_MAX,
   VOLUME_MIN,
   VOLUME_MAX,
+  MUSIC_VOLUME_MIN,
+  MUSIC_VOLUME_MAX,
 } from './settingsStore.ts'
 import { Icon } from './Icon.tsx'
 
@@ -146,6 +148,27 @@ export function SettingsMenu(): React.JSX.Element | null {
               aria-label="Master volume"
             />
             <span className="settings-value">{s.masterVolume}%</span>
+          </Row>
+
+          <Row label="Music volume" hint="Generative ambient score">
+            <input
+              type="range"
+              className="settings-range"
+              min={MUSIC_VOLUME_MIN}
+              max={MUSIC_VOLUME_MAX}
+              step={5}
+              value={s.musicVolume}
+              onChange={(e) => settingsStore.update({ musicVolume: Number(e.target.value) })}
+              aria-label="Music volume"
+            />
+            <span className="settings-value">{s.musicVolume}%</span>
+          </Row>
+
+          <Row label="Factory ambience" hint="Machine-hum bed that follows how busy you are">
+            <Toggle
+              on={s.ambience}
+              onToggle={() => settingsStore.update({ ambience: !s.ambience })}
+            />
           </Row>
 
           <Row label="UI scale">
