@@ -60,7 +60,9 @@ The plan below is ordered around fixing those five things.
       research colony, spaceport) at increasing distance, each with its own staged ladder
       starting _shallow_ (aluminum sheet, glass) and deepening. Distance + different needs
       = routing gameplay + a reason cannons exist. Mostly `scene.ts` + `buildings.json`.
-- [ ] **G4. Rebalance the demand ladder to start shallow.** ★★☆ / S — Stage 1 currently
+- [x] **G4. Rebalance the demand ladder to start shallow.** ★★☆ / S — _Shipped: 6-stage
+      cumulative ladder (glass → aluminum → sheet → microchip → rocket fuel/avionics →
+      aircraft/rocket), starting kit rebased to glass, KPI-verified._ Stage 1 formerly
       demands `rocket_fuel` (tier ~4); the first hour is belt-spaghetti toward one deep
       good with the starting kit as a timer. Let stage 1 want tier-1/2 goods and climb.
       `pnpm balance` + the KPI harness exist precisely to tune this; use them.
