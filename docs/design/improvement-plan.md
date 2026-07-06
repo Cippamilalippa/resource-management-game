@@ -103,7 +103,9 @@ The plan below is ordered around fixing those five things.
       splitters, dive under buildings. Sim: a belt-tile pair linked over a gap (the
       neighbour table already supports arbitrary links); placement pairs entrance/exit
       with a max span; render draws the two caps.
-- [ ] **L2. L-shaped / path belt drags.** ★★☆ / M — Drags currently axis-project to a
+- [x] **L2. L-shaped / path belt drags.** ★★☆ / M — _Shipped: `projectBeltPath`
+      dominant-axis-first L routing (Shift flips), two-leg ghost + full-path count, one
+      undoable gesture, corner re-aim covered end-to-end in tests._ Drags currently axis-project to a
       straight run. Let a drag turn one corner (dominant axis first), preview included —
       most belt runs are L-shaped, this halves gestures. `projectBelt` grows a variant;
       ghost + rasterizer share it (they already share the helper).
@@ -153,7 +155,9 @@ The plan below is ordered around fixing those five things.
       too scattered — needs a shared binding source first)._ There was none: volume slider, UI
       scale, autosave cadence, edge-scroll toggle+speed, key rebinding (persisted like the
       mute flag). Rebinding matters because the current map is dense (V/E/F/M/Q…).
-- [ ] **X2. Alt-mode overlay.** ★★☆ / S — One toggle that shows, on every machine, its
+- [x] **X2. Alt-mode overlay.** ★★☆ / S — _Shipped: Alt toggles a game-agnostic
+      `setDetailOverlay` renderer layer — recipe-product icons on machines, warn ring on
+      unconfigured crafters, filter chips on ports; persisted, default on._ One toggle that shows, on every machine, its
       recipe icon + port arrows + filter colours at a glance (the icon overlay
       infrastructure already exists — this is "always-on for all, bigger"). Factorio's
       single most-used key.
