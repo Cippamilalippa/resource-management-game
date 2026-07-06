@@ -251,6 +251,7 @@ function describeBuilding(
   registry: InspectRegistry,
   x: number,
   y: number,
+  utilizationOf?: (tile: number) => number | undefined,
 ): InspectInfo | null {
   const { Position, Renderable } = world.components
   const ents = renderableEntities(world)
@@ -269,8 +270,27 @@ function describeBuilding(
     // makes (recipe outputs) and what it holds/consumes (recipe inputs and plain stores).
     const b = buildingAt(buildings, px, py)
     if (b >= 0) {
-      if (buildings.crafts[b])
+      if (buildings.crafts[b]) {
         stats.push({ kind: 'text', label: 'Craft rate', value: perSec(buildings.craftEvery[b]!) })
+        // Recipe progress: ticks accrued this cadence out of the ticks needed to fire again (holds
+        // at the cadence while stalled — see `runCrafters` — so a stalled crafter reads as full).
+        stats.push({
+          kind: 'bar',
+          label: 'Progress',
+          value: buildings.craftTimer[b]!,
+          max: Math.max(1, buildings.craftEvery[b]!),
+        })
+        // Wall-clock utilization over the last minute (app-side rolling sample, see
+        // `utilizationStore.ts`); omitted until at least one refresh has sampled this tile.
+        const utilization = utilizationOf?.(tileKey(px, py))
+        if (utilization !== undefined) {
+          stats.push({
+            kind: 'text',
+            label: 'Utilization (60s)',
+            value: `${Math.round(utilization * 100)}%`,
+          })
+        }
+      }
       // A village shows its current level and population (read-only, one-way).
       const vs = villageStageAt(villages, px, py)
       if (vs >= 0) {
@@ -339,8 +359,9 @@ export function resolveInspect(
   registry: InspectRegistry,
   x: number,
   y: number,
+  utilizationOf?: (tile: number) => number | undefined,
 ): InspectInfo | null {
   const t = grid.index.get(tileKey(x, y))
   if (t !== undefined) return describeBeltTile(world, grid, buildings, registry, t, x, y)
-  return describeBuilding(world, buildings, villages, registry, x, y)
+  return describeBuilding(world, buildings, villages, registry, x, y, utilizationOf)
 }

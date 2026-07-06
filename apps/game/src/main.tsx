@@ -15,6 +15,9 @@ import { blueprintStore } from './blueprintStore.ts'
 import { historyStore } from './historyStore.ts'
 import { focusStore } from './focusStore.ts'
 import { productionHistory } from './productionHistory.ts'
+import { utilizationStore } from './utilizationStore.ts'
+import { muteStore, filterMuted } from './muteStore.ts'
+import { alertHistoryStore } from './alertHistoryStore.ts'
 import { sfx } from './sfx.ts'
 import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
 import { overlayStore } from './overlayStore.ts'
@@ -367,6 +370,9 @@ async function boot(): Promise<void> {
   const startSession = async (origin: SimOrigin): Promise<void> => {
     const sim = await createSim(prototypes, discovered, origin)
     productionHistory.reset() // a new world starts its production trend fresh
+    utilizationStore.reset() // per-tile crafter windows don't carry over to a new world
+    muteStore.reset() // muted tile keys belong to the previous world's tiles
+    alertHistoryStore.reset() // app-side only — not part of the save, so start the log fresh
     prevVillageLevels = -1 // don't chime on the first sample of a freshly started/loaded session
     const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry, machines)
     session = {
@@ -741,13 +747,18 @@ async function boot(): Promise<void> {
       const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)
       if (prevVillageLevels >= 0 && villageLevels > prevVillageLevels) sfx.play('level')
       prevVillageLevels = villageLevels
-      const alerts = collectAlerts(sess.state)
+      // Muted tiles ("don't warn for this building", U6) drop out of every alert-fed view: the
+      // live stack, the status overlay, and the history log below all read this filtered list.
+      const alerts = filterMuted(collectAlerts(sess.state), muteStore.get())
       // Status overlay: tint each flagged tile on the map while the overlay is toggled on.
       renderer.setStatusOverlay(
         overlayStore.get().on
           ? alerts.map((a) => ({ x: a.x, y: a.y, color: ALERT_COLOR[a.kind] ?? 0xff5252 }))
           : null,
       )
+      // Diff this refresh's alert sources against the last one and fold any that appeared/
+      // disappeared into the capped history log (app-side only; see `alertHistoryStore.ts`).
+      alertHistoryStore.record(alerts)
       hudStore.set({
         research: buildResearchHud(sess),
         villages,

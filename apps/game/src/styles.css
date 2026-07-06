@@ -1385,31 +1385,21 @@ input:focus-visible,
 .alert {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 11px;
+  gap: 2px;
+  padding: 7px 7px 7px 11px;
   border-radius: 8px;
   font-size: 12px;
   background: rgba(var(--surface-rgb), 0.9);
   border: 1px solid var(--border);
   backdrop-filter: blur(6px);
-  /* Rows are <button>s (click to jump the camera): re-enable pointer events the container disables,
-     and reset the native button look so they read as the former info chips. */
+  /* The row is a container around two buttons (jump / mute): re-enable pointer events the
+     .alerts wrapper disables. */
   pointer-events: auto;
   color: inherit;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    transform 0.08s ease,
-    border-color 0.12s ease;
+  transition: border-color 0.12s ease;
 }
 .alert:hover {
   border-color: var(--accent, #66ccff);
-  transform: translateY(-1px);
-}
-.alert:focus-visible {
-  outline: 2px solid var(--accent, #66ccff);
-  outline-offset: 2px;
 }
 .alert-warn {
   border-color: rgba(var(--warn-rgb), 0.55);
@@ -1419,12 +1409,159 @@ input:focus-visible,
   border-color: rgba(var(--bad-rgb), 0.55);
   color: var(--bad-text);
 }
+/* The clickable "jump to location" body — reset native button look so it reads as the former
+   info chip, occupying all the row's width except the mute affordance. */
+.alert-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.08s ease;
+}
+.alert-body:hover {
+  transform: translateY(-1px);
+}
+.alert-body:focus-visible,
+.alert-mute:focus-visible {
+  outline: 2px solid var(--accent, #66ccff);
+  outline-offset: 2px;
+}
 .alert-text {
   flex: 1;
 }
 .alert-count {
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
+}
+/* Per-row mute (✕): dim until hovered so the row still reads primarily as an info chip. */
+.alert-mute {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    opacity 0.1s ease,
+    background 0.1s ease;
+}
+.alert-mute:hover {
+  opacity: 1;
+  background: rgba(var(--surface-rgb), 0.6);
+}
+
+/* Collapsible alert history log (U6) — a small toggle chip under the live stack that opens a
+   capped, timestamped record of alerts appearing/resolving, plus the muted-sources count. */
+.alert-history-wrap {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+}
+.alert-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(var(--surface-rgb), 0.75);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+.alert-history-toggle:hover {
+  border-color: var(--accent, #66ccff);
+  color: var(--text);
+}
+.alert-history-mutedcount {
+  font-variant-numeric: tabular-nums;
+  color: var(--warn-text);
+}
+.alert-history {
+  margin-top: 6px;
+  padding: 8px;
+  width: 280px;
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+.alert-history-empty {
+  color: var(--text-faint);
+  text-align: center;
+  padding: 8px 0;
+}
+.alert-history-muted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(var(--warn-rgb), 0.12);
+  color: var(--warn-text);
+  margin-bottom: 2px;
+}
+.alert-history-muted button {
+  background: none;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.alert-history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.alert-history-row:nth-child(odd) {
+  background: rgba(var(--surface-rgb), 0.5);
+}
+.alert-history-text {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alert-history-event {
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+.alert-history-event.resolved {
+  color: var(--good-text);
+}
+.alert-history-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
 }
 
 /* ── HUD rail + panels (left side) ───────────────────────────────────────────
