@@ -147,6 +147,46 @@ describe('belt', () => {
     expect(entityCount(sim.world)).toBe(BASELINE + BELT_LEN + 2 + BELT_LEN)
   })
 
+  it('carries items around an L-shaped corner built from two enqueued legs', async () => {
+    // The L-shaped belt drag (improvement-plan L2) enqueues two straight `place_belt` legs sharing a
+    // corner tile: leg 1 east (2,0)→(6,0), leg 2 south (6,0)→(6,4). Leg 2 is enqueued SECOND so its
+    // rasterizer re-aims the shared corner to face south — the belt must actually turn there.
+    const sim = await bootstrapSim(1, { startScene: false })
+    const w = sim.world
+    enqueuePlaceBelt(w, { ax: 2, ay: 0, bx: 6, by: 0, color: 0x404040, moveEvery: 1 })
+    enqueuePlaceBelt(w, { ax: 6, ay: 0, bx: 6, by: 4, color: 0x404040, moveEvery: 1 })
+    placeSource(sim, 2, 0)
+    enqueuePlacePort(w, { x: 2, y: 0, port: 'output', color: 0x44dd44, spawnEvery: 4 })
+    // Sink directly south of B so the end tile (facing south) feeds it through an input port.
+    enqueuePlaceBuilding(w, {
+      x: 6,
+      y: 5,
+      w: 1,
+      h: 1,
+      color: 0x334455,
+      accepts: [{ color: SRC, cap: 1_000_000 }],
+    })
+    enqueuePlacePort(w, { x: 6, y: 4, port: 'input', color: 0xdd4444 })
+    sim.scheduler.runTicks(w, 1) // drain the queued placements so the grid is live
+
+    // The shared corner tile now faces south (leg 2's direction) — proof leg 2 re-aimed it to turn.
+    const g = sim.state.grid
+    let corner = -1
+    for (let t = 0; t < g.count; t++) if (g.tx[t]! === 6 && g.ty[t]! === 0) corner = t
+    expect(corner).not.toBe(-1)
+    expect(g.face[corner]!).toBe(2) // 2 = South
+
+    sim.scheduler.runTicks(w, 1000)
+    // The sink accumulated stock: items rode leg 1 east, turned the corner, rode leg 2 south to B —
+    // flow genuinely traverses the bend, not just the first leg.
+    const store = sim.state.buildings
+    let sinkStock = 0
+    for (let b = 0; b < store.count; b++) {
+      if (store.crafts[b]! === 0) sinkStock = store.slotCount[b * MAX_SLOTS]!
+    }
+    expect(sinkStock).toBeGreaterThan(0)
+  })
+
   it('drops a port placed where no belt exists', async () => {
     const sim = await bootWithBelt(1)
     enqueuePlacePort(sim.world, { x: 100, y: 100, port: 'output', color: 0x44dd44 })

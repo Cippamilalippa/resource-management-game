@@ -12,6 +12,7 @@ import {
   dispatchCommand,
   canAfford,
   projectBelt,
+  projectBeltPath,
   terrainTypeOf,
   terrainTypeAt,
   buildingAt,
@@ -794,7 +795,7 @@ export function installPlacement(
     if (buildStore.selectedItem()?.kind === 'belt') beltStart = { x: tile.x, y: tile.y }
   }
 
-  renderer.onDragMove = (tile) => {
+  renderer.onDragMove = (tile, shiftKey) => {
     // Copy-select: preview the marquee rectangle from the drag's start corner to the cursor.
     if (blueprintStore.get().mode === 'copy-select') {
       if (selectStart) {
@@ -843,20 +844,23 @@ export function installPlacement(
     if (!beltStart) return
     const item = buildStore.selectedItem()
     if (item?.kind !== 'belt') return
-    // Preview the projected (axis-aligned) belt from the start tile to the cursor, with its length.
-    const { dx, dy, length } = projectBelt(beltStart.x, beltStart.y, tile.x, tile.y)
+    // Preview the L-shaped belt from the start tile to the cursor: a run along the dominant axis to
+    // the corner, then the perpendicular run to B (Shift flips which axis goes first). A straight
+    // drag degenerates to a single leg, previewing exactly as before. The label counts the full path.
+    const path = projectBeltPath(beltStart.x, beltStart.y, tile.x, tile.y, shiftKey)
     renderer.setGhost({
       kind: 'line',
       ax: beltStart.x,
       ay: beltStart.y,
-      bx: beltStart.x + dx * (length - 1),
-      by: beltStart.y + dy * (length - 1),
+      bx: tile.x,
+      by: tile.y,
       color: item.color,
-      ...(length > 1 ? { label: `×${length}` } : {}),
+      ...(path.legs.length > 1 ? { corner: { x: path.corner.x, y: path.corner.y } } : {}),
+      ...(path.length > 1 ? { label: `×${path.length}` } : {}),
     })
   }
 
-  renderer.onDragEnd = (tile) => {
+  renderer.onDragEnd = (tile, shiftKey) => {
     const mode = blueprintStore.get().mode
     if (mode === 'copy-select') {
       const start = selectStart
@@ -1014,35 +1018,43 @@ export function installPlacement(
       recordGesture(item.name, steps)
       return
     }
-    // Belt: place the dragged segment, ignoring a zero-length (no-drag) gesture.
+    // Belt: place the dragged L-path, ignoring a zero-length (no-drag) gesture. A straight drag
+    // yields one leg (identical to before); a real bend yields two legs (A→corner, corner→B) that
+    // share the corner tile — enqueued in that order so leg 2 re-aims the corner to turn the belt,
+    // and recorded as ONE undoable gesture. Shift flips which axis the first leg follows.
     const start = beltStart
     beltStart = null
     if (!start || (start.x === tile.x && start.y === tile.y)) return
-    // Name every tile along the projected run so each is inspectable; the run length also scales
-    // the belt's per-tile cost into the all-or-nothing charge the sim applies.
-    const { dx, dy, length } = projectBelt(start.x, start.y, tile.x, tile.y)
-    const beltCost = scaleCost(item.cost, length)
-    const beltParams = {
-      ax: start.x,
-      ay: start.y,
-      bx: tile.x,
-      by: tile.y,
-      color: item.color,
-      moveEvery: item.moveEvery,
-      ...(beltCost ? { cost: beltCost } : {}),
+    const path = projectBeltPath(start.x, start.y, tile.x, tile.y, shiftKey)
+    const steps: PlacedStep[] = []
+    for (let li = 0; li < path.legs.length; li++) {
+      const leg = path.legs[li]!
+      // The corner tile belongs to leg 0. Leg 1 still rasterizes over it (re-aiming it so the belt
+      // turns), but must not be charged, named or removed twice — so skip its start tile for cost
+      // and the recorded tiles, keeping charge and refund exactly balanced across an undo/redo cycle.
+      const skipStart = li > 0
+      const tileCount = leg.length - (skipStart ? 1 : 0)
+      const legCost = scaleCost(item.cost, tileCount)
+      const legTiles: { x: number; y: number }[] = []
+      for (let i = skipStart ? 1 : 0; i < leg.length; i++) {
+        const tx = leg.ax + leg.dx * i
+        const ty = leg.ay + leg.dy * i
+        registry.record(tx, ty, { name: item.name, type: 'belt' })
+        legTiles.push({ x: tx, y: ty })
+      }
+      const beltParams = {
+        ax: leg.ax,
+        ay: leg.ay,
+        bx: leg.bx,
+        by: leg.by,
+        color: item.color,
+        moveEvery: item.moveEvery,
+        ...(legCost ? { cost: legCost } : {}),
+      }
+      enqueuePlaceBelt(world, beltParams)
+      steps.push({ cmd: { type: 'place_belt', ...beltParams }, tiles: legTiles, refund: legCost })
     }
-    enqueuePlaceBelt(world, beltParams)
-    // Undoing a belt run removes every tile along it; the whole run's cost refunds on the first.
-    const beltTiles: { x: number; y: number }[] = []
-    for (let i = 0; i < length; i++) {
-      const tx = start.x + dx * i
-      const ty = start.y + dy * i
-      registry.record(tx, ty, { name: item.name, type: 'belt' })
-      beltTiles.push({ x: tx, y: ty })
-    }
-    recordGesture(item.name, [
-      { cmd: { type: 'place_belt', ...beltParams }, tiles: beltTiles, refund: beltCost },
-    ])
+    recordGesture(item.name, steps)
   }
 
   // The sidebar's close button asks us to release the pin through the store.

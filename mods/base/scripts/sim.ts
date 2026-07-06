@@ -312,6 +312,83 @@ export function projectBelt(
   return { dx: 0, dy: sign(ddy), length: Math.abs(ddy) + 1 }
 }
 
+/**
+ * One axis-aligned leg of a belt path: its endpoints, unit step and tile count (endpoints
+ * inclusive). Exactly one of `dx`/`dy` is non-zero (the other 0) for a real run; a zero-length
+ * leg (a single tile) has both 0.
+ */
+export interface BeltLeg {
+  readonly ax: number
+  readonly ay: number
+  readonly bx: number
+  readonly by: number
+  readonly dx: number
+  readonly dy: number
+  readonly length: number
+}
+
+/**
+ * An L-shaped belt path from A to B: a `corner` tile and one or two axis-aligned {@link BeltLeg}s.
+ * `legs[0]` runs A -> corner along the first axis; `legs[1]` (present only for a real bend) runs
+ * corner -> B along the perpendicular axis, sharing the corner tile. `length` counts distinct
+ * tiles along the whole path (the corner once).
+ */
+export interface BeltPath {
+  readonly corner: { readonly x: number; readonly y: number }
+  readonly legs: readonly BeltLeg[]
+  readonly length: number
+}
+
+/** Build an axis-aligned {@link BeltLeg} from (ax,ay) to (bx,by). One axis must be constant. */
+function beltLeg(ax: number, ay: number, bx: number, by: number): BeltLeg {
+  return {
+    ax,
+    ay,
+    bx,
+    by,
+    dx: sign(bx - ax),
+    dy: sign(by - ay),
+    length: Math.abs(bx - ax) + Math.abs(by - ay) + 1,
+  }
+}
+
+/**
+ * Route the drawn segment A->B as an L: a run along one axis to a corner, then the perpendicular
+ * run to B. By default the first (longer) leg follows the dominant axis — `projectBelt`'s choice —
+ * so the corner sits at `(bx, ay)` for a mostly-horizontal drag or `(ax, by)` for a mostly-vertical
+ * one; `flip` swaps which axis goes first (a Shift-held drag). When A and B already share a row or
+ * column the perpendicular leg is empty and the path degenerates to the single straight run
+ * `projectBelt` would produce, so a straight drag is byte-for-byte unchanged. Pure and deterministic;
+ * used only at placement time (ghost preview + enqueuing the two `place_belt` legs), never on the
+ * per-tick hot path, so the small allocation here is fine.
+ */
+export function projectBeltPath(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  flip = false,
+): BeltPath {
+  const ddx = bx - ax
+  const ddy = by - ay
+  const dominantHorizontal = Math.abs(ddx) >= Math.abs(ddy)
+  const firstHorizontal = flip ? !dominantHorizontal : dominantHorizontal
+  const cx = firstHorizontal ? bx : ax
+  const cy = firstHorizontal ? ay : by
+  // A zero-delta axis collapses the L to the single straight run projectBelt would draw: when the
+  // corner coincides with A the first leg is empty, when it coincides with B the second is — either
+  // way there is just one A→B leg. So an aligned drag (even Shift-flipped) is byte-for-byte the old
+  // behaviour: one command, one ghost band.
+  if ((cx === ax && cy === ay) || (cx === bx && cy === by)) {
+    const only = beltLeg(ax, ay, bx, by)
+    return { corner: { x: bx, y: by }, legs: [only], length: only.length }
+  }
+  const corner = { x: cx, y: cy }
+  const first = beltLeg(ax, ay, cx, cy)
+  const second = beltLeg(cx, cy, bx, by)
+  return { corner, legs: [first, second], length: first.length + second.length - 1 }
+}
+
 /** Grow every per-tile buffer to at least `need` capacity (doubling), off the hot path. */
 function ensureCapacity(g: BeltGrid, need: number): void {
   const cap = g.tx.length
