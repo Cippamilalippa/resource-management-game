@@ -140,7 +140,9 @@ The plan below is ordered around fixing those five things.
 - [ ] **U3. Tech tree as a graph.** ★★☆ / M — The research panel is a list; render the
       10-node DAG as a proper tree with edges, unlock previews (icons of what each tech
       grants), and cost/prereq tooltips. Becomes essential as the tree grows (C1).
-- [ ] **U4. Rate/ratio helper in the recipe picker.** ★★☆ / M — The `apps/balance` machine
+- [x] **U4. Rate/ratio helper in the recipe picker.** ★★☆ / M — _Shipped: per-minute in/out
+      rates on every recipe row (picker + encyclopedia) and a one-level upstream machine bill
+      ("feed it: 2.7× Refinery…") on the assigned recipe; pure `rates.ts`, balance untouched._ The `apps/balance` machine
       -bill math answers "how many smelters per assembler?" — surface it: recipe rows show
       per-minute rates; a selected crafter shows "feeds 0.6 of downstream demand" style
       hints. Read-only, reuse the balance model at load.

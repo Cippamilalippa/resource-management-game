@@ -21,6 +21,9 @@ function recipe(over: Partial<RecipeChoice> & { id: string; name: string }): Rec
     craftEvery: 30,
     storageCap: 100,
     outputColor: 0,
+    inputRates: [],
+    outputRates: [],
+    ratios: [],
     requiresTerrainType: 0,
     ...over,
   }
