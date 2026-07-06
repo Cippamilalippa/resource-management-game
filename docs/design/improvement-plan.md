@@ -148,7 +148,9 @@ The plan below is ordered around fixing those five things.
 
 ## 5. UX & controls
 
-- [ ] **X1. Settings menu.** ★★☆ / M — There is none: volume slider (not just mute), UI
+- [x] **X1. Settings menu.** ★★☆ / M — _Shipped: volume, UI scale, autosave interval,
+      edge-scroll, pause-on-blur (Q6), gear button + `O` key. Key rebinding deferred (handlers
+      too scattered — needs a shared binding source first)._ There was none: volume slider, UI
       scale, autosave cadence, edge-scroll toggle+speed, key rebinding (persisted like the
       mute flag). Rebinding matters because the current map is dense (V/E/F/M/Q…).
 - [ ] **X2. Alt-mode overlay.** ★★☆ / S — One toggle that shows, on every machine, its

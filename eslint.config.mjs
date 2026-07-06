@@ -6,6 +6,9 @@ import globals from 'globals'
 export default tseslint.config(
   {
     ignores: [
+      // Agent worktrees and other harness state live under .claude — never lint them from
+      // the main checkout (each worktree runs its own gate).
+      '.claude/**',
       '**/node_modules/**',
       '**/dist/**',
       '**/dist-electron/**',
