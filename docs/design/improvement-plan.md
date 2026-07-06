@@ -141,10 +141,11 @@ The plan below is ordered around fixing those five things.
       -bill math answers "how many smelters per assembler?" — surface it: recipe rows show
       per-minute rates; a selected crafter shows "feeds 0.6 of downstream demand" style
       hints. Read-only, reuse the balance model at load.
-- [ ] **U5. Better inspector.** ★☆☆ / S — Selected crafter: recipe progress bar,
+- [x] **U5. Better inspector.** ★☆☆ / S — _Shipped: recipe progress bar, slot fill bars,
+      60s utilization %, belt occupant readout._ Selected crafter: recipe progress bar,
       input/output slot fill bars, utilization % over the last minute (sample in the HUD
       refresh). Selected belt: item + throughput. Much of this data exists in `inspect.ts`.
-- [ ] **U6. Alert history + severity.** ★☆☆ / S — Alerts currently aggregate live; add a
+- [x] **U6. Alert history + severity.** ★☆☆ / S — _Shipped: capped timestamped history log + per-source mute filtering every alert-fed view._ Alerts currently aggregate live; add a
       dismissible log with timestamps and severity colours, and a "don't warn for this
       building" mute. App-side only.
 
