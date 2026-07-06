@@ -28,10 +28,12 @@ const BELT_ARROW: readonly (readonly [number, number])[] = [
   [0, -0.4],
 ]
 
-/** Green ring on a placement ghost the sim would accept — a "clear to place" signal. */
-const GHOST_VALID = 0x55ff88
-/** Red fill+ring on a placement ghost the sim would reject (off-terrain, overlapping, unaffordable). */
-const GHOST_INVALID = 0xff5555
+/** Soft green ring on a placement ghost the sim would accept — a gentle "clear to place" signal
+ * (desaturated so it reads without the harsh neon glare of a pure green). */
+const GHOST_VALID = 0x8fce9f
+/** Soft red fill+ring on a placement ghost the sim would reject (off-terrain, overlapping,
+ * unaffordable) — muted to a warm rose so it flags "blocked" without shouting. */
+const GHOST_INVALID = 0xd98c8c
 
 /** Duration (ms) of the scale+fade "pop" when an entity first appears. */
 const SPAWN_MS = 160
@@ -608,8 +610,8 @@ export class Renderer {
       const fillColor = invalid ? GHOST_INVALID : ghost.color
       const ringColor = ghost.valid === true ? GHOST_VALID : invalid ? GHOST_INVALID : ghost.color
       g.rect(ghost.x * TILE_SIZE, ghost.y * TILE_SIZE, ghost.w * TILE_SIZE, ghost.h * TILE_SIZE)
-      g.fill({ color: fillColor, alpha: invalid ? 0.35 : 0.45 })
-      g.stroke({ width: ghost.valid === undefined ? 2 : 3, color: ringColor, alpha: 0.95 })
+      g.fill({ color: fillColor, alpha: invalid ? 0.22 : 0.28 })
+      g.stroke({ width: ghost.valid === undefined ? 2 : 2.5, color: ringColor, alpha: 0.75 })
       // A facing arrow for a directional placement (e.g. a port), so rotation reads on-screen.
       if (ghost.dir !== undefined) {
         const cx = (ghost.x + ghost.w / 2) * TILE_SIZE

@@ -51,6 +51,12 @@ export interface BuildItem {
    * producer that may sit on any belt tile. Drives the placement validity check.
    */
   readonly requiresTerrain?: string
+  /**
+   * True when this producer is an extraction machine (mine / derrick): its recipe is picked
+   * automatically from the terrain it sits on, so it can only be placed on a matching deposit
+   * and never offers a manual recipe choice.
+   */
+  readonly extraction?: boolean
 }
 
 export interface BuildState {

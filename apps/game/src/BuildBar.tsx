@@ -99,10 +99,14 @@ function itemRows(item: BuildItem): DetailRow[] {
     case 'belt':
       return [{ label: 'Speed', value: `1 tile / ${item.moveEvery} ticks` }, ...costRow(item)]
     case 'producer':
-      // A machine is placed empty; its recipe (and thus I/O) is chosen afterward in the sidebar.
+      // A machine is placed empty; its recipe (and thus I/O) is chosen afterward in the sidebar —
+      // except an extraction machine (mine/derrick), which auto-mines whatever deposit it sits on.
       return [
         { label: 'Storage', value: String(item.storage) },
-        { label: 'Recipe', value: 'Choose after placing' },
+        {
+          label: 'Recipe',
+          value: item.extraction ? 'Auto (from terrain)' : 'Choose after placing',
+        },
         ...costRow(item),
       ]
     case 'building':

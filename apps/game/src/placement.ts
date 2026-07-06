@@ -389,8 +389,9 @@ export function installPlacement(
     })
   }
   // Ghost tint for a placement the sim would reject (off-belt or wrong terrain), and the
-  // tint the delete tool paints the object it would remove.
-  const INVALID_COLOR = 0xff5555
+  // tint the delete tool paints the object it would remove. A muted rose, matching the
+  // renderer's softened ghost palette so the cue reads without a harsh neon glare.
+  const INVALID_COLOR = 0xd98c8c
 
   /**
    * The footprint of the deletable object at (x, y) — a 1×1 belt-grid tile, or a resource
@@ -434,6 +435,14 @@ export function installPlacement(
    */
   const producerValid = (item: BuildItem, x: number, y: number): boolean => {
     if (!footprintClear(x, y, item.w, item.h)) return false
+    // An extraction machine (mine/derrick) auto-adopts the recipe of the terrain it lands on, so it
+    // is only "clear to place" over a deposit one of its recipes can mine — off a deposit it would
+    // sit idle, so the ghost reads blocked to match what actually happens on placement.
+    const def = machines.byColor.get(item.color)
+    if (def?.extraction) {
+      const terrain = terrainTypeAt(state.terrain, x, y)
+      return def.recipes.some((r) => r.requiresTerrainType === terrain)
+    }
     if (!item.requiresTerrain) return true
     return terrainTypeAt(state.terrain, x, y) === terrainTypeOf(item.requiresTerrain)
   }
@@ -809,7 +818,7 @@ export function installPlacement(
           ay: pressTile.y,
           bx: tile.x,
           by: tile.y,
-          color: 0xff5555,
+          color: INVALID_COLOR,
         })
       }
       return

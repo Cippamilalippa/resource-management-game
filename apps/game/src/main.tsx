@@ -111,6 +111,7 @@ function machineItems(
       color: def.color,
       itemColor: def.color,
       accepts: [],
+      ...(def.extraction ? { extraction: true } : {}),
       ...(cost.length > 0 ? { cost } : {}),
       spawnEvery: 20,
       moveEvery: 1,
