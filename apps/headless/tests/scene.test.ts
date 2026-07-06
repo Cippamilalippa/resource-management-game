@@ -65,6 +65,22 @@ describe('procedural starting scene', () => {
     expect(totalStock(sparse)).toBe(0)
   })
 
+  it('rolls a finite richness for every deposit tile, within each scenario band', async () => {
+    // Abundant: generous band (1200–2400), one richness entry per painted deposit tile.
+    const abundant = await bootstrapSim(7, { scenario: 'scenario.abundant' })
+    expect(abundant.state.deposits.remaining.size).toBe(abundant.state.terrain.size)
+    for (const units of abundant.state.deposits.remaining.values()) {
+      expect(units).toBeGreaterThanOrEqual(1200)
+      expect(units).toBeLessThanOrEqual(2400)
+    }
+    // Sparse: tighter band (300–700) — its deposits carry less.
+    const sparse = await bootstrapSim(7, { scenario: 'scenario.sparse' })
+    for (const units of sparse.state.deposits.remaining.values()) {
+      expect(units).toBeGreaterThanOrEqual(300)
+      expect(units).toBeLessThanOrEqual(700)
+    }
+  })
+
   it('keeps the fixed anchors: a single 2x2 village on the origin and a 6x6 orchard at (50,50)', async () => {
     const { world } = await bootstrapSim(1, { scenario: 'scenario.abundant' })
     const { entities } = serialize(world)

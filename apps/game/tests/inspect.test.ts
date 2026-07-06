@@ -9,6 +9,8 @@ import {
   enqueuePlaceBuilding,
   enqueuePlacePort,
   enqueuePlaceProducer,
+  tileKey,
+  TERRAIN_SPRITE,
   type GameState,
 } from '../src/gameLogic.ts'
 import { InspectRegistry, resolveInspect } from '../src/inspect.ts'
@@ -46,6 +48,7 @@ describe('resolveInspect', () => {
         state.grid,
         state.buildings,
         state.villages,
+        state.deposits,
         new InspectRegistry(),
         99,
         99,
@@ -61,7 +64,16 @@ describe('resolveInspect', () => {
     flush(world, state)
     reg.record(0, 0, { name: 'Conveyor Belt Mk1', type: 'belt' })
 
-    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 0, 0)
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      0,
+      0,
+    )
     expect(info?.title).toBe('Conveyor Belt Mk1')
     expect(info?.subtitle).toBe('Conveyor belt · facing East')
     expect(info?.footprint).toEqual({ x: 0, y: 0, w: 1, h: 1 })
@@ -81,6 +93,7 @@ describe('resolveInspect', () => {
         state.grid,
         state.buildings,
         state.villages,
+        state.deposits,
         new InspectRegistry(),
         1,
         0,
@@ -108,7 +121,16 @@ describe('resolveInspect', () => {
     enqueuePlacePort(world, { x: 6, y: 5, port: 'output', color: 0x445500, spawnEvery: 20 })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 5)
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      6,
+      5,
+    )
     expect(info?.subtitle).toBe('Output port · facing East')
     // 20 ticks/item at 60 tps = 3 items/s.
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Output rate', value: '3 /s' })
@@ -134,7 +156,16 @@ describe('resolveInspect', () => {
     enqueuePlacePort(world, { x: 6, y: 5, port: 'input', color: 0xdd4444, dir: 3 })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 5)
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      6,
+      5,
+    )
     expect(info?.subtitle).toBe('Input port · facing West')
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Feeds', value: 'Village' })
   })
@@ -156,7 +187,16 @@ describe('resolveInspect', () => {
     reg.record(5, 5, { name: 'Farm', type: 'producer' })
     flush(world, state)
 
-    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 5, 5)
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      5,
+      5,
+    )
     expect(info?.subtitle).toBe('Producer')
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Craft rate', value: '2 /s' })
     // A drain-only recipe output shows under the "Produces" section as an icon + current/total bar.
@@ -183,11 +223,65 @@ describe('resolveInspect', () => {
 
     // Resolving any footprint tile finds the building and its stock bar. A dual-role store slot
     // (fillable + drainable) is held/consumed, so it appears under the "Consumes" section.
-    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 6, 6)
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      6,
+      6,
+    )
     expect(info?.title).toBe('Village')
     expect(info?.stats).toContainEqual({ kind: 'heading', label: 'Consumes' })
     const stock = info?.stats.find((s) => s.kind === 'bar')
     expect(stock).toMatchObject({ kind: 'bar', max: 50, color: 0x112233 })
+  })
+
+  it('shows remaining richness on a finite deposit tile, and "Exhausted" at zero', () => {
+    const world = createGameWorld(1)
+    const state = createGameState()
+    const reg = new InspectRegistry()
+    // Paint a finite deposit tile with a matching terrain entity, then set its remaining richness.
+    const key = tileKey(8, 8)
+    const eid = spawnEntity(world, {
+      pos: { x: 8, y: 8 },
+      sprite: TERRAIN_SPRITE,
+      color: 0xb08d57,
+      width: 1,
+      height: 1,
+    })
+    state.deposits.remaining.set(key, 1240)
+    state.deposits.eid.set(key, eid)
+    reg.record(8, 8, { name: 'Bauxite Deposit', type: 'terrain' })
+
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      8,
+      8,
+    )
+    expect(info?.title).toBe('Bauxite Deposit')
+    expect(info?.stats).toContainEqual({ kind: 'text', label: 'Deposit', value: '1,240 left' })
+
+    // Drained to zero: the row reads "Exhausted".
+    state.deposits.remaining.set(key, 0)
+    const spent = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      8,
+      8,
+    )
+    expect(spent?.stats).toContainEqual({ kind: 'text', label: 'Deposit', value: 'Exhausted' })
   })
 
   it('describes a multi-tile building across its whole footprint', () => {
@@ -204,13 +298,33 @@ describe('resolveInspect', () => {
       [-1, 0],
       [0, 0],
     ] as const) {
-      const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, x, y)
+      const info = resolveInspect(
+        world,
+        state.grid,
+        state.buildings,
+        state.villages,
+        state.deposits,
+        reg,
+        x,
+        y,
+      )
       expect(info?.title).toBe('Village')
       expect(info?.subtitle).toBe('Building')
       expect(info?.footprint).toEqual({ x: -1, y: -1, w: 2, h: 2 })
     }
     expect(
-      info_size(resolveInspect(world, state.grid, state.buildings, state.villages, reg, 0, 0)),
+      info_size(
+        resolveInspect(
+          world,
+          state.grid,
+          state.buildings,
+          state.villages,
+          state.deposits,
+          reg,
+          0,
+          0,
+        ),
+      ),
     ).toBe('2×2')
   })
 })

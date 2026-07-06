@@ -143,6 +143,62 @@ export function terrainTypeAt(terrain: TerrainGrid, x: number, y: number): numbe
   return terrain.get(tileKey(x, y)) ?? TERRAIN_NONE
 }
 
+// --- Deposits: finite richness (G1) -----------------------------------------
+
+/**
+ * "This deposit tile has no finite richness" sentinel returned by {@link depositRichnessAt} — an
+ * infinite / legacy deposit (a scenario that declares richness infinite, or an old save that
+ * predates the field). Distinct from {@link RICHNESS_EXHAUSTED} (0, a finite deposit run dry).
+ */
+export const RICHNESS_INFINITE = -1
+
+/** A finite deposit tile at zero remaining units — EXHAUSTED. Its extraction crafter stalls. */
+export const RICHNESS_EXHAUSTED = 0
+
+/**
+ * The deterministic colour a deposit's terrain entity is greyed to the moment it exhausts, so the
+ * depleted patch reads apart at a glance. The sim owns entity colours (sim → render, one-way), so
+ * this is mutated onto the terrain {@link import('@factory/engine/core').Renderable} like any other
+ * sim-driven visual; being deterministic, it round-trips through save/load and the state hash.
+ */
+export const EXHAUSTED_COLOR = 0x35353b
+
+/**
+ * Per-tile deposit richness, owned by the base game (not the engine) — the finite counterpart to the
+ * infinite extraction the base game shipped with. Parallel to {@link TerrainGrid}: keyed by the same
+ * packed tile key, it records how many extraction units remain under a deposit tile.
+ *
+ *   - **absent** from `remaining` → the tile has *infinite* richness (an `infinite` scenario, or a
+ *     legacy save with no deposit data). Extraction never depletes it — the original behaviour.
+ *   - **> 0** → a finite deposit with that many units left.
+ *   - **0** ({@link RICHNESS_EXHAUSTED}) → drained; its extraction crafter stalls (read as starved).
+ *
+ * `eid` maps each finite deposit tile to its terrain render entity, so exhaustion can grey that
+ * entity in place (see {@link EXHAUSTED_COLOR}). Entity ids are not stable across save/load, so `eid`
+ * is never serialized — it is re-linked from the re-spawned terrain entities on load. Populated by
+ * the starting scene (richness rolled from the scenario band via the seeded RNG) and drained by
+ * {@link runCrafters}; every mutation is a plain Map write, no per-entity allocation.
+ */
+export interface DepositStore {
+  /** Packed tile key -> remaining extraction units (0 = exhausted). Absent = infinite / legacy. */
+  readonly remaining: Map<number, number>
+  /** Packed tile key -> the deposit's terrain render entity id (for the exhaustion grey-out). */
+  readonly eid: Map<number, number>
+}
+
+export function createDepositStore(): DepositStore {
+  return { remaining: new Map(), eid: new Map() }
+}
+
+/**
+ * Remaining extraction units under tile (x, y), or {@link RICHNESS_INFINITE} for an infinite /
+ * untracked tile. Read-only probe for the inspector/HUD (the depletion hot path keys off the
+ * crafter's cached anchor directly). A Map lookup — allocation-free.
+ */
+export function depositRichnessAt(deposits: DepositStore, x: number, y: number): number {
+  return deposits.remaining.get(tileKey(x, y)) ?? RICHNESS_INFINITE
+}
+
 /**
  * Map a technology's string id to a stable, non-zero 32-bit integer (FNV-1a) — the twin of
  * {@link terrainTypeOf} for techs. The sandboxed sim never enumerates or names technologies
@@ -347,6 +403,18 @@ function grow(src: Int32Array, len: number, fill: number): Int32Array {
 
 function grow8(src: Int8Array, len: number, fill: number): Int8Array {
   const out = new Int8Array(len)
+  if (fill !== 0) out.fill(fill)
+  out.set(src)
+  return out
+}
+
+/**
+ * Grow a Float64 buffer (the twin of {@link grow} for {@link tileKey} values). A packed tile key can
+ * exceed 2^31, so a cached anchor key lives in a Float64Array — an Int32Array would silently truncate
+ * it. Integers up to 2^53 are exact in a float, and a tile key is well under that.
+ */
+function growF64(src: Float64Array, len: number, fill: number): Float64Array {
+  const out = new Float64Array(len)
   if (fill !== 0) out.fill(fill)
   out.set(src)
   return out
@@ -601,6 +669,14 @@ export interface BuildingStore {
   slotRole: Int8Array
   /** Flattened per-slot recipe amount: units consumed (input) or produced (output) per craft; 0 if not a recipe slot. */
   slotAmt: Int32Array
+  /**
+   * Cached packed tile key of the deposit an *extraction* crafter depletes (its anchor tile), or
+   * {@link NONE} for any building that is not a finite-deposit extractor. Set once at placement so
+   * the depletion hot path ({@link runCrafters}) can look up the tile's richness by a bare integer
+   * key — never recomputing it — and skip the lookup entirely for ordinary machines. Float64 because a
+   * packed {@link tileKey} can exceed the Int32 range (it would truncate to a bogus key otherwise).
+   */
+  anchorKey: Float64Array
 }
 
 export function createBuildingStore(): BuildingStore {
@@ -625,6 +701,7 @@ export function createBuildingStore(): BuildingStore {
     slotCap: new Int32Array(cap * MAX_SLOTS),
     slotRole: new Int8Array(cap * MAX_SLOTS),
     slotAmt: new Int32Array(cap * MAX_SLOTS),
+    anchorKey: new Float64Array(cap).fill(NONE),
   }
 }
 
@@ -651,6 +728,7 @@ function ensureBuildingCapacity(s: BuildingStore, need: number): void {
   s.slotCap = grow(s.slotCap, next * MAX_SLOTS, 0)
   s.slotRole = grow8(s.slotRole, next * MAX_SLOTS, 0)
   s.slotAmt = grow(s.slotAmt, next * MAX_SLOTS, 0)
+  s.anchorKey = growF64(s.anchorKey, next, NONE)
 }
 
 /**
@@ -718,6 +796,7 @@ export function registerBuilding(
   store.recipe[b] = 0
   store.craftEvery[b] = Math.max(1, craftEvery)
   store.craftTimer[b] = 0
+  store.anchorKey[b] = NONE // set by place_crafter only for a finite-deposit extractor
   let n = 0
   for (let j = 0; j < slots.length && n < MAX_SLOTS; j++) {
     const i = b * MAX_SLOTS + n
@@ -1403,8 +1482,19 @@ function stepBelts(
  * it reduces to "make one unit into the output slot every craftEvery ticks", capped. When a
  * craft cannot fire the timer holds at the cadence so it retries as soon as inputs arrive / room
  * frees. Runs every tick, independent of the belt move cadence; allocation-free.
+ *
+ * A finite-deposit extractor (a crafter tagged with a cached `anchorKey`) additionally gates on the
+ * remaining richness under its anchor tile: an EXHAUSTED tile (0 left) stalls it exactly like a
+ * missing input, and every completed extraction decrements the tile by the units produced. Crossing
+ * to zero greys the deposit's terrain entity in place. Ordinary machines (anchorKey === NONE) skip
+ * all of this — the richness Map is never touched for them.
  */
-function runCrafters(api: ModApi, store: BuildingStore): void {
+function runCrafters(
+  gw: GameWorld,
+  api: ModApi,
+  store: BuildingStore,
+  deposits: DepositStore,
+): void {
   const n = store.count
   for (let b = 0; b < n; b++) {
     // A pure store (no recipe) never "works": make sure it carries no leftover active pulse
@@ -1439,20 +1529,44 @@ function runCrafters(api: ModApi, store: BuildingStore): void {
         break
       }
     }
+    // Finite-deposit gate: read the richness under the extractor's cached anchor once. `rem` stays
+    // RICHNESS_INFINITE (-1) for ordinary machines and infinite/legacy deposits, which never deplete.
+    let rem = RICHNESS_INFINITE
+    const ak = store.anchorKey[b]!
+    if (ak !== NONE) {
+      const r = deposits.remaining.get(ak)
+      if (r !== undefined) {
+        rem = r
+        if (r <= RICHNESS_EXHAUSTED) canCraft = false // exhausted: stall like a missing input
+      }
+    }
     if (!canCraft) {
       // Hold the timer at the cadence so we retry next tick without re-accumulating.
       store.craftTimer[b] = store.craftEvery[b]!
-      // Starved/backed-up: stop the working pulse so the machine reads as stalled.
+      // Starved/backed-up/exhausted: stop the working pulse so the machine reads as stalled.
       api.setActive(store.eid[b]!, false)
       continue
     }
     store.craftTimer[b] = 0
+    let extracted = 0
     for (let k = 0; k < slotN; k++) {
       const i = base + k
       const amt = store.slotAmt[i]!
       if (amt === 0) continue
       if (store.slotRole[i]! & ROLE_DEPOSIT) store.slotCount[i] = store.slotCount[i]! - amt
-      else store.slotCount[i] = store.slotCount[i]! + amt
+      else {
+        store.slotCount[i] = store.slotCount[i]! + amt
+        extracted += amt // units pulled from the deposit this craft (recipe outputs)
+      }
+    }
+    // Deplete the deposit under a finite extractor by what it produced; grey the tile on exhaustion.
+    if (rem > RICHNESS_EXHAUSTED) {
+      const left = rem - extracted > RICHNESS_EXHAUSTED ? rem - extracted : RICHNESS_EXHAUSTED
+      deposits.remaining.set(ak, left)
+      if (left === RICHNESS_EXHAUSTED) {
+        const teid = deposits.eid.get(ak)
+        if (teid !== undefined) gw.components.Renderable.color[teid] = EXHAUSTED_COLOR
+      }
     }
     // Fired this cadence: mark it working. Stays set through the accumulation ticks above.
     api.setActive(store.eid[b]!, true)
@@ -1508,13 +1622,14 @@ function updateBelts(
   g: BeltGrid,
   store: BuildingStore,
   treasury: TreasuryStore,
+  deposits: DepositStore,
 ): void {
   if (++g.moveTimer >= g.moveEvery) {
     g.moveTimer = 0
     stepBelts(gw, api, g, store, treasury)
     g.moveCount++
   }
-  runCrafters(api, store)
+  runCrafters(gw, api, store, deposits)
   extractFromOutputs(api, g, store)
 }
 
@@ -1649,6 +1764,8 @@ export interface GameState {
   readonly grid: BeltGrid
   /** The passive terrain layer that gates where crafters may be built. */
   readonly terrain: TerrainGrid
+  /** Finite deposit richness: units remaining under each deposit tile (absent = infinite). */
+  readonly deposits: DepositStore
   /** The resource-holding buildings (crafters and stores). */
   readonly buildings: BuildingStore
   /** The villages — staged demand consumers that grow/decline on how well they are supplied. */
@@ -1669,6 +1786,7 @@ export function createGameState(moveEvery = 60): GameState {
   return {
     grid: createBeltGrid(moveEvery),
     terrain: new Map(),
+    deposits: createDepositStore(),
     buildings: createBuildingStore(),
     villages: createVillageStore(),
     research: createResearchStore(),
@@ -1746,6 +1864,11 @@ export interface BuildingSnapshot {
   readonly silo?: number
   /** The crafter's recipe id (0 = empty machine). Absent in pre-recipe saves → treated as 0. */
   readonly recipe?: number
+  /**
+   * Cached deposit anchor tile key of a finite-deposit extractor, or absent for any other building
+   * (and in pre-richness saves → treated as {@link NONE}, so a legacy extractor simply never depletes).
+   */
+  readonly anchorKey?: number
   readonly craftEvery: number
   readonly craftTimer: number
   readonly slots: readonly SlotSnapshot[]
@@ -1799,6 +1922,13 @@ export interface GameStateSnapshot {
   readonly belt: BeltSnapshot
   readonly buildings: readonly BuildingSnapshot[]
   readonly terrain: readonly (readonly [number, number])[]
+  /**
+   * Finite deposit richness as `[tileKey, remaining]` pairs, sorted by key (canonical, like
+   * `terrain`). Absent in pre-richness saves → every deposit loads as infinite (legacy behaviour).
+   * The terrain-entity links ({@link DepositStore.eid}) are rebuilt from the re-spawned entities,
+   * not stored.
+   */
+  readonly deposits?: readonly (readonly [number, number])[]
   readonly villages: VillageSnapshot
   readonly research: ResearchSnapshot
   /** The build-cost bank. Absent in pre-treasury saves → loads as empty. */
@@ -1854,6 +1984,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       depot: store.depot[b]!,
       silo: store.silo[b]!,
       recipe: store.recipe[b]!,
+      anchorKey: store.anchorKey[b]!,
       craftEvery: store.craftEvery[b]!,
       craftTimer: store.craftTimer[b]!,
       slots,
@@ -1863,6 +1994,10 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
   // Sort terrain by packed key: a Map iterates in insertion order, which differs between the
   // scene's insert order and a rebuilt store's, so sorting gives one canonical form.
   const terrain: [number, number][] = [...state.terrain.entries()].sort((a, b) => a[0] - b[0])
+  // Deposit richness, same canonical key-sorted form (the `eid` links are re-derived on load).
+  const deposits: [number, number][] = [...state.deposits.remaining.entries()].sort(
+    (a, b) => a[0] - b[0],
+  )
 
   const v = state.villages
   const entries: VillageEntrySnapshot[] = []
@@ -1884,6 +2019,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
     belt: { tiles, moveTimer: g.moveTimer, moveCount: g.moveCount },
     buildings,
     terrain,
+    deposits,
     villages: { stages: v.stages, timer: v.timer, entries },
     research: serializeResearch(state.research),
     treasury: serializeTreasury(state.treasury),
@@ -1913,6 +2049,7 @@ export function loadGameState(
   const markByTile = new Map<number, number>()
   const itemByTile = new Map<number, number>()
   const footprintByTopLeft = new Map<number, number>()
+  const terrainByTile = new Map<number, number>() // deposit terrain entities, re-linked to richness
   for (let i = 0; i < entities.length; i++) {
     const e = entities[i]!
     const eid = api.spawn({
@@ -1927,7 +2064,8 @@ export function loadGameState(
     if (shape === SHAPE_BELT_ARROW) trackByTile.set(key, eid)
     else if (shape === SHAPE_PORT_ARROW || shape === SHAPE_SPLITTER) markByTile.set(key, eid)
     else if (shape === SHAPE_CIRCLE) itemByTile.set(key, eid)
-    else if (shape !== SHAPE_TERRAIN) footprintByTopLeft.set(key, eid) // building footprint
+    else if (shape === SHAPE_TERRAIN) terrainByTile.set(key, eid)
+    else footprintByTopLeft.set(key, eid) // building footprint
   }
 
   // Belt grid: replay the tiles, then link each tile's entities from the index.
@@ -1976,6 +2114,7 @@ export function loadGameState(
     store.depot[b] = bldg.depot ?? 0
     store.silo[b] = bldg.silo ?? 0
     store.recipe[b] = bldg.recipe ?? 0
+    store.anchorKey[b] = bldg.anchorKey ?? NONE
     store.craftEvery[b] = bldg.craftEvery
     store.craftTimer[b] = bldg.craftTimer
     store.slotN[b] = bldg.slots.length
@@ -2007,6 +2146,21 @@ export function loadGameState(
   state.terrain.clear()
   for (let i = 0; i < snap.terrain.length; i++) {
     state.terrain.set(snap.terrain[i]![0], snap.terrain[i]![1])
+  }
+
+  // Deposit richness: restore each finite tile's remaining units and re-link it to its re-spawned
+  // terrain entity (so a later exhaustion can still grey it). Absent in a pre-richness save → every
+  // deposit stays infinite (the Maps stay empty). Exhausted tiles kept their greyed colour in the
+  // saved entity, so no recolour is needed on load.
+  const dep = state.deposits
+  dep.remaining.clear()
+  dep.eid.clear()
+  const depSnap = snap.deposits ?? []
+  for (let i = 0; i < depSnap.length; i++) {
+    const key = depSnap[i]![0]
+    dep.remaining.set(key, depSnap[i]![1])
+    const teid = terrainByTile.get(key)
+    if (teid !== undefined) dep.eid.set(key, teid)
   }
 
   // Villages: reset the store, restore the shared stage ladder (deep-copied so the store never
@@ -2378,6 +2532,7 @@ function copyBuilding(s: BuildingStore, src: number, dst: number): void {
   s.recipe[dst] = s.recipe[src]!
   s.craftEvery[dst] = s.craftEvery[src]!
   s.craftTimer[dst] = s.craftTimer[src]!
+  s.anchorKey[dst] = s.anchorKey[src]!
   s.slotN[dst] = s.slotN[src]!
   for (let k = 0; k < MAX_SLOTS; k++) {
     s.slotColor[dst * MAX_SLOTS + k] = s.slotColor[src * MAX_SLOTS + k]!
@@ -2617,6 +2772,9 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         slots,
       )
       state.buildings.recipe[b] = cmd.recipe ?? 0
+      // A terrain-gated crafter is an extractor: cache its anchor tile so the depletion hot path can
+      // find the deposit's richness by a bare key. Left as NONE for machines that sit on no deposit.
+      if (need !== TERRAIN_NONE) state.buildings.anchorKey[b] = tileKey(cmd.x, cmd.y)
       relinkUnlinkedPorts(g, state.buildings)
       return
     }
@@ -3104,7 +3262,7 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
   }
 
   const beltSystem: System = (gw) => {
-    updateBelts(gw, api, state.grid, state.buildings, state.treasury)
+    updateBelts(gw, api, state.grid, state.buildings, state.treasury, state.deposits)
   }
 
   const villageSystem: System = () => {

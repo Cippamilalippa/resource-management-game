@@ -10,6 +10,7 @@ import { ResourceLabel } from './ResourceLabel.tsx'
 const KIND: Record<AlertKind, { icon: IconName; severity: string; label: string }> = {
   crafter_missing_input: { icon: 'PackageX', severity: 'warn', label: 'Starved crafter' },
   crafter_output_full: { icon: 'PackagePlus', severity: 'warn', label: 'Output backed up' },
+  crafter_exhausted: { icon: 'BatteryWarning', severity: 'bad', label: 'Deposit exhausted' },
   village_declining: { icon: 'TrendingDown', severity: 'bad', label: 'Village declining' },
   cannon_no_target: { icon: 'Crosshair', severity: 'warn', label: 'Cannon has no target' },
   cannon_out_of_range: { icon: 'Crosshair', severity: 'warn', label: 'Cannon target out of range' },
