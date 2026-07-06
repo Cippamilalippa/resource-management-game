@@ -12,11 +12,13 @@ import {
   MAX_SLOTS,
   ROLE_DEPOSIT,
   RESEARCH_NONE,
+  RICHNESS_EXHAUSTED,
   VILLAGE_GROWTH_AFTER,
   VILLAGE_DECLINE_AFTER,
   CANNON_RANGE,
   buildingAt,
   canAffordTreasury,
+  depositRichnessAt,
   type BuildingStore,
   type CostEntry,
   type GameState,
@@ -164,6 +166,7 @@ export function canAfford(state: GameState, cost: readonly CostEntry[]): boolean
 export type AlertKind =
   | 'crafter_missing_input'
   | 'crafter_output_full'
+  | 'crafter_exhausted'
   | 'village_declining'
   | 'cannon_no_target'
   | 'cannon_out_of_range'
@@ -179,10 +182,11 @@ export interface Alert {
 
 /**
  * Scan for stalled crafters and declining villages. A crafter is stalled when its craft timer is
- * pinned at the cadence (`runCrafters` holds it there when it cannot fire) — attributed to a
- * missing input (a deposit recipe slot short of its `amt`) in preference to a full output (a drain
- * recipe slot with no room), matching the order `runCrafters` itself checks. A village is
- * declining whenever its decline timer has started to accrue.
+ * pinned at the cadence (`runCrafters` holds it there when it cannot fire) — attributed first to an
+ * *exhausted deposit* (a finite-deposit extractor whose tile ran dry), then to a missing input (a
+ * deposit recipe slot short of its `amt`) in preference to a full output (a drain recipe slot with no
+ * room), matching the order `runCrafters` itself checks. A village is declining whenever its decline
+ * timer has started to accrue.
  */
 export function collectAlerts(state: GameState): Alert[] {
   const alerts: Alert[] = []
@@ -190,6 +194,15 @@ export function collectAlerts(state: GameState): Alert[] {
   for (let b = 0; b < store.count; b++) {
     if (!store.crafts[b]) continue
     if (store.craftTimer[b]! < store.craftEvery[b]!) continue // healthy or mid-cycle
+    // A finite-deposit extractor (anchorKey set) stalled on an exhausted tile has no missing input and
+    // no full output, so surface it as its own actionable alert (the deposit is spent — relocate it).
+    if (
+      store.anchorKey[b]! >= 0 &&
+      depositRichnessAt(state.deposits, store.bx[b]!, store.by[b]!) === RICHNESS_EXHAUSTED
+    ) {
+      alerts.push({ kind: 'crafter_exhausted', x: store.bx[b]!, y: store.by[b]! })
+      continue
+    }
     const base = b * MAX_SLOTS
     const n = store.slotN[b]!
     let missing = -1

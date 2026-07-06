@@ -18,11 +18,15 @@ import {
   MAX_SLOTS,
   ROLE_DEPOSIT,
   ROLE_DRAIN,
+  RICHNESS_INFINITE,
+  RICHNESS_EXHAUSTED,
   buildingAt,
   tileKey,
+  depositRichnessAt,
   villageStageAt,
   type BeltGrid,
   type BuildingStore,
+  type DepositStore,
   type VillageStore,
 } from './gameLogic.ts'
 
@@ -248,6 +252,7 @@ function describeBuilding(
   world: GameWorld,
   buildings: BuildingStore,
   villages: VillageStore,
+  deposits: DepositStore,
   registry: InspectRegistry,
   x: number,
   y: number,
@@ -266,6 +271,19 @@ function describeBuilding(
     const stats: InspectStat[] = []
     // A terrain (or any object) blurb leads the rows, e.g. "build a Farm on top".
     if (meta?.detail) stats.push({ kind: 'text', label: 'Use', value: meta.detail })
+    // A finite deposit tile (or an extraction machine anchored on one) shows its remaining richness —
+    // e.g. "Bauxite Deposit — 1,240 left". Infinite / non-deposit tiles carry no such row.
+    const richness = depositRichnessAt(deposits, px, py)
+    if (richness !== RICHNESS_INFINITE) {
+      stats.push({
+        kind: 'text',
+        label: 'Deposit',
+        value:
+          richness === RICHNESS_EXHAUSTED
+            ? 'Exhausted'
+            : `${richness.toLocaleString('en-US')} left`,
+      })
+    }
     // A resource-holding building shows its craft rate and its stockpile, split into what it
     // makes (recipe outputs) and what it holds/consumes (recipe inputs and plain stores).
     const b = buildingAt(buildings, px, py)
@@ -356,6 +374,7 @@ export function resolveInspect(
   grid: BeltGrid,
   buildings: BuildingStore,
   villages: VillageStore,
+  deposits: DepositStore,
   registry: InspectRegistry,
   x: number,
   y: number,
@@ -363,5 +382,5 @@ export function resolveInspect(
 ): InspectInfo | null {
   const t = grid.index.get(tileKey(x, y))
   if (t !== undefined) return describeBeltTile(world, grid, buildings, registry, t, x, y)
-  return describeBuilding(world, buildings, villages, registry, x, y, utilizationOf)
+  return describeBuilding(world, buildings, villages, deposits, registry, x, y, utilizationOf)
 }

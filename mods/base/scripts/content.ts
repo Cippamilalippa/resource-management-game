@@ -160,6 +160,17 @@ function startingTreasury(proto: Prototype): { item: string; amount: number }[] 
 }
 
 /**
+ * Validate a scenario's optional deposit-`richness` band (G1 finite deposits — the scene rolls each
+ * deposit tile's units from it). Absent or the string `"infinite"` means infinite richness (a deposit
+ * that never depletes — allowed); anything else must be a `{ min, max }` positive-integer range (min ≤ max).
+ */
+function validateRichness(proto: Prototype): void {
+  const raw = proto.richness
+  if (raw === undefined || raw === 'infinite') return
+  intRange(proto, 'richness')
+}
+
+/**
  * The `{ item, amount }[]` a building/belt/port/… costs from the treasury to place. Empty for a
  * free placement. The prototype types that may bear a `buildCost` (everything the player can build).
  */
@@ -196,6 +207,7 @@ function validateScenarioShapes(registry: PrototypeRegistry): void {
     if (deposits.length === 0) fail(`${s.id}: scenario needs at least one "deposits" terrain id`)
     intRange(s, 'patchSize')
     intRange(s, 'spread')
+    validateRichness(s)
     startingKit(s)
     startingTreasury(s)
   }

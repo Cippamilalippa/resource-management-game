@@ -95,7 +95,16 @@ export function installPlacement(
 
   /** The colour of whatever deletable object sits at (x, y), for looking up its refund. */
   const colorAt = (x: number, y: number): number | null => {
-    const info = resolveInspect(world, grid, state.buildings, state.villages, registry, x, y)
+    const info = resolveInspect(
+      world,
+      grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      registry,
+      x,
+      y,
+    )
     return info ? info.color : null
   }
 
@@ -519,6 +528,7 @@ export function installPlacement(
         grid,
         state.buildings,
         state.villages,
+        state.deposits,
         registry,
         pinned.tile.x,
         pinned.tile.y,
@@ -540,6 +550,7 @@ export function installPlacement(
           grid,
           state.buildings,
           state.villages,
+          state.deposits,
           registry,
           hoverTile.x,
           hoverTile.y,
@@ -570,6 +581,7 @@ export function installPlacement(
       grid,
       state.buildings,
       state.villages,
+      state.deposits,
       registry,
       tile.x,
       tile.y,

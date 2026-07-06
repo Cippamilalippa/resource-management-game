@@ -83,11 +83,20 @@ interface Rect {
   h: number
 }
 
+/**
+ * A scenario's deposit-richness band. `null` means the scenario declares *infinite* richness (the
+ * `richness` field omitted, or `"infinite"`) — extraction never depletes, the original behaviour.
+ * A finite band rolls a per-tile richness from `[min, max]` via the seeded RNG.
+ */
+type RichnessBand = { readonly min: number; readonly max: number } | null
+
 /** The scenario layout params the scene consumes, after parsing (with fallbacks). */
 interface ScenarioConfig {
   readonly deposits: readonly string[]
   readonly patch: { readonly min: number; readonly max: number }
   readonly spread: { readonly min: number; readonly max: number }
+  /** Per-deposit-tile richness band, or `null` for an infinite (never-depleting) scenario. */
+  readonly richness: RichnessBand
   readonly startingKit: readonly { readonly item: string; readonly amount: number }[]
   readonly startingTreasury: readonly { readonly item: string; readonly amount: number }[]
 }
@@ -123,6 +132,26 @@ function rangeOf(
 }
 
 /**
+ * Parse a scenario's `richness` into a {@link RichnessBand}: a `{ min, max }` object → a finite band
+ * (positive integers, min ≤ max); omitted or the string `"infinite"` → `null` (infinite, so the
+ * scene rolls no richness and extraction never depletes — the pre-G1 behaviour). Validation proper
+ * lives host-side in `content.ts`; this stays lenient so a malformed field just falls back to infinite.
+ */
+function richnessBandOf(proto: SceneProto | undefined): RichnessBand {
+  const raw = proto?.richness
+  if (raw === undefined || raw === 'infinite') return null
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>
+    if (typeof r.min === 'number' && typeof r.max === 'number') {
+      const min = Math.max(1, Math.floor(r.min))
+      const max = Math.max(min, Math.floor(r.max))
+      return { min, max }
+    }
+  }
+  return null
+}
+
+/**
  * Resolve the chosen scenario prototype into the layout params the scene lays out from, falling
  * back to defaults so the scene still builds if the scenario is missing a field (or absent).
  */
@@ -138,6 +167,7 @@ function scenarioConfigOf(
     deposits: deposits.length > 0 ? deposits : FALLBACK_DEPOSITS.map((d) => d.id),
     patch: rangeOf(proto, 'patchSize', 4, 5),
     spread: rangeOf(proto, 'spread', 6, 18),
+    richness: richnessBandOf(proto),
     startingKit: flowListOf(proto, 'startingKit'),
     startingTreasury: flowListOf(proto, 'startingTreasury'),
   }
@@ -374,12 +404,21 @@ export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = 
     const oy = api.randomInt(0, cellSize - size)
     const px = cellRect.x + ox
     const py = cellRect.y + oy
+    const richness = scenario.richness
     for (let dy = 0; dy < size; dy++) {
       for (let dx = 0; dx < size; dx++) {
         const x = px + dx
         const y = py + dy
-        api.spawn({ pos: { x, y }, sprite: TERRAIN_SPRITE, color, width: 1, height: 1 })
-        state.terrain.set(tileKey(x, y), type)
+        const key = tileKey(x, y)
+        const eid = api.spawn({ pos: { x, y }, sprite: TERRAIN_SPRITE, color, width: 1, height: 1 })
+        state.terrain.set(key, type)
+        // Finite scenario: roll this tile's richness from the band via the seeded RNG and record it
+        // (plus its terrain entity, so exhaustion can grey it). An infinite scenario rolls nothing,
+        // leaving the deposit maps empty — extraction on it never depletes (the pre-G1 behaviour).
+        if (richness !== null) {
+          state.deposits.remaining.set(key, api.randomInt(richness.min, richness.max))
+          state.deposits.eid.set(key, eid)
+        }
         record(id, x, y)
       }
     }

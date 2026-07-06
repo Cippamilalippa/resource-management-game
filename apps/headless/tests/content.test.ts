@@ -242,6 +242,57 @@ describe('validateContent', () => {
     expect(() => validateContent(reg)).toThrow(/patchSize\.min/)
   })
 
+  it('accepts a scenario with a finite richness band (and with it omitted, or "infinite")', () => {
+    const finite = validRegistry()
+    finite.register({
+      id: 'scenario.finite',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      richness: { min: 100, max: 500 },
+    })
+    expect(() => validateContent(finite)).not.toThrow()
+
+    // "infinite" (explicit) and omitted both mean a never-depleting deposit — both valid.
+    const infinite = validRegistry()
+    infinite.register({
+      id: 'scenario.infinite',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      richness: 'infinite',
+    })
+    expect(() => validateContent(infinite)).not.toThrow()
+  })
+
+  it('rejects a scenario whose richness.min exceeds richness.max', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.badrich',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      richness: { min: 900, max: 100 },
+    })
+    expect(() => validateContent(reg)).toThrow(/richness\.min/)
+  })
+
+  it('rejects a scenario richness that is neither a { min, max } nor "infinite"', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.junkrich',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      richness: 'lots',
+    })
+    expect(() => validateContent(reg)).toThrow(/richness/)
+  })
+
   it('rejects a scenario starting-kit item that references a missing item', () => {
     const reg = validRegistry()
     reg.register({

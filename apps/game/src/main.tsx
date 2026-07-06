@@ -29,6 +29,7 @@ import type { AlertKind } from './gameLogic.ts'
 const ALERT_COLOR: Record<AlertKind, number> = {
   crafter_missing_input: 0xff9800,
   crafter_output_full: 0xffd54f,
+  crafter_exhausted: 0x8d6e63,
   village_declining: 0xff5252,
   cannon_no_target: 0xba68ff,
   cannon_out_of_range: 0xba68ff,

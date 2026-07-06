@@ -14,6 +14,7 @@
     ],
     "patchSize": { "min": 4, "max": 5 },
     "spread": { "min": 6, "max": 18 },
+    "richness": { "min": 1200, "max": 2400 },
     "startingKit": [{ "item": "item.glass", "amount": 30 }],
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 90 },
@@ -35,6 +36,7 @@
     ],
     "patchSize": { "min": 2, "max": 3 },
     "spread": { "min": 14, "max": 30 },
+    "richness": { "min": 300, "max": 700 },
     "startingKit": [],
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 48 },
