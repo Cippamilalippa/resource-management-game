@@ -90,6 +90,16 @@ interface Rect {
  */
 type RichnessBand = { readonly min: number; readonly max: number } | null
 
+/**
+ * An extra settlement beyond the origin spaceport: which `village` prototype to place, and the
+ * Chebyshev distance band (in tiles from the origin) its ring of candidate anchors is drawn from.
+ * Farther bands make its distinct goods a genuine routing problem (G3).
+ */
+interface SettlementConfig {
+  readonly building: string
+  readonly distance: { readonly min: number; readonly max: number }
+}
+
 /** The scenario layout params the scene consumes, after parsing (with fallbacks). */
 interface ScenarioConfig {
   readonly deposits: readonly string[]
@@ -99,6 +109,8 @@ interface ScenarioConfig {
   readonly richness: RichnessBand
   readonly startingKit: readonly { readonly item: string; readonly amount: number }[]
   readonly startingTreasury: readonly { readonly item: string; readonly amount: number }[]
+  /** Extra settlements (beyond the origin spaceport) scattered at increasing distance bands. */
+  readonly settlements: readonly SettlementConfig[]
 }
 
 function colorOf(proto: SceneProto | undefined, fallback: number): number {
@@ -170,7 +182,29 @@ function scenarioConfigOf(
     richness: richnessBandOf(proto),
     startingKit: flowListOf(proto, 'startingKit'),
     startingTreasury: flowListOf(proto, 'startingTreasury'),
+    settlements: settlementsOf(proto),
   }
+}
+
+/**
+ * Parse a scenario's `settlements` list (extra villages beyond the origin spaceport): each entry a
+ * `{ building, distance: { min, max } }`. Malformed entries are skipped, so a bad field just yields
+ * no extra settlements (validation proper lives host-side in `content.ts`). The distance band is
+ * clamped to positive integers with min ≤ max.
+ */
+function settlementsOf(proto: SceneProto | undefined): SettlementConfig[] {
+  const raw = Array.isArray(proto?.settlements) ? (proto.settlements as unknown[]) : []
+  const out: SettlementConfig[] = []
+  for (const s of raw) {
+    const e = (s ?? {}) as Record<string, unknown>
+    if (typeof e.building !== 'string') continue
+    const d = (e.distance ?? {}) as Record<string, unknown>
+    if (typeof d.min !== 'number' || typeof d.max !== 'number') continue
+    const min = Math.max(1, Math.floor(d.min))
+    const max = Math.max(min, Math.floor(d.max))
+    out.push({ building: e.building, distance: { min, max } })
+  }
+  return out
 }
 
 /** Parse a `{ item, amount }[]` flow list off a scenario field, skipping malformed entries. */
@@ -334,12 +368,55 @@ function shuffle<T>(api: ModApi, arr: T[]): void {
 }
 
 /**
- * Spawn the starting world for `config.scenario`: a central village (with the scenario's starting
- * kit), an apple orchard, and the scenario's resource deposits scattered as terrain patches whose
- * positions/sizes are drawn from the world's seeded RNG within the scenario's bands. Terrain tiles
- * fill `state.terrain` (so the sim gates producer placement) and the village is registered in
- * `state.buildings` as a resource store (so input ports can feed it). Each spawn emits `base:spawn`
- * for the host inspector. Deterministic for a given seed + scenario.
+ * Spawn one settlement (a `village` prototype) anchored at (vx, vy): paint its footprint, register it
+ * as a resource store so input ports can feed it, wire up its OWN stage ladder so it grows/declines
+ * independently, and (for the origin spaceport) grant the scenario starting kit into its buffer. Emits
+ * `base:spawn` so the host inspector names the tile. Returns the occupied footprint {@link Rect} so the
+ * caller can keep later settlements/deposits clear of it. Off the hot path (new-game only).
+ */
+function placeVillage(
+  api: ModApi,
+  state: GameState,
+  getProto: (id: string) => SceneProto | undefined,
+  record: (protoId: string, x: number, y: number) => void,
+  protoId: string,
+  vx: number,
+  vy: number,
+  kit: readonly { item: string; amount: number }[],
+): Rect {
+  const proto = getProto(protoId)
+  const vw = sizeDim(proto, 'w', 2)
+  const vh = sizeDim(proto, 'h', 2)
+  const eid = api.spawn({
+    pos: { x: vx, y: vy },
+    color: colorOf(proto, 0xb5651d),
+    width: vw,
+    height: vh,
+  })
+  record(protoId, vx, vy)
+  // Register as a resource store so input ports can feed it (not a crafter: crafts = 0). Skipped if
+  // the prototype stockpiles nothing.
+  const slots = acceptSlotsOf(getProto, proto)
+  if (slots.length > 0) {
+    const b = registerBuilding(state.buildings, eid, vx, vy, vw, vh, 0, 1, slots)
+    // Each settlement climbs its OWN demand ladder (a mining camp's shallow one, a spaceport's deep
+    // one), so pass the parsed stages straight into the village entry.
+    const stages = villageStagesOf(getProto, proto)
+    if (stages.length > 0) registerVillage(state.villages, vx, vy, stages)
+    if (kit.length > 0) grantStartingKit(getProto, state.buildings, b, kit)
+  }
+  return { x: vx, y: vy, w: vw, h: vh }
+}
+
+/**
+ * Spawn the starting world for `config.scenario`: the origin spaceport (with the scenario's starting
+ * kit), any extra settlements the scenario lists at increasing distance bands (each a distinct
+ * `village` prototype with its own demand ladder — G3), an apple orchard, and the scenario's resource
+ * deposits scattered as terrain patches whose positions/sizes are drawn from the world's seeded RNG
+ * within the scenario's bands. Terrain tiles fill `state.terrain` (so the sim gates producer
+ * placement) and each village is registered in `state.buildings` as a resource store (so input ports
+ * can feed it). Each spawn emits `base:spawn` for the host inspector. Deterministic for a given
+ * seed + scenario.
  */
 export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = {}): void {
   const getProto = (id: string): SceneProto | undefined => api.getPrototype(id)
@@ -354,42 +431,42 @@ export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = 
   }
   seedTreasury(getProto, state.treasury, scenario.startingTreasury)
 
-  // Village: a 2x2 block centered on the origin (top-left at -1,-1).
+  // Spaceport: a 2x2 block centered on the origin (top-left at -1,-1). It stays near spawn and gets
+  // the scenario's starting kit as a grace buffer.
   const village = getProto('building.village')
   const vw = sizeDim(village, 'w', 2)
   const vh = sizeDim(village, 'h', 2)
   const vx = -Math.floor(vw / 2)
   const vy = -Math.floor(vh / 2)
-  const villageEid = api.spawn({
-    pos: { x: vx, y: vy },
-    color: colorOf(village, 0xb5651d),
-    width: vw,
-    height: vh,
-  })
-  record('building.village', vx, vy)
-  // Register the village as a resource store so input ports can feed it (not a crafter:
-  // crafts = 0). Skipped if the prototype stockpiles nothing.
-  const slots = acceptSlotsOf(getProto, village)
-  if (slots.length > 0) {
-    const villageB = registerBuilding(state.buildings, villageEid, vx, vy, vw, vh, 0, 1, slots)
-    // Wire up the village demand ladder so it grows/declines on how well it is supplied. All
-    // base villages share the one prototype's stages.
-    const stages = villageStagesOf(getProto, village)
-    if (stages.length > 0) {
-      state.villages.stages = stages
-      registerVillage(state.villages, vx, vy)
-    }
-    // Grant the scenario's starting kit into the village buffer (a grace stock at spawn).
-    grantStartingKit(getProto, state.buildings, villageB, scenario.startingKit)
+  const orchard: Rect = { x: ORCHARD_X, y: ORCHARD_Y, w: ORCHARD_SIZE, h: ORCHARD_SIZE }
+  // Reserved rects grow as we place things, so each later settlement/deposit stays clear of the
+  // earlier ones (kept a MARGIN apart via `overlaps`). The starting kit lands in the spaceport only.
+  const reserved: Rect[] = [
+    placeVillage(api, state, getProto, record, 'building.village', vx, vy, scenario.startingKit),
+    orchard,
+  ]
+
+  // Extra settlements (G3): a mining camp at mid distance, a research colony farther out — each a
+  // distinct `village` prototype with its own shallow-to-deep demand ladder, so distance + different
+  // needs make routing a puzzle. Each is dropped onto a candidate cell in its scenario distance band
+  // (shuffled by the seeded RNG), kept clear of the spaceport/orchard/earlier settlements.
+  const settlementCell = 2 + MARGIN // villages are 2x2; a cell holds one with a margin to spare.
+  for (let s = 0; s < scenario.settlements.length; s++) {
+    const settlement = scenario.settlements[s]!
+    const cells = candidateCells(settlementCell, settlement.distance, reserved)
+    shuffle(api, cells)
+    if (cells.length === 0) continue // no clear ring cell in the band — skip this settlement.
+    const cell = cells[0]!
+    reserved.push(
+      placeVillage(api, state, getProto, record, settlement.building, cell.x, cell.y, []),
+    )
   }
 
   // Deposit patches: scatter each scenario deposit onto a distinct candidate cell (shuffled by the
   // seeded RNG), sizing and jittering the patch inside its cell. Cells are disjoint, so patches
-  // never overlap; the village/orchard rects are excluded up-front.
-  const orchard: Rect = { x: ORCHARD_X, y: ORCHARD_Y, w: ORCHARD_SIZE, h: ORCHARD_SIZE }
-  const villageRect: Rect = { x: vx, y: vy, w: vw, h: vh }
+  // never overlap; the spaceport/orchard/settlement rects are excluded up-front.
   const cellSize = scenario.patch.max + MARGIN
-  const cells = candidateCells(cellSize, scenario.spread, [villageRect, orchard])
+  const cells = candidateCells(cellSize, scenario.spread, reserved)
   shuffle(api, cells)
 
   for (let d = 0; d < scenario.deposits.length && d < cells.length; d++) {

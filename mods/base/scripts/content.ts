@@ -131,9 +131,41 @@ function villageDemands(proto: Prototype): { item: string; ratePerMin: number }[
   return out
 }
 
-/** Validate every village prototype's stage ladder shape. */
+/**
+ * Max stockpile slots / stage demands a single village may carry — mirrors the sim's `MAX_SLOTS` /
+ * `MAX_VILLAGE_DEMANDS` (both 8). A village that accepts more than this, or lists more demands in one
+ * stage, would silently overflow the fixed typed-array buffers, so reject it at load.
+ */
+const MAX_VILLAGE_SLOTS = 8
+
+/**
+ * Validate every village prototype's stage ladder: demand shapes, the slot/demand caps, and that
+ * every demanded item is in the village's `accepts` (a village only stocks — and so can only satisfy
+ * — the resources it accepts; a demand outside that list could never be met).
+ */
 function validateVillageShapes(registry: PrototypeRegistry): void {
-  for (const village of registry.listByType('village')) villageDemands(village)
+  for (const village of registry.listByType('village')) {
+    villageDemands(village)
+    const accepts = idList(village, 'accepts')
+    if (accepts.length > MAX_VILLAGE_SLOTS) {
+      fail(`${village.id}: a village may "accepts" at most ${MAX_VILLAGE_SLOTS} items`)
+    }
+    const acceptSet = new Set(accepts)
+    const stages = Array.isArray(village.stages) ? village.stages : []
+    stages.forEach((raw, si) => {
+      const stage = (raw ?? {}) as Record<string, unknown>
+      const demands = Array.isArray(stage.demands) ? stage.demands : []
+      if (demands.length > MAX_VILLAGE_SLOTS) {
+        fail(`${village.id}: stages[${si}] lists more than ${MAX_VILLAGE_SLOTS} demands`)
+      }
+      for (const d of demands) {
+        const item = (d as Record<string, unknown>)?.item
+        if (typeof item === 'string' && !acceptSet.has(item)) {
+          fail(`${village.id}: stages[${si}] demands "${item}" which is not in "accepts"`)
+        }
+      }
+    })
+  }
 }
 
 /** Read a `{ min, max }` positive-integer range off a scenario field (min <= max). */
@@ -198,9 +230,39 @@ function validateBuildCostShapes(registry: PrototypeRegistry): void {
 }
 
 /**
+ * A scenario's optional `settlements` (extra villages beyond the origin spaceport, G3): each entry a
+ * `{ building, distance: { min, max } }`. Shape-validated here; the referenced `building` is checked
+ * to be a `village` prototype by the reference pass in {@link validateContent}. Returns the parsed
+ * building ids (for that reference check).
+ */
+function settlements(proto: Prototype): string[] {
+  const raw = proto.settlements
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) fail(`${proto.id}: "settlements" must be an array`)
+  return raw.map((entry, i) => {
+    if (typeof entry !== 'object' || entry === null)
+      fail(`${proto.id}: settlements[${i}] must be an object`)
+    const e = entry as Record<string, unknown>
+    if (typeof e.building !== 'string')
+      fail(`${proto.id}: settlements[${i}].building must be a building id`)
+    const d = e.distance
+    if (typeof d !== 'object' || d === null)
+      fail(`${proto.id}: settlements[${i}].distance must be a { min, max }`)
+    const dist = d as Record<string, unknown>
+    const ok = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
+    if (!ok(dist.min) || !ok(dist.max))
+      fail(`${proto.id}: settlements[${i}].distance.min/max must be positive integers`)
+    if ((dist.min as number) > (dist.max as number))
+      fail(`${proto.id}: settlements[${i}].distance.min must be <= distance.max`)
+    return e.building
+  })
+}
+
+/**
  * Validate every scenario prototype's shape: a non-empty terrain `deposits` list, positive-integer
- * `patchSize`/`spread` ranges, and a well-formed `startingKit` flow list. The starting scene
- * ({@link import('./scene.ts')}) reads these to lay out a seed-varied but reproducible world.
+ * `patchSize`/`spread` ranges, a well-formed `startingKit` flow list, and any `settlements` band.
+ * The starting scene ({@link import('./scene.ts')}) reads these to lay out a seed-varied but
+ * reproducible world.
  */
 function validateScenarioShapes(registry: PrototypeRegistry): void {
   for (const s of registry.listByType('scenario')) {
@@ -211,6 +273,7 @@ function validateScenarioShapes(registry: PrototypeRegistry): void {
     validateRichness(s)
     startingKit(s)
     startingTreasury(s)
+    settlements(s)
   }
 }
 
@@ -333,6 +396,12 @@ export function validateContent(registry: PrototypeRegistry): void {
       select: (s) => startingTreasury(s).map((k) => k.item),
       expectType: 'item',
       label: 'startingTreasury',
+    },
+    {
+      type: 'scenario',
+      select: (s) => settlements(s),
+      expectType: 'village',
+      label: 'settlement',
     },
   ])
 

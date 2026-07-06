@@ -2571,7 +2571,8 @@ input:focus-visible,
 }
 
 /* ── Production statistics ("P-screen") ──────────────────────────────────── */
-/* Floating toggle button, left of the status-overlay button in the bottom-right row. */
+/* Floating toggle button, in the bottom-right row left of the settings gear (help 16 → enc 120 →
+   status 224 → detail 328 → map 424 → settings 520 → stats 616). */
 .stats-btn {
   position: absolute;
   right: 616px;

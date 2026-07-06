@@ -79,6 +79,111 @@
     ]
   },
   {
+    "id": "building.mining_camp",
+    "type": "village",
+    "name": "Mining Camp",
+    "icon": "Tent",
+    "size": { "w": 2, "h": 2 },
+    "color": 12617042,
+    "accepts": ["item.coke", "item.alumina", "item.aluminum", "item.glass"],
+    "storage": 400,
+    "stages": [
+      {
+        "level": 1,
+        "population": 30,
+        "demands": [{ "item": "item.coke", "ratePerMin": 10 }]
+      },
+      {
+        "level": 2,
+        "population": 80,
+        "demands": [
+          { "item": "item.coke", "ratePerMin": 12 },
+          { "item": "item.alumina", "ratePerMin": 8 }
+        ]
+      },
+      {
+        "level": 3,
+        "population": 180,
+        "demands": [
+          { "item": "item.coke", "ratePerMin": 12 },
+          { "item": "item.alumina", "ratePerMin": 10 },
+          { "item": "item.aluminum", "ratePerMin": 6 }
+        ]
+      },
+      {
+        "level": 4,
+        "population": 360,
+        "demands": [
+          { "item": "item.coke", "ratePerMin": 14 },
+          { "item": "item.alumina", "ratePerMin": 10 },
+          { "item": "item.aluminum", "ratePerMin": 8 },
+          { "item": "item.glass", "ratePerMin": 6 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "building.research_colony",
+    "type": "village",
+    "name": "Research Colony",
+    "icon": "Telescope",
+    "size": { "w": 2, "h": 2 },
+    "color": 5220512,
+    "accepts": [
+      "item.silicon",
+      "item.aluminum_wire",
+      "item.resin",
+      "item.microchip",
+      "item.science_electronics"
+    ],
+    "storage": 400,
+    "stages": [
+      {
+        "level": 1,
+        "population": 40,
+        "demands": [{ "item": "item.silicon", "ratePerMin": 8 }]
+      },
+      {
+        "level": 2,
+        "population": 100,
+        "demands": [
+          { "item": "item.silicon", "ratePerMin": 10 },
+          { "item": "item.aluminum_wire", "ratePerMin": 6 }
+        ]
+      },
+      {
+        "level": 3,
+        "population": 220,
+        "demands": [
+          { "item": "item.silicon", "ratePerMin": 10 },
+          { "item": "item.aluminum_wire", "ratePerMin": 8 },
+          { "item": "item.resin", "ratePerMin": 5 }
+        ]
+      },
+      {
+        "level": 4,
+        "population": 480,
+        "demands": [
+          { "item": "item.silicon", "ratePerMin": 12 },
+          { "item": "item.aluminum_wire", "ratePerMin": 8 },
+          { "item": "item.resin", "ratePerMin": 6 },
+          { "item": "item.microchip", "ratePerMin": 4 }
+        ]
+      },
+      {
+        "level": 5,
+        "population": 1000,
+        "demands": [
+          { "item": "item.silicon", "ratePerMin": 12 },
+          { "item": "item.aluminum_wire", "ratePerMin": 10 },
+          { "item": "item.resin", "ratePerMin": 6 },
+          { "item": "item.microchip", "ratePerMin": 4 },
+          { "item": "item.science_electronics", "ratePerMin": 3 }
+        ]
+      }
+    ]
+  },
+  {
     "id": "building.depot",
     "type": "building",
     "name": "Depot",

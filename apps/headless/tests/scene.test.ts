@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { entityCount } from '@factory/engine/core'
 import { serialize, hashSnapshot } from '@factory/engine/persistence'
-import { TERRAIN_SPRITE } from '../gameLogic.ts'
+import { TERRAIN_SPRITE, tileKey } from '../gameLogic.ts'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
 
 /**
@@ -54,8 +54,8 @@ describe('procedural starting scene', () => {
     expect(sim.state.terrain.size).toBe(terrain.length)
     expect(sim.state.terrain.size).toBeGreaterThanOrEqual(MIN_TERRAIN)
     expect(sim.state.terrain.size).toBeLessThanOrEqual(MAX_TERRAIN)
-    // 1 spaceport + terrain tiles + a 6x6 orchard.
-    expect(entityCount(sim.world)).toBe(1 + sim.state.terrain.size + 36)
+    // 3 settlements (spaceport + mining camp + research colony) + terrain tiles + a 6x6 orchard.
+    expect(entityCount(sim.world)).toBe(3 + sim.state.terrain.size + 36)
   })
 
   it('grants the abundant scenario its starting-kit stock (sparse gets none)', async () => {
@@ -81,13 +81,13 @@ describe('procedural starting scene', () => {
     }
   })
 
-  it('keeps the fixed anchors: a single 2x2 village on the origin and a 6x6 orchard at (50,50)', async () => {
+  it('keeps the fixed anchors: the 2x2 spaceport on the origin and a 6x6 orchard at (50,50)', async () => {
     const { world } = await bootstrapSim(1, { scenario: 'scenario.abundant' })
     const { entities } = serialize(world)
-    // 2x2 village, top-left at (-1, -1).
+    // Three 2x2 settlements, the spaceport's top-left at (-1, -1).
     const villages = entities.filter((e) => e.width === 2 && e.height === 2)
-    expect(villages).toHaveLength(1)
-    expect(villages[0]).toMatchObject({ x: -1, y: -1 })
+    expect(villages).toHaveLength(3)
+    expect(villages.some((v) => v.x === -1 && v.y === -1)).toBe(true)
     // 6x6 orchard: 1x1 default-glyph (sprite 0) trees in [50,55]².
     const trees = entities.filter((e) => e.width === 1 && e.height === 1 && e.sprite === 0)
     expect(trees).toHaveLength(36)
@@ -96,6 +96,32 @@ describe('procedural starting scene', () => {
       expect(t.x).toBeLessThanOrEqual(55)
       expect(t.y).toBeGreaterThanOrEqual(50)
       expect(t.y).toBeLessThanOrEqual(55)
+    }
+  })
+
+  it('keeps the extra settlements clear of deposits, the orchard, and each other', async () => {
+    // Several seeds, so a lucky layout can't mask an overlap bug in the reserved-rect logic.
+    for (const seed of [1, 7, 42]) {
+      const sim = await bootstrapSim(seed, { scenario: 'scenario.abundant' })
+      const v = sim.state.villages
+      expect(v.count).toBe(3)
+      for (let i = 0; i < v.count; i++) {
+        // No settlement footprint tile sits on a deposit terrain tile.
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const x = v.vx[i]! + dx
+            const y = v.vy[i]! + dy
+            expect(sim.state.terrain.has(tileKey(x, y))).toBe(false)
+            // ...and not inside the orchard square either.
+            expect(x >= 50 && x <= 55 && y >= 50 && y <= 55).toBe(false)
+          }
+        }
+        // Footprints don't overlap each other.
+        for (let j = i + 1; j < v.count; j++) {
+          const apart = Math.abs(v.vx[i]! - v.vx[j]!) >= 2 || Math.abs(v.vy[i]! - v.vy[j]!) >= 2
+          expect(apart).toBe(true)
+        }
+      }
     }
   })
 })

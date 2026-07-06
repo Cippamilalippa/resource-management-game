@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useSyncExternalStore } from 'react'
-import { hudStore, type HudTech, type HudProductionRow } from './hudStore.ts'
+import { hudStore, type HudTech, type HudProductionRow, type HudVillage } from './hudStore.ts'
 import { productionHistory } from './productionHistory.ts'
-import type { VillageStatus } from './gameLogic.ts'
 import { Icon, type IconName } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
 
@@ -190,15 +189,18 @@ function VillagePanel(): React.JSX.Element {
   )
 }
 
-function VillageCard({ v }: { v: VillageStatus }): React.JSX.Element {
+function VillageCard({ v }: { v: HudVillage }): React.JSX.Element {
   // Show whichever trend is active: decline takes visual priority over growth.
   const declining = v.declineTimer > 0
   const frac = declining ? v.declineTimer / v.declineNeeded : v.growthTimer / v.growthNeeded
   return (
     <div className="hud-section">
       <div className="hud-section-head">
-        Level {v.level}
-        {v.level <= v.maxStage + 1 && <span className="hud-sub">of {v.maxStage + 1}</span>}
+        {v.name}
+        <span className="hud-sub">
+          Lvl {v.level}
+          {v.level <= v.maxStage + 1 && ` of ${v.maxStage + 1}`}
+        </span>
         <span className="hud-sub">pop {v.population}</span>
       </div>
       {v.demands.map((d, i) => (
