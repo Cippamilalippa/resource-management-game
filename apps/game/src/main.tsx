@@ -875,7 +875,12 @@ async function boot(): Promise<void> {
       music.setActivity(activeCrafters)
       // Same snapshot, but retained across the P-screen's three fine/medium/coarse windows.
       statsHistory.push(production)
-      const villages = villageStatuses(sess.state)
+      // Enrich each village with its settlement name from the inspect registry (the sim knows
+      // villages only by tile; the registry recorded each `base:spawn`'s prototype name).
+      const villages = villageStatuses(sess.state).map((v) => ({
+        ...v,
+        name: sess.registry.get(v.x, v.y)?.name ?? 'Settlement',
+      }))
       // Chime when the total village level rises (a stage was gained since the last sample).
       const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)
       if (prevVillageLevels >= 0 && villageLevels > prevVillageLevels) sfx.play('level')

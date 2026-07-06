@@ -61,7 +61,7 @@ describe('villageStatuses', () => {
     ])
     setCount(state, b, 0, 50) // grain
     setCount(state, b, 1, 5) // bread
-    state.villages.stages = [
+    registerVillage(state.villages, 0, 0, [
       { population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] },
       {
         population: 25,
@@ -70,8 +70,7 @@ describe('villageStatuses', () => {
           { color: BREAD, ratePerMin: 10 },
         ],
       },
-    ]
-    registerVillage(state.villages, 0, 0)
+    ])
 
     const [v] = villageStatuses(state)
     expect(v).toBeDefined()
@@ -92,7 +91,7 @@ describe('villageStatuses', () => {
     ])
     setCount(state, b, 0, 50) // grain met
     setCount(state, b, 1, 0) // bread starved — a demanded good at zero is an unmet miss
-    state.villages.stages = [
+    registerVillage(state.villages, 0, 0, [
       { population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] },
       {
         population: 25,
@@ -101,8 +100,7 @@ describe('villageStatuses', () => {
           { color: BREAD, ratePerMin: 10 },
         ],
       },
-    ]
-    registerVillage(state.villages, 0, 0)
+    ])
     state.villages.stage[0] = 1 // advance to stage 1
 
     const [v] = villageStatuses(state)
@@ -175,8 +173,9 @@ describe('collectAlerts', () => {
 
   it('raises a declining-village alert once its decline timer accrues', () => {
     const state = createGameState()
-    state.villages.stages = [{ population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] }]
-    registerVillage(state.villages, 0, 0)
+    registerVillage(state.villages, 0, 0, [
+      { population: 10, demands: [{ color: GRAIN, ratePerMin: 20 }] },
+    ])
     state.villages.declineTimer[0] = 60
 
     expect(collectAlerts(state)).toEqual([{ kind: 'village_declining', x: 0, y: 0 }])

@@ -1072,9 +1072,10 @@ export interface VillageStageConfig {
 }
 
 /**
- * The villages: flat parallel arrays indexed by a dense village id, plus the shared stage
- * ladder (all base villages use the one `building.village` prototype). A village consumes its
- * current stage's demands from its own building stockpile (its buffer) every
+ * The villages: flat parallel arrays indexed by a dense village id, each carrying its own stage
+ * ladder in {@link VillageStore.ladders} (distinct settlements — a spaceport, a mining camp, a
+ * research colony — advance up *different* demand ladders, so each village owns one). A village
+ * consumes its current stage's demands from its own building stockpile (its buffer) every
  * {@link VILLAGE_CADENCE} ticks: satisfy every demand and a growth timer accrues toward the
  * next stage; miss any and a decline timer accrues toward the previous one (floored at stage 0
  * — a village is never removed). Anchored by tile so it survives building-store compaction.
@@ -1101,8 +1102,12 @@ export interface VillageStore {
   demandAcc: Int32Array
   /** Shared cadence countdown (ticks since the last evaluation). */
   timer: number
-  /** The stage ladder, shared by every village (from the village prototype). */
-  stages: VillageStageConfig[]
+  /**
+   * Per-village stage ladder, indexed by the dense village id (`ladders[i]` is village `i`'s
+   * ladder). Each settlement has its own, so a mining camp climbs a shallow tier-1/2 ladder while a
+   * spaceport climbs the deep aerospace one — the two grow and decline independently.
+   */
+  ladders: VillageStageConfig[][]
 }
 
 export function createVillageStore(): VillageStore {
@@ -1116,12 +1121,17 @@ export function createVillageStore(): VillageStore {
     declineTimer: new Int32Array(cap),
     demandAcc: new Int32Array(cap * MAX_VILLAGE_DEMANDS),
     timer: 0,
-    stages: [],
+    ladders: [],
   }
 }
 
-/** Register a village at anchor tile (x, y). Its stage ladder is the store's shared {@link VillageStore.stages}. */
-export function registerVillage(v: VillageStore, x: number, y: number): number {
+/** Register a village at anchor tile (x, y) climbing its own `stages` ladder. Returns its dense id. */
+export function registerVillage(
+  v: VillageStore,
+  x: number,
+  y: number,
+  stages: VillageStageConfig[],
+): number {
   const need = v.count + 1
   if (need > v.vx.length) {
     let next = v.vx.length
@@ -1139,6 +1149,7 @@ export function registerVillage(v: VillageStore, x: number, y: number): number {
   v.stage[i] = 0
   v.growthTimer[i] = 0
   v.declineTimer[i] = 0
+  v.ladders[i] = stages
   for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++) v.demandAcc[i * MAX_VILLAGE_DEMANDS + d] = 0
   return i
 }
@@ -1147,6 +1158,18 @@ export function registerVillage(v: VillageStore, x: number, y: number): number {
 export function villageStageAt(v: VillageStore, x: number, y: number): number {
   for (let i = 0; i < v.count; i++) if (v.vx[i] === x && v.vy[i] === y) return v.stage[i]!
   return NONE
+}
+
+/** The current stage config of the village anchored at (x, y), or undefined if none there. */
+export function villageStageConfigAt(
+  v: VillageStore,
+  x: number,
+  y: number,
+): VillageStageConfig | undefined {
+  for (let i = 0; i < v.count; i++) {
+    if (v.vx[i] === x && v.vy[i] === y) return v.ladders[i]?.[v.stage[i]!]
+  }
+  return undefined
 }
 
 /** Units of `color` currently stocked in building `b`'s buffer (0 if it stocks none). Bounded scan. */
@@ -1194,14 +1217,16 @@ function resetDemandAcc(v: VillageStore, i: number): void {
  */
 function updateVillages(state: GameState): void {
   const v = state.villages
-  if (v.count === 0 || v.stages.length === 0) return
+  if (v.count === 0) return
   if (++v.timer < VILLAGE_CADENCE) return
   v.timer = 0
   const store = state.buildings
   for (let i = 0; i < v.count; i++) {
+    const stages = v.ladders[i]!
+    if (stages.length === 0) continue // a village with no ladder never grows or declines.
     const b = buildingAt(store, v.vx[i]!, v.vy[i]!)
     if (b === NONE) continue // the village building was removed — leave the entry inert.
-    const cfg = v.stages[v.stage[i]!]!
+    const cfg = stages[v.stage[i]!]!
     const accBase = i * MAX_VILLAGE_DEMANDS
     let allMet = true
     for (let d = 0; d < cfg.demands.length && d < MAX_VILLAGE_DEMANDS; d++) {
@@ -1227,7 +1252,7 @@ function updateVillages(state: GameState): void {
       v.growthTimer[i] = 0
       v.declineTimer[i] = v.declineTimer[i]! + VILLAGE_CADENCE
     }
-    if (v.growthTimer[i]! >= VILLAGE_GROWTH_AFTER && v.stage[i]! < v.stages.length - 1) {
+    if (v.growthTimer[i]! >= VILLAGE_GROWTH_AFTER && v.stage[i]! < stages.length - 1) {
       v.stage[i] = v.stage[i]! + 1
       v.growthTimer[i] = 0
       v.declineTimer[i] = 0
@@ -1951,7 +1976,7 @@ export interface BuildingSnapshot {
   readonly slots: readonly SlotSnapshot[]
 }
 
-/** One village's anchor tile, current stage, growth/decline timers, and fractional-demand accumulators. */
+/** One village's anchor tile, its own stage ladder, current stage, timers, and demand accumulators. */
 export interface VillageEntrySnapshot {
   readonly vx: number
   readonly vy: number
@@ -1960,11 +1985,21 @@ export interface VillageEntrySnapshot {
   readonly declineTimer: number
   /** Per-demand accumulators (length {@link MAX_VILLAGE_DEMANDS}) so consumption resumes exactly. */
   readonly demandAcc: readonly number[]
+  /**
+   * This village's own stage ladder (distinct settlements climb different demand ladders). Absent in
+   * pre-multi-village saves → falls back to the snapshot's legacy shared {@link VillageSnapshot.stages}.
+   */
+  readonly stages?: readonly VillageStageConfig[]
 }
 
-/** The villages: the shared stage ladder, the cadence countdown, and the per-village entries. */
+/** The villages: the cadence countdown and the per-village entries (each carrying its own ladder). */
 export interface VillageSnapshot {
-  readonly stages: readonly VillageStageConfig[]
+  /**
+   * Legacy shared stage ladder from pre-multi-village saves (every village used one). New saves carry
+   * the ladder per {@link VillageEntrySnapshot.stages} and omit this; kept optional so an old save
+   * still loads — its entries fall back to it.
+   */
+  readonly stages?: readonly VillageStageConfig[]
   readonly timer: number
   readonly entries: readonly VillageEntrySnapshot[]
 }
@@ -2089,6 +2124,9 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       growthTimer: v.growthTimer[i]!,
       declineTimer: v.declineTimer[i]!,
       demandAcc,
+      // Each village carries its own ladder, so the snapshot stores it per entry (distinct
+      // settlements have distinct ladders — no single shared one to reference).
+      stages: v.ladders[i]!,
     })
   }
 
@@ -2097,7 +2135,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
     buildings,
     terrain,
     deposits,
-    villages: { stages: v.stages, timer: v.timer, entries },
+    villages: { timer: v.timer, entries },
     research: serializeResearch(state.research),
     treasury: serializeTreasury(state.treasury),
     config: { buildRefundPermille: state.config.buildRefundPermille },
@@ -2240,17 +2278,22 @@ export function loadGameState(
     if (teid !== undefined) dep.eid.set(key, teid)
   }
 
-  // Villages: reset the store, restore the shared stage ladder (deep-copied so the store never
-  // aliases the snapshot), then replay each village's anchor, stage and timers.
+  // Villages: reset the store, then replay each village with its own stage ladder (deep-copied so the
+  // store never aliases the snapshot). A pre-multi-village save carried one shared ladder on the
+  // snapshot instead of per-entry, so fall back to it when an entry has none — old saves still load.
   const v = state.villages
   v.count = 0
-  v.stages = snap.villages.stages.map((s) => ({
-    population: s.population,
-    demands: s.demands.map((d) => ({ color: d.color, ratePerMin: d.ratePerMin })),
-  }))
+  v.ladders.length = 0
+  const legacyShared = snap.villages.stages
+  const copyLadder = (stages: readonly VillageStageConfig[]): VillageStageConfig[] =>
+    stages.map((s) => ({
+      population: s.population,
+      demands: s.demands.map((d) => ({ color: d.color, ratePerMin: d.ratePerMin })),
+    }))
   for (let i = 0; i < snap.villages.entries.length; i++) {
     const entry = snap.villages.entries[i]!
-    const idx = registerVillage(v, entry.vx, entry.vy)
+    const ladder = copyLadder(entry.stages ?? legacyShared ?? [])
+    const idx = registerVillage(v, entry.vx, entry.vy, ladder)
     v.stage[idx] = entry.stage
     v.growthTimer[idx] = entry.growthTimer
     v.declineTimer[idx] = entry.declineTimer

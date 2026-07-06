@@ -98,6 +98,35 @@ describe('full-sim save/load round-trip', () => {
     // ...including a mid-accrual village demand accumulator (the fractional-demand state), so the
     // round-trip above genuinely exercises it rather than round-tripping all-zero accumulators.
     expect(src.state.villages.demandAcc.some((x) => x !== 0)).toBe(true)
+
+    // G3: all three settlements round-tripped, each with its OWN stage ladder (the snapshot carries
+    // the ladder per entry — distinct ladders must survive a save/load, not collapse to one).
+    const villages = serializeGameState(dst.state).villages
+    expect(villages.entries).toHaveLength(3)
+    const ladderLengths = villages.entries.map((e) => e.stages?.length)
+    expect(ladderLengths).toEqual([6, 4, 5]) // Spaceport, Mining Camp, Research Colony
+    expect(dst.state.villages.ladders.map((l) => l.length)).toEqual([6, 4, 5])
+  })
+})
+
+describe('legacy village-snapshot fallback', () => {
+  it('loads a pre-multi-village save whose ladder lived once on the snapshot', async () => {
+    const src = await bootstrapSim(5)
+    src.scheduler.runTicks(src.world, 100)
+    // Rewrite the (JSON-safe) snapshot into the legacy shape: one shared `stages` ladder on the
+    // villages snapshot, none per entry — exactly what a pre-G3 save carries.
+    const snap = JSON.parse(JSON.stringify(src.serialize())) as ReturnType<Sim['serialize']>
+    const base = (snap.modState as Record<string, unknown>).base as {
+      villages: { stages?: unknown; entries: { stages?: unknown }[] }
+    }
+    base.villages.stages = base.villages.entries[0]!.stages
+    for (const e of base.villages.entries) delete e.stages
+
+    const dst = await bootstrapSim(5, { startScene: false })
+    dst.restore(snap)
+    // Every village fell back to the shared ladder (the Spaceport's 6 stages) instead of losing it.
+    expect(dst.state.villages.count).toBe(3)
+    expect(dst.state.villages.ladders.map((l) => l.length)).toEqual([6, 6, 6])
   })
 })
 

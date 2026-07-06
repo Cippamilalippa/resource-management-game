@@ -19,6 +19,10 @@
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 90 },
       { "item": "item.glass", "amount": 24 }
+    ],
+    "settlements": [
+      { "building": "building.mining_camp", "distance": { "min": 22, "max": 30 } },
+      { "building": "building.research_colony", "distance": { "min": 40, "max": 52 } }
     ]
   },
   {
@@ -41,6 +45,10 @@
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 48 },
       { "item": "item.glass", "amount": 10 }
+    ],
+    "settlements": [
+      { "building": "building.mining_camp", "distance": { "min": 34, "max": 44 } },
+      { "building": "building.research_colony", "distance": { "min": 52, "max": 64 } }
     ]
   }
 ]

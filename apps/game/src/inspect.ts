@@ -24,6 +24,7 @@ import {
   tileKey,
   depositRichnessAt,
   villageStageAt,
+  villageStageConfigAt,
   type BeltGrid,
   type BuildingStore,
   type DepositStore,
@@ -309,11 +310,12 @@ function describeBuilding(
           })
         }
       }
-      // A village shows its current level and population (read-only, one-way).
+      // A village shows its current level and population (read-only, one-way). Each settlement has
+      // its own ladder, so read the population off this village's current stage config.
       const vs = villageStageAt(villages, px, py)
       if (vs >= 0) {
         stats.push({ kind: 'text', label: 'Level', value: String(vs + 1) })
-        const pop = villages.stages[vs]?.population
+        const pop = villageStageConfigAt(villages, px, py)?.population
         if (typeof pop === 'number')
           stats.push({ kind: 'text', label: 'Population', value: String(pop) })
       }

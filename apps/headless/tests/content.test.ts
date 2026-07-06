@@ -306,6 +306,95 @@ describe('validateContent', () => {
     expect(() => validateContent(reg)).toThrow(/item\.ghost/)
   })
 
+  it('accepts a scenario with well-formed settlements (a village id + distance band)', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'building.camp',
+      type: 'village',
+      accepts: ['item.ore'],
+      storage: 100,
+      stages: [{ level: 1, population: 5, demands: [{ item: 'item.ore', ratePerMin: 10 }] }],
+    })
+    reg.register({
+      id: 'scenario.settled',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      settlements: [{ building: 'building.camp', distance: { min: 20, max: 30 } }],
+    })
+    expect(() => validateContent(reg)).not.toThrow()
+  })
+
+  it('rejects a settlement that references a missing (or non-village) building', () => {
+    const missing = validRegistry()
+    missing.register({
+      id: 'scenario.ghosttown',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      settlements: [{ building: 'building.ghost', distance: { min: 20, max: 30 } }],
+    })
+    expect(() => validateContent(missing)).toThrow(/building\.ghost/)
+
+    // A crafter is not a village — the settlement must point at a `village` prototype.
+    const wrongType = validRegistry()
+    wrongType.register({
+      id: 'scenario.wrongtype',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      settlements: [{ building: 'building.mine', distance: { min: 20, max: 30 } }],
+    })
+    expect(() => validateContent(wrongType)).toThrow(/building\.mine/)
+  })
+
+  it('rejects a settlement with a malformed distance band', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'building.camp',
+      type: 'village',
+      accepts: ['item.ore'],
+      stages: [{ level: 1, population: 5, demands: [{ item: 'item.ore', ratePerMin: 10 }] }],
+    })
+    reg.register({
+      id: 'scenario.badband',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      settlements: [{ building: 'building.camp', distance: { min: 30, max: 20 } }],
+    })
+    expect(() => validateContent(reg)).toThrow(/distance\.min/)
+  })
+
+  it('rejects a village that demands an item outside its accepts list', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'building.village',
+      type: 'village',
+      accepts: ['item.ore'],
+      storage: 100,
+      stages: [{ level: 1, population: 10, demands: [{ item: 'item.plate', ratePerMin: 5 }] }],
+    })
+    // item.plate exists, but the village never stocks it — the demand could never be satisfied.
+    expect(() => validateContent(reg)).toThrow(/not in "accepts"/)
+  })
+
+  it('rejects a village whose accepts list exceeds the 8 stockpile slots', () => {
+    const reg = validRegistry()
+    for (let i = 0; i < 9; i++) reg.register({ id: `item.x${i}`, type: 'item', color: 100 + i })
+    reg.register({
+      id: 'building.hoarder',
+      type: 'village',
+      accepts: Array.from({ length: 9 }, (_, i) => `item.x${i}`),
+      stages: [{ level: 1, population: 10, demands: [{ item: 'item.x0', ratePerMin: 5 }] }],
+    })
+    expect(() => validateContent(reg)).toThrow(/at most 8/)
+  })
+
   it('accepts a well-formed buildCost on a buildable', () => {
     const reg = validRegistry()
     // A furnace that costs 2 plates to place — the treasury-cost the placement charges.

@@ -9,6 +9,15 @@
  */
 import type { VillageStatus, Alert, TreasuryBalance } from './gameLogic.ts'
 
+/**
+ * A village status enriched host-side with its settlement name (the sim is string-agnostic — it
+ * knows villages only by tile, so the boot loop resolves the name from the inspect registry, which
+ * recorded each `base:spawn`'s prototype name). Panels label each row with it.
+ */
+export interface HudVillage extends VillageStatus {
+  readonly name: string
+}
+
 /** One technology as the research screen shows it, enriched with its human name and status. */
 export interface HudTech {
   readonly id: string
@@ -57,7 +66,7 @@ export interface HudObjective {
 /** The full HUD snapshot the panels render. */
 export interface HudState {
   readonly research: HudResearch
-  readonly villages: readonly VillageStatus[]
+  readonly villages: readonly HudVillage[]
   readonly alerts: readonly Alert[]
   readonly production: readonly HudProductionRow[]
   /** Guided first-objectives checklist; empty once every step is done (panel hides). */

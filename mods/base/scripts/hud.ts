@@ -74,7 +74,8 @@ export function villageStatuses(state: GameState): VillageStatus[] {
   const out: VillageStatus[] = []
   for (let i = 0; i < v.count; i++) {
     const stage = v.stage[i]!
-    const cfg = v.stages[stage]
+    const stages = v.ladders[i] ?? []
+    const cfg = stages[stage]
     const b = buildingAt(state.buildings, v.vx[i]!, v.vy[i]!)
     const demands: VillageDemandStatus[] = []
     if (cfg) {
@@ -94,7 +95,7 @@ export function villageStatuses(state: GameState): VillageStatus[] {
       y: v.vy[i]!,
       stage,
       level: stage + 1,
-      maxStage: Math.max(0, v.stages.length - 1),
+      maxStage: Math.max(0, stages.length - 1),
       population: cfg?.population ?? 0,
       demands,
       growthTimer: v.growthTimer[i]!,
