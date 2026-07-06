@@ -35,6 +35,9 @@ let muted = readMuted()
 // Master gain multiplier (0–1) applied on top of each voice's own gain. Driven by the settings
 // store's master-volume slider; the binary `M` mute above still overrides it (mute → silent).
 let volume = 1
+// Subscribers notified when the `M` mute toggles, so the sibling music/ambience layer can gate
+// itself off the same global mute without owning its own key handler or duplicating the flag.
+const muteListeners = new Set<() => void>()
 
 function readMuted(): boolean {
   try {
@@ -66,7 +69,21 @@ export const sfx = {
     } catch {
       // Ignore storage failures — muting still applies for the session.
     }
+    for (const l of muteListeners) l()
   },
+
+  /** Subscribe to `M`-mute changes (music/ambience gate themselves off this). Returns unsubscribe. */
+  subscribeMuted: (listener: () => void): (() => void) => {
+    muteListeners.add(listener)
+    return () => muteListeners.delete(listener)
+  },
+
+  /**
+   * The shared AudioContext, lazily created (and reused by the music/ambience layer so the whole
+   * app runs on one context). Null when Web Audio is unavailable (headless/tests). Callers must
+   * only create it in response to a user gesture, per the browser autoplay policy.
+   */
+  context: (): AudioContext | null => audio(),
 
   /** The current master gain multiplier (0–1). */
   getVolume: (): number => volume,

@@ -6,8 +6,10 @@
  *
  * Volume is the single source of truth for the sfx gain multiplier: whenever it changes we push it
  * into {@link sfx}, which still layers the binary `M`-key mute on top (mute wins over any volume).
+ * The music-volume slider and ambience toggle work the same way, pushing into {@link music}.
  */
 import { sfx } from './sfx.ts'
+import { music } from './music.ts'
 
 /** Autosave cadence choices, in minutes. `0` means autosave is disabled. */
 export const AUTOSAVE_OPTIONS = [0, 1, 3, 5, 10] as const
@@ -21,10 +23,18 @@ export const UI_SCALE_MAX = 130
 export const VOLUME_MIN = 0
 export const VOLUME_MAX = 100
 
+/** Music-volume bounds (a percentage mapped to a 0–1 gain multiplier for {@link music}). */
+export const MUSIC_VOLUME_MIN = 0
+export const MUSIC_VOLUME_MAX = 100
+
 /** The persisted settings — pure data, safe to serialize verbatim. */
 export interface Settings {
   /** Master SFX volume, 0–100. Mapped to a 0–1 gain; the `M` mute still overrides it. */
   readonly masterVolume: number
+  /** Ambient-music volume, 0–100. Mapped to a 0–1 gain; the `M` mute still overrides it. */
+  readonly musicVolume: number
+  /** Whether the factory-ambience hum bed plays (its intensity tracks how busy the factory is). */
+  readonly ambience: boolean
   /** Overlay UI scale as a percentage (see {@link UI_SCALE_MIN}/{@link UI_SCALE_MAX}). */
   readonly uiScale: number
   /** Autosave cadence in minutes; `0` disables autosave. */
@@ -37,6 +47,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   masterVolume: 80,
+  musicVolume: 55,
+  ambience: true,
   uiScale: 100,
   autosaveMin: 3,
   edgeScroll: true,
@@ -69,6 +81,13 @@ export function clampSettings(partial: Partial<Settings> | null | undefined): Se
   const p = partial ?? {}
   return {
     masterVolume: clampNum(p.masterVolume, VOLUME_MIN, VOLUME_MAX, DEFAULT_SETTINGS.masterVolume),
+    musicVolume: clampNum(
+      p.musicVolume,
+      MUSIC_VOLUME_MIN,
+      MUSIC_VOLUME_MAX,
+      DEFAULT_SETTINGS.musicVolume,
+    ),
+    ambience: typeof p.ambience === 'boolean' ? p.ambience : DEFAULT_SETTINGS.ambience,
     uiScale: clampNum(p.uiScale, UI_SCALE_MIN, UI_SCALE_MAX, DEFAULT_SETTINGS.uiScale),
     autosaveMin: snapAutosave(p.autosaveMin),
     edgeScroll: typeof p.edgeScroll === 'boolean' ? p.edgeScroll : DEFAULT_SETTINGS.edgeScroll,
@@ -95,6 +114,13 @@ export function serializeSettings(settings: Settings): string {
 /** The gain multiplier (0–1) {@link sfx} should apply for a given master-volume percentage. */
 export function volumeGain(masterVolume: number): number {
   return clampNum(masterVolume, VOLUME_MIN, VOLUME_MAX, DEFAULT_SETTINGS.masterVolume) / 100
+}
+
+/** The gain multiplier (0–1) {@link music} should apply for a given music-volume percentage. */
+export function musicGain(musicVolume: number): number {
+  return (
+    clampNum(musicVolume, MUSIC_VOLUME_MIN, MUSIC_VOLUME_MAX, DEFAULT_SETTINGS.musicVolume) / 100
+  )
 }
 
 /**
@@ -144,8 +170,10 @@ function emit(): void {
   for (const l of listeners) l()
 }
 
-// Push the initial persisted volume into the sfx layer so it matches on first sound.
+// Push the initial persisted volumes/toggles into the audio layers so they match on first sound.
 sfx.setVolume(volumeGain(state.masterVolume))
+music.setMusicVolume(musicGain(state.musicVolume))
+music.setAmbienceEnabled(state.ambience)
 
 export const settingsStore = {
   get: (): SettingsStoreState => state,
@@ -158,6 +186,8 @@ export const settingsStore = {
     const next = clampSettings({ ...state, ...patch })
     state = { ...next, open: state.open }
     if (patch.masterVolume !== undefined) sfx.setVolume(volumeGain(next.masterVolume))
+    if (patch.musicVolume !== undefined) music.setMusicVolume(musicGain(next.musicVolume))
+    if (patch.ambience !== undefined) music.setAmbienceEnabled(next.ambience)
     persist()
     emit()
   },

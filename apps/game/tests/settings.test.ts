@@ -4,18 +4,23 @@ import {
   parseSettings,
   serializeSettings,
   volumeGain,
+  musicGain,
   shouldPauseOnBlur,
   DEFAULT_SETTINGS,
   UI_SCALE_MIN,
   UI_SCALE_MAX,
   VOLUME_MIN,
   VOLUME_MAX,
+  MUSIC_VOLUME_MIN,
+  MUSIC_VOLUME_MAX,
 } from '../src/settingsStore.ts'
 
 describe('clampSettings', () => {
   it('passes valid in-range settings through unchanged', () => {
     const input = {
       masterVolume: 55,
+      musicVolume: 40,
+      ambience: false,
       uiScale: 110,
       autosaveMin: 5 as const,
       edgeScroll: false,
@@ -31,12 +36,20 @@ describe('clampSettings', () => {
   })
 
   it('clamps numeric fields to their bounds', () => {
-    const hi = clampSettings({ masterVolume: 999, uiScale: 999 })
+    const hi = clampSettings({ masterVolume: 999, musicVolume: 999, uiScale: 999 })
     expect(hi.masterVolume).toBe(VOLUME_MAX)
+    expect(hi.musicVolume).toBe(MUSIC_VOLUME_MAX)
     expect(hi.uiScale).toBe(UI_SCALE_MAX)
-    const lo = clampSettings({ masterVolume: -50, uiScale: 10 })
+    const lo = clampSettings({ masterVolume: -50, musicVolume: -50, uiScale: 10 })
     expect(lo.masterVolume).toBe(VOLUME_MIN)
+    expect(lo.musicVolume).toBe(MUSIC_VOLUME_MIN)
     expect(lo.uiScale).toBe(UI_SCALE_MIN)
+  })
+
+  it('defaults an absent or non-boolean ambience toggle', () => {
+    expect(clampSettings({}).ambience).toBe(DEFAULT_SETTINGS.ambience)
+    expect(clampSettings({ ambience: 'no' as never }).ambience).toBe(DEFAULT_SETTINGS.ambience)
+    expect(clampSettings({ ambience: false }).ambience).toBe(false)
   })
 
   it('rounds fractional numbers and defaults non-finite ones', () => {
@@ -68,6 +81,8 @@ describe('parse/serialize round-trip', () => {
   it('round-trips a valid settings object', () => {
     const settings = clampSettings({
       masterVolume: 30,
+      musicVolume: 75,
+      ambience: false,
       uiScale: 90,
       autosaveMin: 10 as const,
       edgeScroll: false,
@@ -100,6 +115,20 @@ describe('volumeGain', () => {
     expect(volumeGain(200)).toBe(1)
     expect(volumeGain(-10)).toBe(0)
     expect(volumeGain(Number.NaN)).toBe(DEFAULT_SETTINGS.masterVolume / 100)
+  })
+})
+
+describe('musicGain', () => {
+  it('maps a 0–100 percentage to a 0–1 gain', () => {
+    expect(musicGain(0)).toBe(0)
+    expect(musicGain(50)).toBe(0.5)
+    expect(musicGain(100)).toBe(1)
+  })
+
+  it('clamps out-of-range and non-finite input', () => {
+    expect(musicGain(200)).toBe(1)
+    expect(musicGain(-10)).toBe(0)
+    expect(musicGain(Number.NaN)).toBe(DEFAULT_SETTINGS.musicVolume / 100)
   })
 })
 

@@ -16,6 +16,7 @@ import { historyStore } from './historyStore.ts'
 import { focusStore } from './focusStore.ts'
 import { productionHistory } from './productionHistory.ts'
 import { sfx } from './sfx.ts'
+import { music } from './music.ts'
 import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
 import { overlayStore } from './overlayStore.ts'
 import { detailOverlayStore } from './detailOverlayStore.ts'
@@ -372,6 +373,19 @@ async function boot(): Promise<void> {
   saveStore.subscribe(syncViewChrome)
   settingsStore.subscribe(syncViewChrome)
   syncViewChrome()
+
+  // Generative music + factory ambience (wall-clock, sim-independent — see music.ts). The pad only
+  // sounds while a game is on screen; it fades out in the menu/setup shells. Browser autoplay policy
+  // forbids audio before a user gesture, so we (re)start the AudioContext on the first pointer/key
+  // input that occurs during play — routine in-game clicks satisfy it immediately.
+  const syncMusicScene = (): void => music.setPlaying(appStore.get().phase === 'playing')
+  appStore.subscribe(syncMusicScene)
+  syncMusicScene()
+  const unlockAudio = (): void => {
+    if (appStore.get().phase === 'playing') music.resume()
+  }
+  globalThis.addEventListener('pointerdown', unlockAudio)
+  globalThis.addEventListener('keydown', unlockAudio)
 
   // Apply the UI-scale setting to the DOM overlay root. `zoom` scales the whole px-based overlay
   // layout cleanly in Chromium/Electron (font-size wouldn't touch the many fixed-px sizes), and
@@ -843,6 +857,13 @@ async function boot(): Promise<void> {
       }))
       // Fold the per-resource make rate into the rolling history the sparklines chart.
       productionHistory.push(production)
+      // Drive the factory-ambience intensity off how busy the factory is: the count of crafters
+      // that currently have a recipe running. A cheap index scan on the ~4 Hz throttle (never per
+      // frame); music.ts ramps the hum toward it over a couple of seconds.
+      const buildings = sess.state.buildings
+      let activeCrafters = 0
+      for (let b = 0; b < buildings.count; b++) if (buildings.crafts[b]) activeCrafters++
+      music.setActivity(activeCrafters)
       const villages = villageStatuses(sess.state)
       // Chime when the total village level rises (a stage was gained since the last sample).
       const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)
