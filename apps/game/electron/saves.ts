@@ -18,6 +18,7 @@ import {
   QUICKSAVE_ID,
   SAVE_EXT,
   SAVE_FILE_VERSION,
+  withSaveExtras,
   type SaveKind,
   type SaveMeta,
   type SavePayload,
@@ -155,16 +156,13 @@ export async function saveGame(req: SaveRequest): Promise<SaveMeta> {
   const createdAt = prior?.meta.createdAt ?? now
   const name = req.name ?? prior?.meta.name ?? defaultName(req.kind, tick)
 
-  const meta: SaveMeta = {
-    id,
-    name,
-    kind: req.kind,
-    tick,
-    seed,
-    snapshotVersion,
-    createdAt,
-    updatedAt: now,
-  }
+  // Thumbnail/play-time are optional and renderer-supplied; withSaveExtras falls back to the prior
+  // slot's values when the request omits one (e.g. a failed thumbnail capture this write).
+  const meta: SaveMeta = withSaveExtras(
+    { id, name, kind: req.kind, tick, seed, snapshotVersion, createdAt, updatedAt: now },
+    req,
+    prior?.meta,
+  )
   const file: SaveFile = { fileVersion: SAVE_FILE_VERSION, meta, snapshot: req.snapshot }
   await writeFile(fileForId(dir, id), JSON.stringify(file), 'utf8')
   return meta

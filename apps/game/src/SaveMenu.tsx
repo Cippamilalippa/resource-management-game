@@ -2,6 +2,8 @@ import { useState, useSyncExternalStore } from 'react'
 import { SNAPSHOT_VERSION } from '@factory/engine/persistence'
 import { saveStore } from './saveStore.ts'
 import { appStore } from './appStore.ts'
+import { formatPlayTime } from './saveFormat.ts'
+import { Icon } from './Icon.tsx'
 import type { SaveMeta } from '../electron/preload.ts'
 
 /** Human label for a slot's origin, shown as a small badge. */
@@ -45,11 +47,19 @@ function SaveRow({
   return (
     <li className={`save-row${active ? ' active' : ''}`}>
       <div className="save-row-main">
+        {meta.thumbnail ? (
+          <img className="save-row-thumb" src={meta.thumbnail} alt="" />
+        ) : (
+          <span className="save-row-thumb save-row-thumb-empty" aria-hidden="true">
+            <Icon name="Image" size={18} />
+          </span>
+        )}
         <span className={`save-badge save-badge-${meta.kind}`}>{KIND_LABEL[meta.kind]}</span>
         <div className="save-row-titles">
           <span className="save-row-name">{meta.name}</span>
           <span className="save-row-meta">
-            tick {meta.tick.toLocaleString()} · {when(meta.updatedAt)}
+            tick {meta.tick.toLocaleString()} · {when(meta.updatedAt)} · played{' '}
+            {formatPlayTime(meta.playTimeSec)}
             {incompatible ? ` · v${meta.snapshotVersion} (incompatible)` : ''}
           </span>
         </div>

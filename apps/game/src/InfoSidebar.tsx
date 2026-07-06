@@ -4,6 +4,7 @@ import type { InspectStat } from './inspect.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
 import { RecipePanel } from './RecipePanel.tsx'
 import { FilterPanel } from './FilterPanel.tsx'
+import { encyclopediaStore } from './encyclopedia.ts'
 
 /** 0xRRGGBB packed color -> CSS hex string. */
 function cssColor(color: number): string {
@@ -16,12 +17,16 @@ function StatRow({ stat }: { stat: InspectStat }): React.JSX.Element {
   if (stat.kind === 'heading') {
     return <div className="sidebar-heading">{stat.label}</div>
   }
+  // Hoisted so the click handlers below don't need a non-null assertion on the union-narrowed field.
+  const barColor = stat.kind === 'bar' ? stat.color : undefined
+  const openItem = (color: number): void => encyclopediaStore.openForItem(color)
   return (
     <div className="sidebar-row">
-      {/* A resource bar is labelled by the resource's icon; other rows by their text label. */}
-      {stat.kind === 'bar' && stat.color !== undefined ? (
+      {/* A resource bar is labelled by the resource's icon; other rows by their text label. Clicking
+          it opens the encyclopedia filtered on that item (Q4) — these are the accepts/produces rows. */}
+      {barColor !== undefined ? (
         <span className="sidebar-label">
-          <ResourceLabel color={stat.color} showName={false} />
+          <ResourceLabel color={barColor} showName={false} onClick={() => openItem(barColor)} />
         </span>
       ) : (
         <span className="sidebar-label">{stat.label}</span>
@@ -29,7 +34,7 @@ function StatRow({ stat }: { stat: InspectStat }): React.JSX.Element {
       {stat.kind === 'text' && <span className="sidebar-value">{stat.value}</span>}
       {stat.kind === 'color' && (
         <span className="sidebar-value">
-          <ResourceLabel color={stat.color} />
+          <ResourceLabel color={stat.color} onClick={() => openItem(stat.color)} />
         </span>
       )}
       {stat.kind === 'bar' && (

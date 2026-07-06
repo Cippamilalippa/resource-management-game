@@ -40,6 +40,17 @@ export interface SaveMeta {
   readonly createdAt: number
   /** Epoch ms of the most recent write to the slot. */
   readonly updatedAt: number
+  /**
+   * Optional small preview of the world at save time: a downscaled (~192px wide) JPEG data-URL
+   * captured from the Pixi canvas by the renderer. Added additively — older saves simply lack it,
+   * and the slot list falls back to a placeholder when absent.
+   */
+  readonly thumbnail?: string
+  /**
+   * Optional accumulated wall-clock play time in seconds, carried across save/load. Added
+   * additively — older saves lack it, and the slot list falls back to "—" when absent.
+   */
+  readonly playTimeSec?: number
 }
 
 /** A request from the renderer to persist the current sim. `snapshot` is the opaque engine blob. */
@@ -51,10 +62,34 @@ export interface SaveRequest {
   readonly id?: string
   /** The engine `WorldSnapshot` (typed opaquely here so this module stays import-free). */
   readonly snapshot: unknown
+  /** See {@link SaveMeta.thumbnail}. Captured renderer-side (the main process has no canvas). */
+  readonly thumbnail?: string
+  /** See {@link SaveMeta.playTimeSec}. Tracked renderer-side and handed over at save time. */
+  readonly playTimeSec?: number
 }
 
 /** The result of loading a slot: its metadata plus the opaque engine snapshot to restore. */
 export interface SavePayload {
   readonly meta: SaveMeta
   readonly snapshot: unknown
+}
+
+/**
+ * Merge a save's core fields with its optional thumbnail/play-time extras: prefer the incoming
+ * request's values, falling back to the slot's prior write when the request omits one (e.g. a
+ * thumbnail capture that failed this write shouldn't blank out an existing preview). Pure and
+ * import-free — unlike `saves.ts` this needs no Electron runtime, so it's unit-testable directly.
+ */
+export function withSaveExtras(
+  core: Omit<SaveMeta, 'thumbnail' | 'playTimeSec'>,
+  req: Pick<SaveRequest, 'thumbnail' | 'playTimeSec'>,
+  prior?: Pick<SaveMeta, 'thumbnail' | 'playTimeSec'>,
+): SaveMeta {
+  const thumbnail = req.thumbnail ?? prior?.thumbnail
+  const playTimeSec = typeof req.playTimeSec === 'number' ? req.playTimeSec : prior?.playTimeSec
+  return {
+    ...core,
+    ...(thumbnail ? { thumbnail } : {}),
+    ...(playTimeSec !== undefined ? { playTimeSec } : {}),
+  }
 }

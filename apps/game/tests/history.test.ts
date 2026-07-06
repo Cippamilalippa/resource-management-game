@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { historyStore, type HistoryCommand } from '../src/historyStore.ts'
+import { historyStore, formatHistoryToast, type HistoryCommand } from '../src/historyStore.ts'
 
 /**
  * The undo/redo history is a pure UI-side store: it records the commands that reverse and replay a
@@ -84,5 +84,47 @@ describe('historyStore', () => {
     historyStore.undo()
     expect(historyStore.get().undoLabel).toBe(null)
     expect(historyStore.get().redoLabel).toBe('Paste')
+  })
+
+  // Q5: a transient toast plus a small "recent steps" readout so undo/redo is no longer invisible.
+  describe('toast + recent-steps readout', () => {
+    it('undo/redo populate a toast naming the step and how many more remain', () => {
+      placeStep(1, 1)
+      placeStep(2, 2)
+      historyStore.undo()
+      expect(historyStore.get().toast).toBe('Undid: building — 1 more')
+      historyStore.undo()
+      expect(historyStore.get().toast).toBe('Undid: building')
+      historyStore.redo()
+      expect(historyStore.get().toast).toBe('Redid: building — 1 more')
+    })
+
+    it('reset clears any pending toast', () => {
+      placeStep(1, 1)
+      historyStore.undo()
+      expect(historyStore.get().toast).not.toBe(null)
+      historyStore.reset()
+      expect(historyStore.get().toast).toBe(null)
+    })
+
+    it('recentLabels lists past steps most-recent-first, capped at 5', () => {
+      for (let i = 0; i < 7; i++) placeStep(i, i)
+      // 7 pushes -> only the last 5 labels are kept, newest first (all share the same label here,
+      // so pin the count instead of the content).
+      expect(historyStore.get().recentLabels).toHaveLength(5)
+      expect(historyStore.get().recentLabels.every((l) => l === 'building')).toBe(true)
+    })
+  })
+})
+
+describe('formatHistoryToast', () => {
+  it('omits the "more" suffix when nothing remains in that direction', () => {
+    expect(formatHistoryToast('undo', 'Belt', 0)).toBe('Undid: Belt')
+    expect(formatHistoryToast('redo', 'Belt', 0)).toBe('Redid: Belt')
+  })
+
+  it('appends the remaining count otherwise', () => {
+    expect(formatHistoryToast('undo', 'Belt', 4)).toBe('Undid: Belt — 4 more')
+    expect(formatHistoryToast('redo', 'Belt', 1)).toBe('Redid: Belt — 1 more')
   })
 })

@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react'
 import { hudStore } from './hudStore.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
 import { Icon } from './Icon.tsx'
+import { encyclopediaStore } from './encyclopedia.ts'
 
 /** Compact numeric formatting for the balance chips: 12 · 3.4k · 1.2M. */
 function fmt(n: number): string {
@@ -29,7 +30,12 @@ export function TreasuryBar(): React.JSX.Element | null {
       <Icon name="Landmark" size={15} />
       {treasury.map((b) => (
         <span className="treasury-item" key={b.color} title={`${b.amount}`}>
-          <ResourceLabel color={b.color} size={15} showName={false} />
+          <ResourceLabel
+            color={b.color}
+            size={15}
+            showName={false}
+            onClick={() => encyclopediaStore.openForItem(b.color)}
+          />
           <span className="treasury-amt">{fmt(b.amount)}</span>
         </span>
       ))}
