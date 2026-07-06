@@ -227,7 +227,16 @@ describe('resolveInspect', () => {
     flush(world, state) // tick 2
     flush(world, state) // tick 3: craft timer accrues to 3 (below the 10-tick cadence)
 
-    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 5, 5)
+    const info = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      state.deposits,
+      reg,
+      5,
+      5,
+    )
     expect(info?.stats).toContainEqual({ kind: 'bar', label: 'Progress', value: 3, max: 10 })
     // No utilization callback passed: the readout is omitted rather than shown as "no data".
     expect(info?.stats.find((s) => s.label === 'Utilization (60s)')).toBeUndefined()
@@ -238,6 +247,7 @@ describe('resolveInspect', () => {
       state.grid,
       state.buildings,
       state.villages,
+      state.deposits,
       reg,
       5,
       5,
@@ -255,6 +265,7 @@ describe('resolveInspect', () => {
       state.grid,
       state.buildings,
       state.villages,
+      state.deposits,
       reg,
       5,
       5,
