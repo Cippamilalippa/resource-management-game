@@ -161,9 +161,66 @@ describe('resolveInspect', () => {
     expect(info?.stats).toContainEqual({ kind: 'text', label: 'Craft rate', value: '2 /s' })
     // A drain-only recipe output shows under the "Produces" section as an icon + current/total bar.
     expect(info?.stats).toContainEqual({ kind: 'heading', label: 'Produces' })
-    const stock = info?.stats.find((s) => s.kind === 'bar')
+    // The recipe progress bar (added ahead of the stock bars) is also a 'bar' row but carries no
+    // resource colour, so the stock bar is the first *coloured* bar.
+    const stock = info?.stats.find((s) => s.kind === 'bar' && s.color !== undefined)
     // The output bar carries a positive per-second throughput (1 unit every 30 ticks → "2/s").
     expect(stock).toMatchObject({ kind: 'bar', max: 100, color: 0x112233, rate: '2/s' })
+  })
+
+  it('shows a recipe progress bar for a crafter, and an optional utilization readout', () => {
+    const world = createGameWorld(1)
+    const state = createGameState()
+    const reg = new InspectRegistry()
+    enqueuePlaceProducer(world, {
+      x: 5,
+      y: 5,
+      w: 1,
+      h: 1,
+      color: 0x778800,
+      itemColor: 0x112233,
+      produceEvery: 10,
+      storageCap: 100,
+    })
+    reg.record(5, 5, { name: 'Farm', type: 'producer' })
+    flush(world, state) // tick 1: places the crafter, craft timer starts at 0
+    flush(world, state) // tick 2
+    flush(world, state) // tick 3: craft timer accrues to 3 (below the 10-tick cadence)
+
+    const info = resolveInspect(world, state.grid, state.buildings, state.villages, reg, 5, 5)
+    expect(info?.stats).toContainEqual({ kind: 'bar', label: 'Progress', value: 3, max: 10 })
+    // No utilization callback passed: the readout is omitted rather than shown as "no data".
+    expect(info?.stats.find((s) => s.label === 'Utilization (60s)')).toBeUndefined()
+
+    // With a callback, the fraction is surfaced as a rounded percentage.
+    const withUtilization = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      reg,
+      5,
+      5,
+      () => 0.5,
+    )
+    expect(withUtilization?.stats).toContainEqual({
+      kind: 'text',
+      label: 'Utilization (60s)',
+      value: '50%',
+    })
+
+    // A callback that has no data yet (returns undefined) also omits the row.
+    const noData = resolveInspect(
+      world,
+      state.grid,
+      state.buildings,
+      state.villages,
+      reg,
+      5,
+      5,
+      () => undefined,
+    )
+    expect(noData?.stats.find((s) => s.label === 'Utilization (60s)')).toBeUndefined()
   })
 
   it('shows a stock bar per resource on a resource-holding building', () => {

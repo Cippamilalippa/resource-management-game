@@ -40,6 +40,7 @@ import { resolveInspect, type InspectInfo, type InspectRegistry } from './inspec
 import { inspectStore } from './inspectStore.ts'
 import { recipeStore } from './recipeStore.ts'
 import { filterStore } from './filterStore.ts'
+import { utilizationStore } from './utilizationStore.ts'
 import type { MachineIndex, RecipeChoice } from './machines.ts'
 
 /** Whether two footprints describe the same object (same anchor and size). */
@@ -495,8 +496,23 @@ export function installPlacement(
   let cursorTile: GridCoord | null = null
   let selectStart: GridCoord | null = null
 
-  /** Push the current inspect view (pinned wins over hover) to the store and highlight. */
-  const applyView = (): void => {
+  /** Sample whether `info`'s crafter fired this refresh into the rolling utilization window,
+   * keyed by its footprint tile (see `utilizationStore.ts`). A no-op for anything that isn't a
+   * crafter. Reads `RenderHints.active` — the same transient sim→render pulse the renderer uses
+   * to animate a working machine — so this is a read, never a write, of sim/render state. */
+  const sampleUtilization = (info: InspectInfo | null): void => {
+    if (!info) return
+    const { x, y } = info.footprint
+    const b = buildingAt(state.buildings, x, y)
+    if (b < 0 || !state.buildings.crafts[b]) return
+    const active = world.components.RenderHints.active[state.buildings.eid[b]!] === 1
+    utilizationStore.sample(tileKey(x, y), active)
+  }
+
+  /** Push the current inspect view (pinned wins over hover) to the store and highlight. `sample`
+   * is true only on the render loop's throttled refresh (never on a raw hover/click), so the
+   * utilization window advances on a steady wall-clock cadence rather than per pointer event. */
+  const applyView = (sample = false): void => {
     if (pinned) {
       const info = resolveInspect(
         world,
@@ -506,12 +522,14 @@ export function installPlacement(
         registry,
         pinned.tile.x,
         pinned.tile.y,
+        utilizationStore.utilization,
       )
       if (info) {
         inspectStore.set({ info, pinned: true })
         renderer.setHighlight({ ...info.footprint, color: info.color, selected: true })
         publishRecipe(info) // recipe picker follows the pinned crafter
         publishFilter(info) // filter editor follows the pinned port
+        if (sample) sampleUtilization(info)
         return
       }
       pinned = null // the pinned object vanished — fall through to hover.
@@ -525,12 +543,14 @@ export function installPlacement(
           registry,
           hoverTile.x,
           hoverTile.y,
+          utilizationStore.utilization,
         )
       : null
     inspectStore.set({ info, pinned: false })
     renderer.setHighlight(info ? { ...info.footprint, color: info.color, selected: false } : null)
     publishRecipe(null) // nothing pinned → no recipe picker
     publishFilter(null) // nothing pinned → no filter editor
+    if (sample) sampleUtilization(info)
   }
 
   /** Clear all inspect state (entering build mode, or nothing under the cursor). */
@@ -1106,5 +1126,7 @@ export function installPlacement(
     buildStore.clearSelection()
   }
 
-  return { refresh: applyView }
+  // The render loop's throttled refresh samples utilization; every other caller of `applyView`
+  // (hover/click/mode-switch) leaves `sample` at its default false.
+  return { refresh: () => applyView(true) }
 }
