@@ -6,38 +6,73 @@
     "icon": "TowerControl",
     "size": { "w": 2, "h": 2 },
     "color": 11887901,
-    "accepts": ["item.rocket_fuel", "item.avionics", "item.aircraft", "item.rocket"],
+    "accepts": [
+      "item.glass",
+      "item.aluminum",
+      "item.aluminum_sheet",
+      "item.microchip",
+      "item.rocket_fuel",
+      "item.avionics",
+      "item.aircraft",
+      "item.rocket"
+    ],
     "storage": 500,
     "stages": [
       {
         "level": 1,
         "population": 50,
-        "demands": [{ "item": "item.rocket_fuel", "ratePerMin": 20 }]
+        "demands": [{ "item": "item.glass", "ratePerMin": 10 }]
       },
       {
         "level": 2,
-        "population": 150,
+        "population": 120,
         "demands": [
-          { "item": "item.rocket_fuel", "ratePerMin": 20 },
-          { "item": "item.avionics", "ratePerMin": 6 }
+          { "item": "item.glass", "ratePerMin": 12 },
+          { "item": "item.aluminum", "ratePerMin": 10 }
         ]
       },
       {
         "level": 3,
-        "population": 400,
+        "population": 280,
         "demands": [
-          { "item": "item.rocket_fuel", "ratePerMin": 20 },
-          { "item": "item.avionics", "ratePerMin": 6 },
-          { "item": "item.aircraft", "ratePerMin": 2 }
+          { "item": "item.glass", "ratePerMin": 12 },
+          { "item": "item.aluminum", "ratePerMin": 12 },
+          { "item": "item.aluminum_sheet", "ratePerMin": 6 }
         ]
       },
       {
         "level": 4,
-        "population": 1000,
+        "population": 600,
         "demands": [
-          { "item": "item.rocket_fuel", "ratePerMin": 20 },
-          { "item": "item.avionics", "ratePerMin": 6 },
-          { "item": "item.aircraft", "ratePerMin": 2 },
+          { "item": "item.glass", "ratePerMin": 14 },
+          { "item": "item.aluminum", "ratePerMin": 12 },
+          { "item": "item.aluminum_sheet", "ratePerMin": 6 },
+          { "item": "item.microchip", "ratePerMin": 4 }
+        ]
+      },
+      {
+        "level": 5,
+        "population": 1200,
+        "demands": [
+          { "item": "item.glass", "ratePerMin": 14 },
+          { "item": "item.aluminum", "ratePerMin": 14 },
+          { "item": "item.aluminum_sheet", "ratePerMin": 8 },
+          { "item": "item.microchip", "ratePerMin": 4 },
+          { "item": "item.rocket_fuel", "ratePerMin": 5 },
+          { "item": "item.avionics", "ratePerMin": 3 }
+        ]
+      },
+      {
+        "level": 6,
+        "population": 2500,
+        "demands": [
+          { "item": "item.glass", "ratePerMin": 16 },
+          { "item": "item.aluminum", "ratePerMin": 14 },
+          { "item": "item.aluminum_sheet", "ratePerMin": 8 },
+          { "item": "item.microchip", "ratePerMin": 5 },
+          { "item": "item.rocket_fuel", "ratePerMin": 6 },
+          { "item": "item.avionics", "ratePerMin": 3 },
+          { "item": "item.aircraft", "ratePerMin": 1 },
           { "item": "item.rocket", "ratePerMin": 1 }
         ]
       }
