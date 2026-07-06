@@ -5,9 +5,9 @@ import { MAX_SLOTS, buildingAt, villageStageAt } from '../gameLogic.ts'
 
 /**
  * The starting scene registers one village anchored at (-1, -1) with its footprint covering the
- * origin. Its stockpile slots follow the prototype `accepts` order (grain, wood, bread, gear),
- * so slot 0 is grain — the only level-1 demand. These tests drive that buffer directly to
- * isolate the village growth/decline rule from the belt network.
+ * origin. Its stockpile slots follow the prototype `accepts` order (glass, aluminum,
+ * aluminum_sheet, microchip, …), so slot 0 is glass — the only level-1 demand. These tests drive
+ * that buffer directly to isolate the village growth/decline rule from the belt network.
  */
 const VILLAGE_ANCHOR = { x: -1, y: -1 }
 
@@ -16,8 +16,8 @@ function villageBuilding(sim: Sim): number {
   return buildingAt(sim.state.buildings, 0, 0)
 }
 
-/** Set the village's grain buffer (slot 0) to `n`. */
-function setGrain(sim: Sim, n: number): void {
+/** Set the village's slot-0 buffer (the single level-1 demand, glass) to `n`. */
+function setStage1(sim: Sim, n: number): void {
   const b = villageBuilding(sim)
   sim.state.buildings.slotCount[b * MAX_SLOTS] = n
 }
@@ -59,8 +59,8 @@ describe('village growth / decline', () => {
 
   it('grows a stage when its level-1 demand stays satisfied', async () => {
     const sim = await bootstrapSim(1)
-    // Keep grain topped up so level 1 (grain only) is met every cadence.
-    setGrain(sim, 100_000)
+    // Keep glass topped up so level 1 (glass only) is met every cadence.
+    setStage1(sim, 100_000)
     sim.scheduler.runTicks(sim.world, 700)
     // ~600 ticks of sustained satisfaction promotes it from stage 0 to stage 1.
     expect(stage(sim)).toBe(1)
@@ -69,12 +69,12 @@ describe('village growth / decline', () => {
   it('declines a stage when a higher tier goes unsupplied, floored at level 1', async () => {
     const sim = await bootstrapSim(1)
     // Grow to stage 1 first.
-    setGrain(sim, 100_000)
+    setStage1(sim, 100_000)
     sim.scheduler.runTicks(sim.world, 700)
     expect(stage(sim)).toBe(1)
-    // Stage 1 also demands wood + bread (never supplied) AND now grain is cut off, so every
+    // Stage 1 (level 2) also demands aluminum (never supplied) AND now glass is cut off, so every
     // demand is unmet: after ~600 ticks it drops back to stage 0 and cannot fall below it.
-    setGrain(sim, 0)
+    setStage1(sim, 0)
     sim.scheduler.runTicks(sim.world, 900)
     expect(stage(sim)).toBe(0)
   })
@@ -121,7 +121,7 @@ describe('village growth / decline', () => {
   it('is deterministic: same seed + buffer -> identical stage and timers', async () => {
     const run = async (): Promise<Sim> => {
       const sim = await bootstrapSim(3)
-      setGrain(sim, 100_000)
+      setStage1(sim, 100_000)
       sim.scheduler.runTicks(sim.world, 1000)
       return sim
     }

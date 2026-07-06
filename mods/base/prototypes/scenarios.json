@@ -14,7 +14,7 @@
     ],
     "patchSize": { "min": 4, "max": 5 },
     "spread": { "min": 6, "max": 18 },
-    "startingKit": [{ "item": "item.rocket_fuel", "amount": 40 }],
+    "startingKit": [{ "item": "item.glass", "amount": 30 }],
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 90 },
       { "item": "item.glass", "amount": 24 }
