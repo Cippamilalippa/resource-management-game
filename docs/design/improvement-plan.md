@@ -41,7 +41,10 @@ The plan below is ordered around fixing those five things.
 
 ## 1. Gameplay — core loop & stakes
 
-- [ ] **G1. Finite deposits with richness.** ★★★ / M — Give each deposit tile an integer
+- [x] **G1. Finite deposits with richness.** ★★★ / M — _Shipped: per-tile richness rolled
+      from per-scenario bands (`infinite` supported; abundant 1200–2400, sparse 300–700),
+      extraction drains it, exhausted tiles grey out + `crafter_exhausted` alert, inspector
+      shows remaining, persisted additively (legacy saves = infinite)._ Give each deposit tile an integer
       `richness` that extraction drains; exhausted tiles gray out; patch totals visible on
       hover and minimap. This single change creates the expansion loop (scout → outpost →
       logistics) that drives everything in Factorio. Data: per-terrain `richness` bands per
@@ -198,7 +201,9 @@ The plan below is ordered around fixing those five things.
       terrain tiles (W2). The renderer already maps `sprite` ids and icon textures; extend
       it to atlas frames while keeping the engine game-agnostic (mods supply the atlas —
       an additive `ModApi`/host asset channel). Biggest perceived-quality jump available.
-- [ ] **P2. Music + ambient audio.** ★★☆ / M — A few loopable tracks + world-positional
+- [x] **P2. Music + ambient audio.** ★★☆ / M — _Shipped: generative pentatonic pad with
+      voice-leading + sparse plucks, activity-following factory hum, music volume + ambience
+      settings, M-mute integrated._ A few loopable tracks + world-positional
       machine hum near the camera (Web Audio, wall-clock, sim-independent like `sfx.ts`).
 - [ ] **P3. More juice.** ★☆☆ / S–M — Item pop on port pickup/drop, cannon muzzle flash +
       shell arc shadow, village level-up celebration, research-complete banner. All
