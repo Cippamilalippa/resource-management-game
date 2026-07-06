@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { encyclopediaStore, type EncyclopediaEntry } from './encyclopedia.ts'
+import { encyclopediaStore, type EncyclopediaEntry, type EncyclopediaFlow } from './encyclopedia.ts'
 import { Icon } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
+import { formatRate } from './rates.ts'
 
-/** A recipe's ingredients or products as resource swatches with amounts. */
-function Flows({
-  flows,
-}: {
-  flows: readonly { color: number; amount: number }[]
-}): React.JSX.Element {
+/** A recipe's ingredients or products as resource swatches with per-craft amount and /min rate. */
+function Flows({ flows }: { flows: readonly EncyclopediaFlow[] }): React.JSX.Element {
   if (flows.length === 0) return <span className="enc-none">—</span>
   return (
     <span className="enc-flows">
@@ -16,6 +13,7 @@ function Flows({
         <span key={i} className="enc-flow">
           <span className="enc-amt">{f.amount}×</span>
           <ResourceLabel color={f.color} size={14} />
+          <span className="enc-rate">{formatRate(f.perMin)}/min</span>
         </span>
       ))}
     </span>

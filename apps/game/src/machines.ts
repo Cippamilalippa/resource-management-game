@@ -8,6 +8,7 @@
  * commands. Read-only — it never touches the sim.
  */
 import { recipeTypeOf, terrainTypeOf, type CraftFlow } from './gameLogic.ts'
+import { buildRateModel, type RatioHint } from './rates.ts'
 import type { ClientPrototype } from './sim.ts'
 
 /** A recipe as the picker offers it, pre-resolved to the colours + amounts the sim command needs. */
@@ -19,6 +20,12 @@ export interface RecipeChoice {
   readonly category: string
   readonly inputs: readonly CraftFlow[]
   readonly outputs: readonly CraftFlow[]
+  /** Per-minute rate of each input, aligned to {@link inputs} (from `time`, amount, machine speed). */
+  readonly inputRates: readonly number[]
+  /** Per-minute rate of each output, aligned to {@link outputs}. */
+  readonly outputRates: readonly number[]
+  /** Direct upstream machine ratios to sustain 1× this crafter (one level; empty for extraction). */
+  readonly ratios: readonly RatioHint[]
   /** Attempt one craft every N ticks (recipe `time`). */
   readonly craftEvery: number
   readonly storageCap: number
@@ -78,6 +85,8 @@ function label(id: string): string {
  * the current sim behaviour); `storageCap` comes from the building.
  */
 export function buildMachineIndex(prototypes: readonly ClientPrototype[]): MachineIndex {
+  // Per-machine throughput math (per-minute rates + one-level machine ratios), derived once.
+  const rates = buildRateModel(prototypes)
   const itemColor = new Map<string, number>()
   const itemName = new Map<string, string>()
   for (const p of prototypes) {
@@ -103,6 +112,7 @@ export function buildMachineIndex(prototypes: readonly ClientPrototype[]): Machi
     const first = outputs[0]
     if (!first) continue // a recipe with no resolvable output isn't offerable
     const primaryId = (Array.isArray(p.results) ? (p.results as AuthoredFlow[])[0]?.item : '') ?? ''
+    const recipeRates = rates.recipeRates(p.id)
     const choice: RecipeChoice = {
       id: p.id,
       name: itemName.get(primaryId) ?? label(p.id),
@@ -110,6 +120,9 @@ export function buildMachineIndex(prototypes: readonly ClientPrototype[]): Machi
       category,
       inputs: toFlows(p.ingredients),
       outputs,
+      inputRates: recipeRates.inputs,
+      outputRates: recipeRates.outputs,
+      ratios: rates.ratioHints(p.id),
       craftEvery: num(p, 'time', 30),
       storageCap: 100,
       outputColor: first.color,

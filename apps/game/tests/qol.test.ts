@@ -10,6 +10,9 @@ function recipe(over: Partial<RecipeChoice> & { id: string; name: string }): Rec
     category: 'craft',
     inputs: [],
     outputs: [],
+    inputRates: [],
+    outputRates: [],
+    ratios: [],
     craftEvery: 30,
     storageCap: 100,
     outputColor: 0,
@@ -43,6 +46,8 @@ describe('buildEncyclopedia', () => {
           name: 'Iron plate',
           inputs: [{ color: 0xaa0000, amount: 2 }],
           outputs: [{ color: 0xcccccc, amount: 1 }],
+          inputRates: [30],
+          outputRates: [15],
           craftEvery: 40,
         }),
         recipe({ id: 'copper_plate', name: 'Copper plate' }),
@@ -53,8 +58,8 @@ describe('buildEncyclopedia', () => {
     const iron = entries.find((e) => e.name === 'Iron plate')!
     expect(iron.machineName).toBe('Smelter')
     expect(iron.craftEvery).toBe(40)
-    expect(iron.inputs).toEqual([{ color: 0xaa0000, amount: 2 }])
-    expect(iron.outputs).toEqual([{ color: 0xcccccc, amount: 1 }])
+    expect(iron.inputs).toEqual([{ color: 0xaa0000, amount: 2, perMin: 30 }])
+    expect(iron.outputs).toEqual([{ color: 0xcccccc, amount: 1, perMin: 15 }])
   })
 
   it('returns nothing when no machine has recipes', () => {
