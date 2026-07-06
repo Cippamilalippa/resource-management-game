@@ -18,6 +18,7 @@ import { productionHistory } from './productionHistory.ts'
 import { utilizationStore } from './utilizationStore.ts'
 import { muteStore, filterMuted } from './muteStore.ts'
 import { alertHistoryStore } from './alertHistoryStore.ts'
+import { statsHistory } from './statsHistory.ts'
 import { sfx } from './sfx.ts'
 import { music } from './music.ts'
 import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
@@ -444,6 +445,7 @@ async function boot(): Promise<void> {
     utilizationStore.reset() // per-tile crafter windows don't carry over to a new world
     muteStore.reset() // muted tile keys belong to the previous world's tiles
     alertHistoryStore.reset() // app-side only — not part of the save, so start the log fresh
+    statsHistory.reset() // ...and its P-screen statistics history too
     prevVillageLevels = -1 // don't chime on the first sample of a freshly started/loaded session
     playTimeMs = Math.max(0, initialPlayTimeSec) * 1000
     const inspect = installPlacement(renderer, sim.world, sim.state, sim.registry, machines)
@@ -871,6 +873,8 @@ async function boot(): Promise<void> {
       let activeCrafters = 0
       for (let b = 0; b < buildings.count; b++) if (buildings.crafts[b]) activeCrafters++
       music.setActivity(activeCrafters)
+      // Same snapshot, but retained across the P-screen's three fine/medium/coarse windows.
+      statsHistory.push(production)
       const villages = villageStatuses(sess.state)
       // Chime when the total village level rises (a stage was gained since the last sample).
       const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)

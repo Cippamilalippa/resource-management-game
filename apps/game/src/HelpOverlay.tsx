@@ -45,6 +45,7 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
       ['Alt', 'Detail overlay'],
       ['E', 'Recipe book'],
       ['O', 'Settings'],
+      ['P', 'Production statistics'],
       ['?', 'This help'],
     ],
   },
