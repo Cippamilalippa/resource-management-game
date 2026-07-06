@@ -19,6 +19,7 @@ import { StatusOverlay } from './StatusOverlay.tsx'
 import { SettingsMenu, SettingsButton } from './SettingsMenu.tsx'
 import { DetailOverlay } from './DetailOverlay.tsx'
 import { HistoryToast } from './HistoryToast.tsx'
+import { MapView } from './MapView.tsx'
 
 /**
  * Root of the DOM overlay. Renders the in-game HUD only while a session is on screen (`playing`);
@@ -46,6 +47,7 @@ export function App(): React.JSX.Element {
           <StatsScreen />
           <StatusOverlay />
           <DetailOverlay />
+          <MapView />
           <DebugOverlay />
           <HistoryToast />
         </>

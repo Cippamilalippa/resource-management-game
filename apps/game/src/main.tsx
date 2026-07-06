@@ -25,6 +25,7 @@ import { encyclopediaStore, buildEncyclopedia } from './encyclopedia.ts'
 import { overlayStore } from './overlayStore.ts'
 import { detailOverlayStore } from './detailOverlayStore.ts'
 import { collectDetailMarks } from './detailOverlay.ts'
+import { mapModeStore } from './mapModeStore.ts'
 import type { AlertKind } from './gameLogic.ts'
 
 /** Status-overlay marker colour per alert kind (starved = orange, backed up = amber, etc.). */
@@ -368,17 +369,26 @@ async function boot(): Promise<void> {
     if (!detailOverlayStore.get().on) renderer.setDetailOverlay(null)
   })
   // Suppress edge-of-screen camera panning AND hide the minimap unless a session is actively on
-  // screen and no modal (save or settings) is open, so nothing drifts under a modal or shows on the
-  // menu shell. Edge panning additionally honours the player's edge-scroll setting.
+  // screen and no modal (save or settings) is open, so nothing drifts under a modal or shows on
+  // the menu shell. Edge panning additionally honours the player's edge-scroll setting. The
+  // full-screen map, when up, also suppresses both (it replaces the minimap and holds the camera
+  // still) — and leaving play / opening a modal closes the map so it never lingers over the menu.
   const syncViewChrome = (): void => {
     const live =
       appStore.get().phase === 'playing' && !saveStore.get().open && !settingsStore.get().open
-    renderer.edgeScroll = live && settingsStore.get().edgeScroll
-    renderer.minimap = live
+    if (!live && mapModeStore.get().on) mapModeStore.set(false)
+    const mapOn = mapModeStore.get().on
+    renderer.edgeScroll = live && settingsStore.get().edgeScroll && !mapOn
+    renderer.minimap = live && !mapOn
   }
   appStore.subscribe(syncViewChrome)
   saveStore.subscribe(syncViewChrome)
   settingsStore.subscribe(syncViewChrome)
+  // Mirror the map toggle onto the renderer, then re-sync the view chrome (minimap/edge-scroll).
+  mapModeStore.subscribe(() => {
+    renderer.setMapMode(mapModeStore.get().on)
+    syncViewChrome()
+  })
   syncViewChrome()
 
   // Generative music + factory ambience (wall-clock, sim-independent — see music.ts). The pad only
@@ -756,8 +766,15 @@ async function boot(): Promise<void> {
       if (appStore.get().phase !== 'playing') return
       e.preventDefault()
       historyStore.redo()
-    } else if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !typing) {
-      // Toggle sound effects (procedural, UI-layer only). Persisted across sessions.
+    } else if (
+      (e.key === 'm' || e.key === 'M') &&
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !typing
+    ) {
+      // Shift+M toggles sound effects (procedural, UI-layer only). Persisted across sessions. Bare M
+      // is the full-screen map (see MapView.tsx) — Factorio muscle-memory, so mute moved off it.
       sfx.setMuted(!sfx.isMuted())
     } else if (e.key === 'F5') {
       e.preventDefault()

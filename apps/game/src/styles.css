@@ -237,6 +237,10 @@ input:focus-visible,
 .detail-btn {
   right: 328px;
 }
+/* Full-screen map toggle — shares .overlay-btn styling, next slot left. */
+.map-btn {
+  right: 424px;
+}
 
 /* ── Recipe encyclopedia ─────────────────────────────────────────────────── */
 .enc-btn {
@@ -2377,7 +2381,7 @@ input:focus-visible,
 /* ── Settings (gear button bottom-right + modal) ─────────────────────────────── */
 .settings-btn {
   position: absolute;
-  right: 328px;
+  right: 520px;
   bottom: 16px;
   pointer-events: auto;
   display: inline-flex;
@@ -2570,7 +2574,7 @@ input:focus-visible,
 /* Floating toggle button, left of the status-overlay button in the bottom-right row. */
 .stats-btn {
   position: absolute;
-  right: 424px;
+  right: 616px;
   bottom: 16px;
   pointer-events: auto;
   display: inline-flex;
