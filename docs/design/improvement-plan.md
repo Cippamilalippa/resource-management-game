@@ -58,7 +58,10 @@ The plan below is ordered around fixing those five things.
       fuel. Engine stays generic: it's just another mod-zero store + system; coverage is
       integer Chebyshev like the cannon range. Phase it: (a) machines need _fuel_ delivered
       by belt (S, no new network), (b) electric network with poles (L).
-- [ ] **G3. Multiple villages, distinct demand ladders.** ★★★ / M — The `VillageStore` is
+- [x] **G3. Multiple villages, distinct demand ladders.** ★★★ / M — _Shipped: Mining Camp
+      (4 stages, tier-1/2 goods) + Research Colony (5 stages, electronics branch) placed at
+      per-scenario distance bands; per-village ladders in the store (legacy saves fall back);
+      named rows in panel + inspector._ The `VillageStore` is
       already multi-entry; the scene just spawns one. Scatter 2–4 settlements (mining camp,
       research colony, spaceport) at increasing distance, each with its own staged ladder
       starting _shallow_ (aluminum sheet, glass) and deepening. Distance + different needs
