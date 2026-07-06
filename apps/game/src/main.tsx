@@ -33,6 +33,7 @@ import { createSim, type ClientPrototype, type SimOrigin } from './sim.ts'
 import { saveStore, type SaveController } from './saveStore.ts'
 import { appStore, type AppController } from './appStore.ts'
 import { simControlStore } from './simControlStore.ts'
+import { settingsStore, shouldPauseOnBlur } from './settingsStore.ts'
 import { hudStore, type HudController, type HudResearch, type HudTech } from './hudStore.ts'
 import { buildMachineIndex, type MachineIndex } from './machines.ts'
 import type { InspectRegistry } from './inspect.ts'
@@ -321,15 +322,27 @@ async function boot(): Promise<void> {
     if (!overlayStore.get().on) renderer.setStatusOverlay(null)
   })
   // Suppress edge-of-screen camera panning AND hide the minimap unless a session is actively on
-  // screen and no save overlay is open, so nothing drifts under a modal or shows on the menu shell.
+  // screen and no modal (save or settings) is open, so nothing drifts under a modal or shows on the
+  // menu shell. Edge panning additionally honours the player's edge-scroll setting.
   const syncViewChrome = (): void => {
-    const live = appStore.get().phase === 'playing' && !saveStore.get().open
-    renderer.edgeScroll = live
+    const live =
+      appStore.get().phase === 'playing' && !saveStore.get().open && !settingsStore.get().open
+    renderer.edgeScroll = live && settingsStore.get().edgeScroll
     renderer.minimap = live
   }
   appStore.subscribe(syncViewChrome)
   saveStore.subscribe(syncViewChrome)
+  settingsStore.subscribe(syncViewChrome)
   syncViewChrome()
+
+  // Apply the UI-scale setting to the DOM overlay root. `zoom` scales the whole px-based overlay
+  // layout cleanly in Chromium/Electron (font-size wouldn't touch the many fixed-px sizes), and
+  // Chromium keeps pointer hit-testing correct under it. A pure presentation tweak — no sim effect.
+  const applyUiScale = (): void => {
+    overlay.style.zoom = String(settingsStore.get().uiScale / 100)
+  }
+  settingsStore.subscribe(applyUiScale)
+  applyUiScale()
 
   /**
    * The live sim the render loop drives. Swapped wholesale on new-game/load: a fresh
@@ -594,15 +607,51 @@ async function boot(): Promise<void> {
   // Populate the menu's save availability up-front (Continue/Load stay disabled until a slot exists).
   void withBusy(refreshSaves)
 
-  // Autosave on a cadence. Skipped while the save menu is open or we're not in play (nothing is
-  // advancing then, so the last cadence save already captured the state).
-  const AUTOSAVE_MS = 3 * 60 * 1000
-  setInterval(() => {
-    if (!saveStore.get().open && appStore.get().phase === 'playing') void autosave()
-  }, AUTOSAVE_MS)
+  // Autosave on a player-configurable cadence (Settings → Autosave). Skipped while a modal is open
+  // or we're not in play (nothing is advancing then, so the last cadence save already captured the
+  // state). The interval is rebuilt whenever the setting changes; `0` minutes disables it entirely.
+  let autosaveTimer: ReturnType<typeof setInterval> | undefined
+  const applyAutosaveInterval = (): void => {
+    if (autosaveTimer !== undefined) clearInterval(autosaveTimer)
+    autosaveTimer = undefined
+    const minutes = settingsStore.get().autosaveMin
+    if (minutes <= 0) return
+    autosaveTimer = setInterval(
+      () => {
+        if (!saveStore.get().open && appStore.get().phase === 'playing') void autosave()
+      },
+      minutes * 60 * 1000,
+    )
+  }
+  settingsStore.subscribe(applyAutosaveInterval)
+  applyAutosaveInterval()
   globalThis.addEventListener('beforeunload', () => {
     // Fire-and-forget: the page is going away, so we can't await the IPC round-trip.
     if (bridge && session) void bridge.saveGame({ kind: 'auto', snapshot: session.serialize() })
+  })
+
+  // Q6 — auto-pause when the window loses focus (opt-in). We only pause a *running, not-already-
+  // paused* session, and remember that we did; on focus we lift only that self-inflicted pause, so a
+  // manual pause the player set is never clobbered. Predictable: the game never silently unpauses
+  // something you paused yourself.
+  let pausedByBlur = false
+  globalThis.addEventListener('blur', () => {
+    if (
+      shouldPauseOnBlur({
+        enabled: settingsStore.get().pauseOnBlur,
+        playing: appStore.get().phase === 'playing',
+        alreadyPaused: simControlStore.get().paused,
+      })
+    ) {
+      pausedByBlur = true
+      simControlStore.setPaused(true)
+    }
+  })
+  globalThis.addEventListener('focus', () => {
+    if (pausedByBlur) {
+      pausedByBlur = false
+      simControlStore.setPaused(false)
+    }
   })
 
   // Global hotkeys: F5 quicksave, F9 quickload, F10 toggles the save overlay. Esc is reserved for
@@ -697,6 +746,7 @@ async function boot(): Promise<void> {
     // per real second.
     if (
       saveStore.get().open ||
+      settingsStore.get().open ||
       simControlStore.get().paused ||
       appStore.get().phase !== 'playing'
     ) {

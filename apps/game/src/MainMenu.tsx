@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { appStore } from './appStore.ts'
 import { saveStore } from './saveStore.ts'
+import { settingsStore } from './settingsStore.ts'
 
 /**
  * The main menu shell shown at boot (and whenever the player returns to it): New Game / Continue /
@@ -41,6 +42,9 @@ export function MainMenu(): React.JSX.Element | null {
             onClick={() => controller?.openLoad()}
           >
             Load Game
+          </button>
+          <button className="menu-item" disabled={busy} onClick={() => settingsStore.open()}>
+            Settings
           </button>
           {!app.unavailable && (
             <button className="menu-item" disabled={busy} onClick={() => controller?.quit()}>
