@@ -14,8 +14,16 @@ export interface EncyclopediaEntry {
   readonly category: string
   /** Ticks per craft. */
   readonly craftEvery: number
-  readonly inputs: readonly { readonly color: number; readonly amount: number }[]
-  readonly outputs: readonly { readonly color: number; readonly amount: number }[]
+  readonly inputs: readonly EncyclopediaFlow[]
+  readonly outputs: readonly EncyclopediaFlow[]
+}
+
+/** A recipe flow with its identity colour, per-craft amount, and per-minute throughput. */
+export interface EncyclopediaFlow {
+  readonly color: number
+  readonly amount: number
+  /** Units per minute this flow runs at, for the machine that hosts the recipe. */
+  readonly perMin: number
 }
 
 /** Build the catalogue from the derived machine index: one entry per (machine, recipe) it can run. */
@@ -29,8 +37,16 @@ export function buildEncyclopedia(machines: MachineIndex): EncyclopediaEntry[] {
         machineName: def.name,
         category: r.category,
         craftEvery: r.craftEvery,
-        inputs: r.inputs.map((f) => ({ color: f.color, amount: f.amount })),
-        outputs: r.outputs.map((f) => ({ color: f.color, amount: f.amount })),
+        inputs: r.inputs.map((f, i) => ({
+          color: f.color,
+          amount: f.amount,
+          perMin: r.inputRates[i] ?? 0,
+        })),
+        outputs: r.outputs.map((f, i) => ({
+          color: f.color,
+          amount: f.amount,
+          perMin: r.outputRates[i] ?? 0,
+        })),
       })
     }
   }
