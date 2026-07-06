@@ -15,6 +15,7 @@ import { DebugOverlay } from './DebugOverlay.tsx'
 import { BlueprintLibrary } from './BlueprintLibrary.tsx'
 import { Encyclopedia } from './Encyclopedia.tsx'
 import { StatusOverlay } from './StatusOverlay.tsx'
+import { SettingsMenu, SettingsButton } from './SettingsMenu.tsx'
 
 /**
  * Root of the DOM overlay. Renders the in-game HUD only while a session is on screen (`playing`);
@@ -38,6 +39,7 @@ export function App(): React.JSX.Element {
           <InfoSidebar />
           <HelpOverlay />
           <Encyclopedia />
+          <SettingsButton />
           <StatusOverlay />
           <DebugOverlay />
         </>
@@ -45,6 +47,7 @@ export function App(): React.JSX.Element {
       <MainMenu />
       <NewGameSetup />
       <SaveMenu />
+      <SettingsMenu />
     </>
   )
 }

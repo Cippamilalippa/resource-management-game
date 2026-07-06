@@ -32,6 +32,9 @@ const MUTE_KEY = 'factory.sfx.muted'
 
 let ctx: AudioContext | null = null
 let muted = readMuted()
+// Master gain multiplier (0–1) applied on top of each voice's own gain. Driven by the settings
+// store's master-volume slider; the binary `M` mute above still overrides it (mute → silent).
+let volume = 1
 
 function readMuted(): boolean {
   try {
@@ -65,9 +68,19 @@ export const sfx = {
     }
   },
 
-  /** Play a cue. No-op when muted or when Web Audio is unavailable (e.g. headless). */
+  /** The current master gain multiplier (0–1). */
+  getVolume: (): number => volume,
+
+  /** Set the master gain multiplier (0–1), clamped. Persistence lives in the settings store. */
+  setVolume: (value: number): void => {
+    volume = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1
+  },
+
+  /**
+   * Play a cue. No-op when muted, at zero volume, or when Web Audio is unavailable (e.g. headless).
+   */
   play: (cue: SfxCue): void => {
-    if (muted) return
+    if (muted || volume <= 0) return
     const ac = audio()
     if (!ac) return
     if (ac.state === 'suspended') void ac.resume()
@@ -79,9 +92,11 @@ export const sfx = {
     osc.type = v.type
     osc.frequency.setValueAtTime(v.from, now)
     osc.frequency.exponentialRampToValueAtTime(v.to, now + v.dur)
-    // Quick attack, exponential decay to near-silence — a clean, un-clicky blip.
+    // Quick attack, exponential decay to near-silence — a clean, un-clicky blip. The voice's own
+    // gain is scaled by the master volume multiplier (kept above the exponential-ramp floor).
+    const peak = Math.max(0.0002, v.gain * volume)
     gain.gain.setValueAtTime(0.0001, now)
-    gain.gain.exponentialRampToValueAtTime(v.gain, now + 0.008)
+    gain.gain.exponentialRampToValueAtTime(peak, now + 0.008)
     gain.gain.exponentialRampToValueAtTime(0.0001, now + v.dur)
     osc.connect(gain).connect(ac.destination)
     osc.start(now)
