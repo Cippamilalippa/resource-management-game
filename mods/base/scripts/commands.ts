@@ -15,6 +15,7 @@ import type {
   PlaceBeltCommand,
   PlacePortCommand,
   PlaceSplitterCommand,
+  PlaceUndergroundCommand,
   PlaceCrafterCommand,
   PlaceCannonCommand,
   SetRecipeCommand,
@@ -38,6 +39,14 @@ export function enqueuePlaceBelt(gw: GameWorld, cmd: Omit<PlaceBeltCommand, 'typ
 /** Queue an input/output port placement onto a belt tile (applied next tick). */
 export function enqueuePlacePort(gw: GameWorld, cmd: Omit<PlacePortCommand, 'type'>): void {
   enqueueCommand(gw, { type: 'place_port', ...cmd })
+}
+
+/** Queue an underground-belt placement (applied next tick): entrance + exit caps in one command. */
+export function enqueuePlaceUnderground(
+  gw: GameWorld,
+  cmd: Omit<PlaceUndergroundCommand, 'type'>,
+): void {
+  enqueueCommand(gw, { type: 'place_underground', ...cmd })
 }
 
 /** Queue a splitter placement onto a belt tile (applied next tick). */

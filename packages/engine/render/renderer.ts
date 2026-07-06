@@ -771,6 +771,18 @@ export class Renderer {
         g.stroke({ width: 1, color: 0x000000, alpha: 0.08 })
         return
       }
+      case 12: {
+        // Underground entrance (down-ramp): a solid tile with a forward chevron and a dark tunnel
+        // "mouth" bar at the leading edge — the belt diving under the surface.
+        this.#underRamp(g, orient, color, true)
+        return
+      }
+      case 13: {
+        // Underground exit (up-ramp): the same, with the mouth at the trailing edge — the belt
+        // rising back to the surface.
+        this.#underRamp(g, orient, color, false)
+        return
+      }
       // Buildings — a framed panel wearing a kind-specific silhouette cap. The specific machine is
       // identified by its centred icon; the cap distinguishes the broad category at a glance.
       case 7:
@@ -862,6 +874,42 @@ export class Renderer {
         g.fill({ color: dark, alpha: 0.85 })
       }
     }
+  }
+
+  /**
+   * Draw an underground-belt cap glyph oriented along `orient` (0=N,1=E,2=S,3=W): a solid tile, a
+   * dark tunnel-"mouth" bar drawn across the tile at the leading edge (an `entrance`, the belt diving
+   * under) or the trailing edge (an exit, the belt rising), and a forward chevron showing travel.
+   * Purely a primitive glyph — the engine assigns no game meaning; content maps it to its own concept.
+   */
+  #underRamp(g: Graphics, orient: number, color: number, entrance: boolean): void {
+    const pad = 2
+    g.rect(pad, pad, TILE_SIZE - pad * 2, TILE_SIZE - pad * 2)
+    g.fill({ color, alpha: 0.85 })
+    const c = TILE_SIZE / 2
+    const ux = orient === 1 ? 1 : orient === 3 ? -1 : 0
+    const uy = orient === 0 ? -1 : orient === 2 ? 1 : 0
+    const px = -uy
+    const py = ux
+    // Dark mouth bar: a rectangle spanning the tile's width, set ahead of (entrance) or behind (exit)
+    // centre along the travel axis. `edge` flips which side it sits on.
+    const edge = entrance ? 1 : -1
+    const mx = c + ux * edge * (TILE_SIZE * 0.32)
+    const my = c + uy * edge * (TILE_SIZE * 0.32)
+    const halfW = TILE_SIZE * 0.36
+    const thick = TILE_SIZE * 0.12
+    g.poly([
+      mx + px * halfW - ux * thick,
+      my + py * halfW - uy * thick,
+      mx + px * halfW + ux * thick,
+      my + py * halfW + uy * thick,
+      mx - px * halfW + ux * thick,
+      my - py * halfW + uy * thick,
+      mx - px * halfW - ux * thick,
+      my - py * halfW - uy * thick,
+    ])
+    g.fill({ color: 0x000000, alpha: 0.5 })
+    this.#chevron(g, orient, c, c, TILE_SIZE * 0.26, 0xffffff, 0.95)
   }
 
   /**

@@ -7,6 +7,7 @@ import {
   enqueuePlacePort,
   enqueuePlaceCrafter,
   enqueuePlaceSplitter,
+  enqueuePlaceUnderground,
   enqueueSetPortFilter,
   enqueueRemove,
   dispatchCommand,
@@ -16,9 +17,13 @@ import {
   terrainTypeAt,
   buildingAt,
   tileKey,
+  KIND_PLAIN,
   KIND_OUTPUT,
   KIND_INPUT,
   KIND_SPLITTER,
+  KIND_UNDER_IN,
+  KIND_UNDER_OUT,
+  UNDERGROUND_MAX_SPAN,
   MAX_PORT_FILTER,
   FILTER_EMPTY,
   type GameState,
@@ -472,6 +477,37 @@ export function installPlacement(
 
   // The belt's start tile while a drag is in progress (belts only); null otherwise.
   let beltStart: GridCoord | null = null
+  // The underground entrance tile while a tunnel drag is in progress; null otherwise.
+  let undergroundStart: GridCoord | null = null
+
+  /**
+   * Project a tunnel drag entrance→cursor onto its dominant axis and clamp the span to the tunnel's
+   * reach: the exit tile, the facing (0..3), and the span (tiles from entrance to exit). A zero-length
+   * drag yields span 0 (no tunnel). Mirrors the sim's axis/span gate so the ghost and placement agree.
+   */
+  const undergroundPlan = (
+    start: GridCoord,
+    end: GridCoord,
+  ): { ex: number; ey: number; dir: number; span: number } => {
+    const { dx, dy, length } = projectBelt(start.x, start.y, end.x, end.y)
+    const span = Math.min(length - 1, UNDERGROUND_MAX_SPAN)
+    const dir = dy < 0 ? 0 : dx > 0 ? 1 : dy > 0 ? 2 : 3
+    return { ex: start.x + dx * span, ey: start.y + dy * span, dir, span }
+  }
+
+  /**
+   * Whether an underground cap could legally sit at (x, y): clear of any building and of any belt tile
+   * that is not a plain belt (a plain belt is converted). Mirrors the sim's `undergroundEndpointClear`.
+   */
+  const undergroundEndpointOk = (x: number, y: number): boolean => {
+    if (buildingAt(state.buildings, x, y) >= 0) return false
+    const t = grid.index.get(tileKey(x, y))
+    return t === undefined || grid.kind[t] === KIND_PLAIN
+  }
+
+  /** Whether a whole tunnel (both caps) is placeable — a valid span and both endpoints clear. */
+  const undergroundValid = (start: GridCoord, ex: number, ey: number, span: number): boolean =>
+    span >= 1 && undergroundEndpointOk(start.x, start.y) && undergroundEndpointOk(ex, ey)
   // The tile the pointer was pressed on, to tell a click (press==release) from a drag.
   let pressTile: GridCoord | null = null
   // Config pipette (Shift+Q): the recipe copied off a crafter, applied to matching machines placed
@@ -594,8 +630,8 @@ export function installPlacement(
       })
       return
     }
-    // Belt: until a drag begins, preview the single start tile under the cursor.
-    if (!beltStart) {
+    // Belt / underground: until a drag begins, preview the single start tile under the cursor.
+    if (!beltStart && !undergroundStart) {
       renderer.setGhost({ kind: 'rect', x: tile.x, y: tile.y, w: 1, h: 1, color: item.color })
     }
   }
@@ -699,6 +735,11 @@ export function installPlacement(
         if (item) buildStore.select(item.id)
         return
       }
+      if (kind === KIND_UNDER_IN || kind === KIND_UNDER_OUT) {
+        const item = items.find((i) => i.kind === 'underground' && !i.locked)
+        if (item) buildStore.select(item.id)
+        return
+      }
       const color = world.components.Renderable.color[grid.trackEid[t]!]
       const item =
         items.find((i) => i.kind === 'belt' && i.color === color && !i.locked) ??
@@ -782,7 +823,9 @@ export function installPlacement(
     }
     if (mode === 'paste') return // paste stamps on release (a click), not on press.
     pressTile = { x: tile.x, y: tile.y }
-    if (buildStore.selectedItem()?.kind === 'belt') beltStart = { x: tile.x, y: tile.y }
+    const armedKind = buildStore.selectedItem()?.kind
+    if (armedKind === 'belt') beltStart = { x: tile.x, y: tile.y }
+    else if (armedKind === 'underground') undergroundStart = { x: tile.x, y: tile.y }
   }
 
   renderer.onDragMove = (tile) => {
@@ -828,6 +871,23 @@ export function installPlacement(
         by: pressTile.y + dy * (length - 1),
         color: armed.color,
         ...(count > 1 ? { label: `×${count}` } : {}),
+      })
+      return
+    }
+    // Underground drag: preview the span band from the entrance toward the clamped exit, tinting red
+    // where the sim would reject it (blocked endpoint, off-axis, unaffordable). Label counts the span.
+    if (undergroundStart && armed?.kind === 'underground') {
+      const plan = undergroundPlan(undergroundStart, tile)
+      const affordable = !armed.cost || armed.cost.length === 0 || canAfford(state, armed.cost)
+      const ok = undergroundValid(undergroundStart, plan.ex, plan.ey, plan.span) && affordable
+      renderer.setGhost({
+        kind: 'line',
+        ax: undergroundStart.x,
+        ay: undergroundStart.y,
+        bx: plan.ex,
+        by: plan.ey,
+        color: ok ? armed.color : INVALID_COLOR,
+        ...(plan.span >= 1 ? { label: `×${plan.span + 1}` } : {}),
       })
       return
     }
@@ -1003,6 +1063,40 @@ export function installPlacement(
         return { cmd: { type: 'place_crafter', ...params }, tiles: [t], refund: item.cost }
       })
       recordGesture(item.name, steps)
+      return
+    }
+    // Underground: drag from the entrance toward the exit — the facing follows the dominant drag axis
+    // and the span is clamped to the tunnel's reach. Both caps place as ONE undoable gesture (undo
+    // removes both, redo re-sends the single place command). A click or an invalid span places nothing.
+    if (item.kind === 'underground') {
+      const startU = undergroundStart
+      undergroundStart = null
+      if (!startU) return
+      const plan = undergroundPlan(startU, tile)
+      if (!undergroundValid(startU, plan.ex, plan.ey, plan.span)) return
+      const params = {
+        x: startU.x,
+        y: startU.y,
+        ex: plan.ex,
+        ey: plan.ey,
+        dir: plan.dir,
+        color: item.color,
+        moveEvery: item.moveEvery,
+        ...(item.cost ? { cost: item.cost } : {}),
+      }
+      enqueuePlaceUnderground(world, params)
+      registry.record(startU.x, startU.y, { name: item.name, type: 'underground' })
+      registry.record(plan.ex, plan.ey, { name: item.name, type: 'underground' })
+      recordGesture(item.name, [
+        {
+          cmd: { type: 'place_underground', ...params },
+          tiles: [
+            { x: startU.x, y: startU.y },
+            { x: plan.ex, y: plan.ey },
+          ],
+          refund: item.cost,
+        },
+      ])
       return
     }
     // Belt: place the dragged segment, ignoring a zero-length (no-drag) gesture.

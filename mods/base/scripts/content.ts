@@ -168,6 +168,7 @@ export const COST_BEARING_TYPES = [
   'building',
   'belt',
   'splitter',
+  'underground',
   'input',
   'output',
   'village',
@@ -330,6 +331,7 @@ export function validateContent(registry: PrototypeRegistry): void {
     'building',
     'belt',
     'splitter',
+    'underground',
     'input',
     'output',
   ])

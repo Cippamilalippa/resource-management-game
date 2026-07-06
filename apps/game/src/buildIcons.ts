@@ -12,6 +12,7 @@ const KIND_ICON: Record<BuildItem['kind'], IconName> = {
   producer: 'Factory',
   building: 'Warehouse',
   splitter: 'Split',
+  underground: 'Route',
   port: 'ArrowRightLeft',
 }
 
