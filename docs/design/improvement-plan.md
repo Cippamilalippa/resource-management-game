@@ -94,7 +94,9 @@ The plan below is ordered around fixing those five things.
 - [ ] **W2. Terrain rendering pass.** ★★★ / M — Even before real art: per-biome ground
       fill, patch edges, subtle tile variation (hash-based), so the world isn't a flat
       void. Renderer-only (exempt from sim rules).
-- [ ] **W3. Map view.** ★★☆ / M — Zoom out past a threshold into a chunky map mode
+- [x] **W3. Map view.** ★★☆ / M — _Shipped: M toggles a full-screen chunky map (independent
+      focus/zoom, click-to-glide, drag-pan, wheel-zoom, alert markers scaled up); mute moved
+      to Shift+M; pure projection math unit-tested._ Zoom out past a threshold into a chunky map mode
       (the minimap projection already exists — promote it to full-screen), with overlays:
       deposits, status/alerts, logistics. Factorio's M-key is core to managing scale.
 - [ ] **W4. More scenarios as difficulty presets.** ★☆☆ / S — Island start, rich-but-far,
@@ -102,7 +104,9 @@ The plan below is ordered around fixing those five things.
 
 ## 3. Logistics depth (the build vocabulary)
 
-- [ ] **L1. Underground belts.** ★★★ / M — The most-missed belt verb: cross belts without
+- [x] **L1. Underground belts.** ★★★ / M — _Shipped: entrance/exit caps (span ≤ 6) via the
+      neighbour-table override so back-pressure works unchanged; crossing belts pass through
+      the gap; removal demotes the partner; persisted additively; 8 headless tests._ The most-missed belt verb: cross belts without
       splitters, dive under buildings. Sim: a belt-tile pair linked over a gap (the
       neighbour table already supports arbitrary links); placement pairs entrance/exit
       with a max span; render draws the two caps.
@@ -133,7 +137,9 @@ The plan below is ordered around fixing those five things.
 - [ ] **U1. Art direction pass on the HUD.** ★★☆ / M — The panels are functional but
       generic glass boxes. Pick a visual identity (industrial/aerospace), consistent
       spacing/type scale, panel icons, hover states. Pure CSS/React, zero sim risk.
-- [ ] **U2. Full production stats screen.** ★★☆ / M — Promote the sparklines to a modal
+- [x] **U2. Full production stats screen.** ★★☆ / M — _Shipped: P-key modal with 1/5/15-min
+      folded retention, sortable prod/cons/net table, per-item expanded chart, filter;
+      verified live in Electron via Playwright._ Promote the sparklines to a modal
       (Factorio P-screen): per-item production/consumption over selectable windows,
       sortable, click-through to the item's recipes in the encyclopedia. Data already
       flows through `productionHistory`; it needs retention tiers + a real chart.
