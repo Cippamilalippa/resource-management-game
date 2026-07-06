@@ -107,6 +107,13 @@ export type Ghost =
       readonly color: number
       /** Optional readout drawn at the line's end tile (e.g. a drag length "×5"). */
       readonly label?: string
+      /**
+       * Optional bend: when set, the band is drawn as an L — A -> corner along one axis, then
+       * corner -> B along the other — instead of a single straight bounding box. Used by the
+       * L-shaped belt drag preview so both legs show; the label still reads at B. The renderer
+       * stays game-agnostic — it just draws whatever polyline the app hands it.
+       */
+      readonly corner?: { readonly x: number; readonly y: number }
     }
   | {
       /** A multi-cell preview (blueprint paste): a set of tinted footprint rects. */
@@ -235,14 +242,19 @@ export class Renderer {
   onTileHover: ((tile: GridCoord) => void) | null = null
   /** Called when the pointer is pressed on a tile — the start of a drag gesture. */
   onDragStart: ((tile: GridCoord) => void) | null = null
-  /** Called as the pointer moves while pressed — a drag-gesture update. */
-  onDragMove: ((tile: GridCoord) => void) | null = null
+  /**
+   * Called as the pointer moves while pressed — a drag-gesture update. `shiftKey` relays whether
+   * Shift is held (a generic modifier bit — e.g. the belt drag flips its L corner), leaving the
+   * renderer game-agnostic.
+   */
+  onDragMove: ((tile: GridCoord, shiftKey: boolean) => void) | null = null
   /**
    * Called when the pointer is released — the end of a drag gesture. A press and
    * release on the same tile (no movement) is a click: the same hook fires with the
-   * end tile equal to the start tile.
+   * end tile equal to the start tile. `shiftKey` relays whether Shift was held (see
+   * {@link onDragMove}).
    */
-  onDragEnd: ((tile: GridCoord) => void) | null = null
+  onDragEnd: ((tile: GridCoord, shiftKey: boolean) => void) | null = null
   /** Called when the rotate key (R) is pressed — the app rotates the armed placement. */
   onRotate: (() => void) | null = null
   /**
@@ -633,12 +645,23 @@ export class Renderer {
       }
       return
     }
-    // Line: a one-tile-thick band covering the bounding box of A..B.
-    const minX = Math.min(ghost.ax, ghost.bx)
-    const minY = Math.min(ghost.ay, ghost.by)
-    const w = Math.abs(ghost.bx - ghost.ax) + 1
-    const h = Math.abs(ghost.by - ghost.ay) + 1
-    g.rect(minX * TILE_SIZE, minY * TILE_SIZE, w * TILE_SIZE, h * TILE_SIZE)
+    // Line: a one-tile-thick band covering the bounding box of A..B — or, when a corner is given,
+    // an L of two bands (A..corner then corner..B). Both bands are added to one path so the shared
+    // corner tile fills once (no double-alpha).
+    const band = (px: number, py: number, qx: number, qy: number): void => {
+      g.rect(
+        Math.min(px, qx) * TILE_SIZE,
+        Math.min(py, qy) * TILE_SIZE,
+        (Math.abs(qx - px) + 1) * TILE_SIZE,
+        (Math.abs(qy - py) + 1) * TILE_SIZE,
+      )
+    }
+    if (ghost.corner) {
+      band(ghost.ax, ghost.ay, ghost.corner.x, ghost.corner.y)
+      band(ghost.corner.x, ghost.corner.y, ghost.bx, ghost.by)
+    } else {
+      band(ghost.ax, ghost.ay, ghost.bx, ghost.by)
+    }
     g.fill({ color: ghost.color, alpha: 0.45 })
     g.stroke({ width: 2, color: ghost.color, alpha: 0.9 })
     // Drag readout (e.g. "×5"): drawn just past the line's end tile so it tracks the cursor.
@@ -968,7 +991,7 @@ export class Renderer {
         minimapPanning = false
         return
       }
-      if (pressed && this.onDragEnd) this.onDragEnd(tileAt(e.clientX, e.clientY))
+      if (pressed && this.onDragEnd) this.onDragEnd(tileAt(e.clientX, e.clientY), e.shiftKey)
       pressed = false
     })
     globalThis.addEventListener('pointermove', (e) => {
@@ -980,7 +1003,7 @@ export class Renderer {
         return
       }
       const tile = tileAt(e.clientX, e.clientY)
-      if (pressed && this.onDragMove) this.onDragMove(tile)
+      if (pressed && this.onDragMove) this.onDragMove(tile, e.shiftKey)
       if (this.onTileHover) this.onTileHover(tile)
     })
     // Track whether the cursor is over the canvas so edge panning only kicks in on screen.
