@@ -146,7 +146,9 @@ The plan below is ordered around fixing those five things.
       (Factorio P-screen): per-item production/consumption over selectable windows,
       sortable, click-through to the item's recipes in the encyclopedia. Data already
       flows through `productionHistory`; it needs retention tiers + a real chart.
-- [ ] **U3. Tech tree as a graph.** ★★☆ / M — The research panel is a list; render the
+- [x] **U3. Tech tree as a graph.** ★★☆ / M — _Shipped: layered DAG layout (longest-path +
+      barycenter, pure/tested), SVG-edge graph with state tints, active-chain highlight,
+      locked-flash, unlock preview icons + tooltips._ The research panel is a list; render the
       10-node DAG as a proper tree with edges, unlock previews (icons of what each tech
       grants), and cost/prereq tooltips. Becomes essential as the tree grows (C1).
 - [x] **U4. Rate/ratio helper in the recipe picker.** ★★☆ / M — _Shipped: per-minute in/out
