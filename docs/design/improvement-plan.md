@@ -242,6 +242,65 @@ The plan below is ordered around fixing those five things.
 - [ ] **C3. A second themed mod as proof.** M — A small `mods/agri` (Factory Town-flavored
       food chain) proves the mod pipeline end-to-end and doubles as M8's example mod.
 
+## 8b. UX-audit backlog (hands-on findings, 2026-07-07)
+
+> Evidence-based: the game was driven live in Chromium (Vite renderer + a shimmed
+> `window.factory` bridge with the real merged content) and screenshotted through the
+> main flows after the first ~20 plan items merged. Bugs first, then improvements.
+
+- [ ] **UX1. Central hotkey + modal manager (fixes a real focus trap).** ★★★ / M —
+      Opening the encyclopedia autofocuses its search box; while ANY input has focus every
+      global key handler bails — including Escape — so the modal can't be closed by
+      keyboard and every subsequent hotkey (`P`, `O`, `M`, digits…) types into the search
+      instead. The Settings modal has the same Esc gap, while F10 (save menu) ignores the
+      typing guard entirely and opens OVER other modals. Each panel adds its own window
+      keydown listener today. Fix: one hotkey registry with a modal stack — Esc always
+      closes the topmost modal (handled before the input guard), hotkeys are uniformly
+      suppressed while a modal is open or an input focused, and one listener replaces the
+      scattered ones. This is also the missing foundation for the deferred key rebinding
+      (X1 stretch).
+- [ ] **UX2. Consolidate the bottom-right toolbar.** ★★☆ / S — Seven absolutely-positioned
+      buttons (Stats / Settings / Map / Detail / Status / Recipes / Controls) grew one per
+      feature at hand-tuned `right:` offsets; they collided three times during merges and
+      at 1600px the row overlaps the build bar's search input. Replace with one flex
+      toolbar component (auto layout, shared styling, tooltips, active states) that the
+      build bar reserves space for.
+- [ ] **UX3. Don't open on "Village declining ×2".** ★★★ / S — The two new settlements
+      start starving at tick 0, so the first thing a new player sees is a red alert stack
+      they can't act on for an hour. Give settlements a decline grace period (no decline
+      timer/alert until the settlement has been fed at least once, or for the first N
+      minutes), and/or a small starter buffer like the Spaceport's kit.
+- [ ] **UX4. Label the world.** ★★☆ / S–M — Deposits render as anonymous flat colour
+      rects; nothing on screen says which is bauxite vs coal without hovering each tile.
+      Extend the detail overlay (Alt) to stamp terrain patches with their resource icon +
+      remaining richness, and label them in the full-screen map view. (W1/W2 terrain will
+      fix the void backdrop; labels are still needed on top.)
+- [ ] **UX5. Alert stack placement + stale hints.** ★☆☆ / S — Alerts sit top-center where
+      the camera focuses, so a busy factory gets its midline covered; move the stack
+      top-right under the treasury, and reserve center for transient toasts. Also fix the
+      stale Settings hint "M to mute" (mute is Shift+M since the map took M) — audit all
+      keybind hints against HelpOverlay whenever a key moves.
+- [ ] **UX6. Left-rail discoverability.** ★☆☆ / S — The research/villages/production rail
+      is icon-only with no labels or tooltips; first-time players won't find the research
+      screen (objective #4 depends on it). Add tooltips + a subtle attention cue on the
+      research button while no research is active and labs exist.
+- [ ] **UX7. New-game setup should sell the run.** ★☆☆ / S — The setup screen shows seed +
+      two scenario cards but not the win goal, expected difficulty, or a map preview. Show
+      each scenario's goal ("Reach Spaceport level 5"), its richness/water character, and
+      ideally a small deterministic minimap preview of the seed.
+- [ ] **UX8. Onboarding beyond the first chain.** ★★☆ / M — The Getting Started list
+      covers machine→belt→lab→research→goal but never mentions the credit economy (depots
+      = income), upkeep, the other two settlements, cannons, or undergrounds. Extend the
+      objective ladder a few steps (sell to a depot; feed the Mining Camp) and add a
+      one-line "why" to each row.
+- [ ] **UX9. Inspector polish.** ★☆☆ / S — Consumes/produces rows are icon-only bars
+      (names only via tooltip at best), and dev-ish rows (`Position -1,-1`) show to
+      players. Put the resource name next to each bar, move tile coords behind the debug
+      overlay, and show the settlement's demand rates next to the buffer bars.
+- [ ] **UX10. Modal consistency pass.** ★☆☆ / S — Encyclopedia/Stats/Settings/SaveMenu
+      differ in backdrop, sizing, close affordances, and whether they pause the sim.
+      One modal shell component (backdrop, title row, ✕, Esc, optional pause) used by all.
+
 ## 9. Tech & performance (guardrails while all this lands)
 
 - [ ] **T1. Extend the perf guard** to cover power coverage, depletion checks and
