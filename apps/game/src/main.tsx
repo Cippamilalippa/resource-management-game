@@ -43,7 +43,13 @@ import { saveStore, type SaveController } from './saveStore.ts'
 import { appStore, type AppController } from './appStore.ts'
 import { simControlStore } from './simControlStore.ts'
 import { settingsStore, shouldPauseOnBlur } from './settingsStore.ts'
-import { hudStore, type HudController, type HudResearch, type HudTech } from './hudStore.ts'
+import {
+  hudStore,
+  type HudController,
+  type HudResearch,
+  type HudTech,
+  type HudUnlock,
+} from './hudStore.ts'
 import { buildMachineIndex, type MachineIndex } from './machines.ts'
 import type { InspectRegistry } from './inspect.ts'
 import type { GameState } from './gameLogic.ts'
@@ -147,12 +153,14 @@ interface TechMeta {
   /** Per-pack research cost as the sim consumes it: { pack colour, amount }. */
   readonly cost: readonly { color: number; amount: number }[]
   readonly prereqs: readonly string[]
+  /** Raw unlocked prototype ids (`building.*` / `recipe.*`) as authored, for the tree's preview. */
+  readonly unlocks: readonly string[]
 }
 
-/** Prettify a technology id (`tech.jet_propulsion`) into a title-cased label ("Jet Propulsion"). */
+/** Prettify a prototype id (`tech.jet_propulsion`) into a title-cased label ("Jet Propulsion"). */
 function techLabel(id: string): string {
   return id
-    .replace(/^tech\./, '')
+    .replace(/^\w+\./, '')
     .split('_')
     .map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w))
     .join(' ')
@@ -177,9 +185,69 @@ function techMetas(prototypes: readonly ClientPrototype[]): TechMeta[] {
         cost.push({ color: itemColors.get(c.item) ?? 0xffffff, amount: c.amount })
       }
     }
-    metas.push({ id: p.id, name: techLabel(p.id), int: techTypeOf(p.id), cost, prereqs })
+    const unlocks = (Array.isArray(p.unlocks) ? p.unlocks : []).filter(
+      (x): x is string => typeof x === 'string',
+    )
+    metas.push({ id: p.id, name: techLabel(p.id), int: techTypeOf(p.id), cost, prereqs, unlocks })
   }
   return metas
+}
+
+/**
+ * Resolve each technology's authored unlock ids (`building.*` / `recipe.*`) to displayable
+ * {@link HudUnlock}s for the tree's preview strip: a building shows its own icon + accent colour, a
+ * recipe shows its primary output resource. Entries sharing a display name are deduped (the base
+ * data pairs `building.X` with `recipe.X` that crafts it — one badge is enough), and unresolvable
+ * ids are dropped. Session-invariant, computed once at boot.
+ */
+function techUnlockIndex(
+  techs: readonly TechMeta[],
+  prototypes: readonly ClientPrototype[],
+): ReadonlyMap<string, readonly HudUnlock[]> {
+  const itemName = new Map<string, string>()
+  const itemColor = new Map<string, number>()
+  const protoById = new Map<string, ClientPrototype>()
+  for (const p of prototypes) {
+    protoById.set(p.id, p)
+    if (p.type !== 'item') continue
+    if (typeof p.name === 'string') itemName.set(p.id, p.name)
+    itemColor.set(p.id, num(p, 'color', 0xffffff))
+  }
+
+  const resolve = (id: string): HudUnlock | null => {
+    const p = protoById.get(id)
+    if (!p) return null
+    if (p.type === 'recipe') {
+      // A recipe reads as its primary product: the item's name + identity colour.
+      const primary = Array.isArray(p.results) ? (p.results as RecipeFlow[])[0]?.item : undefined
+      if (typeof primary !== 'string') return null
+      const name = itemName.get(primary) ?? techLabel(primary)
+      return { id, name, kind: 'recipe', color: itemColor.get(primary) ?? 0xffffff }
+    }
+    // Anything else placeable (building / crafter / belt / …) shows its own icon + colour.
+    const name = typeof p.name === 'string' ? p.name : techLabel(id)
+    const icon = typeof p.icon === 'string' ? p.icon : undefined
+    return { id, name, kind: 'building', color: num(p, 'color', 0xffffff), ...(icon && { icon }) }
+  }
+
+  const index = new Map<string, readonly HudUnlock[]>()
+  for (const t of techs) {
+    const out: HudUnlock[] = []
+    const seenNames = new Set<string>()
+    // Buildings first so a building/recipe pair with one display name keeps the building badge.
+    const resolved = t.unlocks
+      .map(resolve)
+      .filter((u): u is HudUnlock => u !== null)
+      .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'building' ? -1 : 1))
+    for (const u of resolved) {
+      const key = u.name.toLowerCase()
+      if (seenNames.has(key)) continue
+      seenNames.add(key)
+      out.push(u)
+    }
+    index.set(t.id, out)
+  }
+  return index
 }
 
 /** Map the placeable prototypes (buildings, belts, ports) and crafter machines to build-bar tools. */
@@ -483,6 +551,8 @@ async function boot(): Promise<void> {
   // Assemble the research view-model: the sim tracks only integer tech ids, so enrich each with its
   // display name and status (researched / active / available) against the session's researched set.
   const techNameById = new Map(techs.map((t) => [t.id, t.name] as const))
+  // Each tech's unlock previews (buildings/recipes it grants), resolved once — session-invariant.
+  const unlocksByTech = techUnlockIndex(techs, prototypes)
   const buildResearchHud = (sess: Session): HudResearch => {
     const prog = researchProgress(sess.state)
     const activeMeta = prog.idle ? undefined : techs.find((t) => t.int === prog.activeTech)
@@ -498,6 +568,8 @@ async function boot(): Promise<void> {
         available,
         cost: t.cost.map((c) => ({ color: c.color, amount: c.amount })),
         prereqs: t.prereqs.map((p) => techNameById.get(p) ?? p),
+        prereqIds: t.prereqs,
+        unlocks: unlocksByTech.get(t.id) ?? [],
       }
     })
     return {

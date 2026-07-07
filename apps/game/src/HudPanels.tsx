@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useSyncExternalStore } from 'react'
-import { hudStore, type HudTech, type HudProductionRow, type HudVillage } from './hudStore.ts'
+import { hudStore, type HudProductionRow, type HudVillage } from './hudStore.ts'
+import { TechTreeGraph } from './TechTree.tsx'
 import { productionHistory } from './productionHistory.ts'
 import { Icon, type IconName } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
@@ -62,7 +63,7 @@ function Bar({ frac, tone }: { frac: number; tone?: 'good' | 'warn' | 'bad' }): 
   )
 }
 
-/** Research screen: active tech + per-pack progress, then the tech tree grouped by status. */
+/** Research screen: active tech + per-pack progress, then the tech tree as a layered graph. */
 function ResearchPanel(): React.JSX.Element {
   const research = useSyncExternalStore(
     hudStore.subscribe,
@@ -70,16 +71,15 @@ function ResearchPanel(): React.JSX.Element {
     () => hudStore.get().research,
   )
   const select = (id: string): void => hudStore.getController()?.selectResearch(id)
-
-  const available = research.techs.filter((t) => t.available)
-  const locked = research.techs.filter((t) => !t.researched && !t.available && !t.active)
-  const done = research.techs.filter((t) => t.researched)
+  const done = research.techs.reduce((n, t) => n + (t.researched ? 1 : 0), 0)
 
   return (
-    <div className="hud-panel">
+    <div className="hud-panel hud-panel-research">
       <h2 className="hud-title">
         <Icon name="FlaskConical" size={16} /> Research
-        <span className="hud-sub">{research.labCount} labs</span>
+        <span className="hud-sub">
+          {done}/{research.techs.length} researched · {research.labCount} labs
+        </span>
       </h2>
 
       <div className="hud-section">
@@ -101,68 +101,23 @@ function ResearchPanel(): React.JSX.Element {
         )}
       </div>
 
-      {available.length > 0 && (
-        <div className="hud-section">
-          <div className="hud-section-head">Available</div>
-          {available.map((t) => (
-            <TechRow key={t.id} tech={t} onSelect={() => select(t.id)} />
-          ))}
-        </div>
-      )}
-      {locked.length > 0 && (
-        <div className="hud-section">
-          <div className="hud-section-head">Locked</div>
-          {locked.map((t) => (
-            <TechRow key={t.id} tech={t} />
-          ))}
-        </div>
-      )}
-      {done.length > 0 && (
-        <div className="hud-section">
-          <div className="hud-section-head">Researched ({done.length})</div>
-          <div className="hud-done-list">
-            {done.map((t) => (
-              <span key={t.id} className="hud-done-chip">
-                <Icon name="Check" size={12} /> {t.name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** One selectable/locked technology row with its per-pack cost. */
-function TechRow({ tech, onSelect }: { tech: HudTech; onSelect?: () => void }): React.JSX.Element {
-  const body = (
-    <>
-      <span className="hud-tech-name">{tech.name}</span>
-      <span className="hud-tech-cost">
-        {tech.cost.map((c, i) => (
-          <span key={i} className="hud-tech-costitem">
-            <ResourceLabel color={c.color} size={13} showName={false} />
-            {c.amount}
+      <div className="hud-section">
+        <TechTreeGraph research={research} onSelect={select} />
+        <div className="tech-legend">
+          <span>
+            <span className="tech-dot researched" /> researched
           </span>
-        ))}
-      </span>
-    </>
-  )
-  if (onSelect) {
-    return (
-      <button
-        className="hud-tech hud-tech-avail"
-        onClick={onSelect}
-        title={`Research ${tech.name}`}
-      >
-        {body}
-      </button>
-    )
-  }
-  return (
-    <div className="hud-tech hud-tech-locked" title={`Requires: ${tech.prereqs.join(', ')}`}>
-      <Icon name="Lock" size={12} />
-      {body}
+          <span>
+            <span className="tech-dot available" /> available
+          </span>
+          <span>
+            <span className="tech-dot locked" /> locked
+          </span>
+          <span>
+            <span className="tech-dot active" /> active
+          </span>
+        </div>
+      </div>
     </div>
   )
 }

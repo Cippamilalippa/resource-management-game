@@ -18,6 +18,17 @@ export interface HudVillage extends VillageStatus {
   readonly name: string
 }
 
+/** One building/recipe a technology grants, resolved for display on its tree node (U3). */
+export interface HudUnlock {
+  readonly id: string
+  readonly name: string
+  readonly kind: 'building' | 'recipe'
+  /** Building accent colour, or the recipe's primary-output resource colour. */
+  readonly color: number
+  /** Lucide glyph name for building unlocks (the UI validates it); recipes use the resource icon. */
+  readonly icon?: string
+}
+
 /** One technology as the research screen shows it, enriched with its human name and status. */
 export interface HudTech {
   readonly id: string
@@ -30,7 +41,12 @@ export interface HudTech {
   readonly available: boolean
   /** Per-pack cost: resource colour + amount. */
   readonly cost: readonly { readonly color: number; readonly amount: number }[]
+  /** Prerequisite display names (tooltips). */
   readonly prereqs: readonly string[]
+  /** Prerequisite tech ids (graph edges / unmet-prereq flash). */
+  readonly prereqIds: readonly string[]
+  /** What researching this grants, for the node's unlock-preview strip. */
+  readonly unlocks: readonly HudUnlock[]
 }
 
 /** Live research state for the research screen. */
