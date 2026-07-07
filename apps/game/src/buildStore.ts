@@ -36,6 +36,8 @@ export interface BuildItem {
    * Empty/omitted means free.
    */
   readonly cost?: readonly { readonly color: number; readonly amount: number }[]
+  /** Per-cadence upkeep in credits drained while the building stands (0/omitted = free to run). */
+  readonly upkeep?: number
   /** True when the unlocking technology is not yet researched — shown greyed and not selectable. */
   readonly locked?: boolean
   /** Ticks between drains for an output port. */

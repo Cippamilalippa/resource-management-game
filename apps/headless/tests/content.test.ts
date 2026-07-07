@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { PrototypeRegistry } from '@factory/engine/data'
-import { validateContent, buildableSet, allTechIds, scenarioList } from '../gameLogic.ts'
+import {
+  validateContent,
+  itemColorPrices,
+  buildableSet,
+  allTechIds,
+  scenarioList,
+} from '../gameLogic.ts'
 
 /**
  * Register a minimal but complete, VALID content set: an item + terrain, one crafter that
@@ -446,6 +452,61 @@ describe('validateContent', () => {
       startingTreasury: [{ item: 'item.ghost', amount: 5 }],
     })
     expect(() => validateContent(reg)).toThrow(/item\.ghost/)
+  })
+
+  it('accepts a non-negative integer upkeep and rejects a malformed one', () => {
+    const good = validRegistry()
+    good.register({
+      id: 'building.kept',
+      type: 'crafter',
+      craftingCategories: ['smelting'],
+      speed: 1,
+      storage: 100,
+      upkeep: 2,
+    })
+    expect(() => validateContent(good)).not.toThrow()
+
+    const bad = validRegistry()
+    bad.register({
+      id: 'building.badkeep',
+      type: 'crafter',
+      craftingCategories: ['smelting'],
+      speed: 1,
+      storage: 100,
+      upkeep: -1,
+    })
+    expect(() => validateContent(bad)).toThrow(/upkeep/)
+  })
+})
+
+describe('itemColorPrices', () => {
+  it('prices every item colour from the recipe DAG (hand-checked chain)', () => {
+    // validRegistry: ore = extraction (40t, comp 1) → ceil(1 + 0.5·0.667) = 2;
+    // plate = 2 ore (60t) → comp 2, labor 1 + 2·0.667 = 2.333 → ceil(2 + 1.167) = 4.
+    const prices = new Map(itemColorPrices(validRegistry()).map((p) => [p.color, p.price]))
+    expect(prices.get(1)).toBe(2) // item.ore, colour 1
+    expect(prices.get(2)).toBe(4) // item.plate, colour 2
+  })
+
+  it('prices an item no recipe produces at 1', () => {
+    const reg = validRegistry()
+    reg.register({ id: 'item.mystery', type: 'item', color: 99 })
+    const prices = new Map(itemColorPrices(reg).map((p) => [p.color, p.price]))
+    expect(prices.get(99)).toBe(1)
+  })
+
+  it('a faster crafter for a category lowers embodied labor (never below 1)', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'building.megamine',
+      type: 'crafter',
+      craftingCategories: ['mining'],
+      speed: 4,
+      storage: 100,
+    })
+    const prices = new Map(itemColorPrices(reg).map((p) => [p.color, p.price]))
+    // ore labor drops from 0.667s to 0.167s → ceil(1 + 0.083) = 2 still, plate falls to 3.
+    expect(prices.get(2)).toBe(3)
   })
 })
 

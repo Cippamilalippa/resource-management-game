@@ -20,6 +20,7 @@ import {
   createGameState,
   createGameSystems,
   loadGameState,
+  loadPriceTable,
   type EntityData,
   type GameState,
   type GameStateSnapshot,
@@ -54,6 +55,15 @@ export interface BaseReady {
   readonly newGame: (config?: SceneConfig) => void
   /** Restore a saved state: re-spawn the snapshot's entities and rebuild the stores in place. */
   readonly load: (snapshot: LoadableSnapshot) => void
+  /**
+   * Supply the colour→credit price table the HOST computed from the recipe DAG (see `content.ts`'s
+   * `itemColorPrices`) — the credit economy's price source. Call BEFORE `newGame`/`load`: the scene
+   * seeds the starting balance through it, and a legacy per-colour save converts through it. The
+   * sim never sees an item id — only this colour-keyed table, like all other colour config.
+   */
+  readonly setPrices: (
+    entries: readonly { readonly color: number; readonly price: number }[],
+  ) => void
 }
 
 export default function init(api: ModApi): void {
@@ -69,6 +79,7 @@ export default function init(api: ModApi): void {
       if (blob === undefined) throw new Error('save has no base-mod state to load')
       loadGameState(api, state, snapshot.entities, blob)
     },
+    setPrices: (entries) => loadPriceTable(state.prices, entries),
   }
   api.emit('base:ready', ready)
   api.log('base game init — registered command + belt systems')

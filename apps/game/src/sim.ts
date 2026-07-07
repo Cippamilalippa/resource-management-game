@@ -15,7 +15,12 @@ import {
 } from '@factory/engine/modloader'
 import { serialize, type WorldSnapshot } from '@factory/engine/persistence'
 import type { DiscoveredModInfo } from '../electron/preload.ts'
-import { validateContent, serializeGameState, type GameState } from './gameLogic.ts'
+import {
+  validateContent,
+  itemColorPrices,
+  serializeGameState,
+  type GameState,
+} from './gameLogic.ts'
 import { InspectRegistry } from './inspect.ts'
 
 /** A prototype as delivered by the preload bridge. */
@@ -32,6 +37,11 @@ export interface ClientSim {
   state: GameState
   /** Tile→name memory for the read-only inspector, pre-seeded with the starting scene. */
   registry: InspectRegistry
+  /**
+   * The colour→credit price table the host computed from the recipe DAG (the same one handed to
+   * the sim). Read-only UI reference: cost rows, "sells for" readouts, the encyclopedia.
+   */
+  prices: readonly { readonly color: number; readonly price: number }[]
   /** Snapshot the whole sim (engine entities + the base mod's out-of-ECS state) for a save. */
   serialize(): WorldSnapshot
 }
@@ -50,6 +60,7 @@ interface BaseReadyHandle {
   state: GameState
   newGame: (config?: { scenario?: string }) => void
   load: (snapshot: WorldSnapshot) => void
+  setPrices: (entries: readonly { color: number; price: number }[]) => void
 }
 
 /**
@@ -140,6 +151,9 @@ export async function createSim(
   world.events.on('base:ready', (r) => {
     const ready = r as BaseReadyHandle
     state = ready.state
+    // Hand the sim the colour→credit price table BEFORE any origin is applied — the scene seeds
+    // its starting balance through it, a legacy save converts through it (see headless bootstrap).
+    ready.setPrices(prices)
     if (origin.kind === 'load') {
       // Fast-forward the engine clock/RNG (the hash covers both), then hand the mod its state —
       // the same two-step `restore` the headless bootstrap performs.
@@ -170,6 +184,9 @@ export async function createSim(
   for (const p of prototypes) hostRegistry.register(p)
   // Assert the recipe/tech/crafter/village content is well-formed before running anything.
   validateContent(hostRegistry)
+  // The colour→credit price table, computed once from the recipe DAG (handed to the sim in the
+  // `base:ready` callback below, which fires synchronously inside `runModScripts`).
+  const prices = itemColorPrices(hostRegistry)
   const mods: DiscoveredMod[] = discovered.map((d) => ({
     manifest: d.manifest,
     source: new BundledModSource(d.dir),
@@ -189,6 +206,7 @@ export async function createSim(
     scheduler,
     state: liveState,
     registry,
+    prices,
     // Snapshot the engine entities plus the base mod's out-of-ECS state under its own `modState`
     // key — the exact shape the headless bootstrap saves, so a save round-trips between hosts.
     serialize: () => serialize(world, { base: serializeGameState(liveState) }),

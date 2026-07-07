@@ -23,6 +23,7 @@ import {
   type Prototype,
   type PrototypeRegistry,
 } from '@factory/engine/data'
+import { computeItemPrices, type PriceRecipe } from '@factory/shared'
 
 // --- shape helpers ----------------------------------------------------------
 
@@ -225,7 +226,16 @@ export function buildCostOf(proto: Prototype): { item: string; amount: number }[
 /** Shape-check every cost-bearing prototype's `buildCost` (empty/absent is fine — a free build). */
 function validateBuildCostShapes(registry: PrototypeRegistry): void {
   for (const type of COST_BEARING_TYPES) {
-    for (const p of registry.listByType(type)) buildCostOf(p)
+    for (const p of registry.listByType(type)) {
+      buildCostOf(p)
+      // The optional per-cadence credit `upkeep` (G6): a non-negative integer when present.
+      if (
+        p.upkeep !== undefined &&
+        (typeof p.upkeep !== 'number' || !Number.isInteger(p.upkeep) || p.upkeep < 0)
+      ) {
+        fail(`${p.id}: "upkeep" must be a non-negative integer`)
+      }
+    }
   }
 }
 
@@ -504,4 +514,48 @@ export function allTechIds(prototypes: readonly BuildableProto[]): Set<string> {
   const ids = new Set<string>()
   for (const p of prototypes) if (p.type === 'technology') ids.add(p.id)
   return ids
+}
+
+// --- item prices: the credit economy's colour→price table -------------------
+
+/** One item's integer credit price paired with the resource colour the sim keys it by. */
+export interface ColorPrice {
+  readonly color: number
+  readonly price: number
+}
+
+/**
+ * Compute the credit price of every item colour from the recipe DAG — the HOST side of the credit
+ * economy (G6). It unfolds each item to its raw leaves + embodied machine-time via the shared
+ * pricing math ({@link computeItemPrices}, the same formula `apps/balance` reports), then maps each
+ * item id to the colour the sim identifies it by. The sim never sees an item id: this table is
+ * handed to it (via `base:ready`'s `setPrices`) exactly like the other colour-keyed config, and it
+ * looks a price up by colour to charge build costs and credit depot deposits.
+ *
+ * A raw leaf with no recipe (none in the base game, but a modder could add one) is priced at the
+ * default weight (1). Deterministic and pure — the integers are stable for a given content set.
+ */
+export function itemColorPrices(registry: PrototypeRegistry): ColorPrice[] {
+  const recipes: PriceRecipe[] = registry.listByType('recipe').map((r) => ({
+    id: r.id,
+    category: typeof r.category === 'string' ? r.category : '',
+    ingredients: flows(r, 'ingredients'),
+    results: flows(r, 'results'),
+    time: typeof r.time === 'number' ? r.time : 1,
+  }))
+  // category id → fastest crafter speed providing it (missing → 1), so faster machines cost less.
+  const categorySpeed = new Map<string, number>()
+  for (const c of registry.listByType('crafter')) {
+    const speed = typeof c.speed === 'number' && c.speed > 0 ? c.speed : 1
+    for (const cat of idList(c, 'craftingCategories')) {
+      categorySpeed.set(cat, Math.max(categorySpeed.get(cat) ?? 0, speed))
+    }
+  }
+  const prices = computeItemPrices(recipes, { categorySpeed })
+  const out: ColorPrice[] = []
+  for (const item of registry.listByType('item')) {
+    const color = typeof item.color === 'number' ? item.color : 0xffffff
+    out.push({ color, price: prices.get(item.id)?.price ?? 1 })
+  }
+  return out
 }

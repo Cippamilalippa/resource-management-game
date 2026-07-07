@@ -33,3 +33,7 @@ export function assert(condition: unknown, message: string): asserts condition {
 
 /** Branded id type so prototype ids are not confused with arbitrary strings. */
 export type PrototypeId = string & { readonly __brand: 'PrototypeId' }
+
+// The pure production-graph pricing math (the credit economy's price source; also used by the
+// balance analyzer). Kept in its own module so the game host and balancer share one formula.
+export * from './pricing.ts'

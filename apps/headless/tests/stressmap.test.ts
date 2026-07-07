@@ -31,9 +31,9 @@ describe('stress map', () => {
 
   it('runs a live chain: the terminal depots bank output', async () => {
     const sim = await buildAndRun(20, 1200)
-    // A depot banks belted-in goods into the treasury, so a non-empty treasury means raw flowed all
-    // the way down the chain (produce → 5 crafts → belt → depot) — the map is genuinely simulating.
-    expect(sim.state.treasury.n).toBeGreaterThan(0)
+    // A depot sells belted-in goods for credits, so a non-zero balance means raw flowed all the
+    // way down the chain (produce → 5 crafts → belt → depot) — the map is genuinely simulating.
+    expect(sim.state.treasury.credits).toBeGreaterThan(0)
   })
 
   it('is deterministic: same cells + ticks → identical hash', async () => {

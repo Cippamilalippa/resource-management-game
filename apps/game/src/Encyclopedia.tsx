@@ -8,6 +8,7 @@ import {
 import { Icon } from './Icon.tsx'
 import { ResourceLabel } from './ResourceLabel.tsx'
 import { formatRate } from './rates.ts'
+import { priceForColor } from './resources.ts'
 
 /** A recipe's ingredients or products as resource swatches with per-craft amount and /min rate. */
 function Flows({ flows }: { flows: readonly EncyclopediaFlow[] }): React.JSX.Element {
@@ -140,6 +141,11 @@ export function Encyclopedia(): React.JSX.Element {
             <div className="enc-filter-chip">
               <span>Filtered on</span>
               <ResourceLabel color={itemFilter} size={14} />
+              {priceForColor(itemFilter) !== undefined && (
+                <span className="enc-price" title="Depot sale price">
+                  · sells for {priceForColor(itemFilter)}¢
+                </span>
+              )}
               <button
                 className="enc-filter-clear"
                 onClick={() => encyclopediaStore.clearItemFilter()}

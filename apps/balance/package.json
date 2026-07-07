@@ -7,5 +7,7 @@
     "start": "tsx index.ts",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@factory/shared": "workspace:*"
+  }
 }

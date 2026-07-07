@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     ticksSimulated: ticks + 60,
     msPerTick: Number(msPerTick.toFixed(3)),
     fps: Math.round(1000 / msPerTick),
-    treasuryBanked: sim.state.treasury.n, // distinct colours the depots have banked (chain is live)
+    treasuryBanked: sim.state.treasury.credits, // credits the depots have banked (chain is live)
     stateHash: hashState(sim.world, { base: serializeGameState(sim.state) }),
   }
 

@@ -86,7 +86,7 @@ function main(): void {
     }
   } else {
     console.log('— Item costs (unfolded to raw) —')
-    console.log(itemTable(model))
+    console.log(itemTable(model, data))
     console.log('\n— Cost curve by tier —')
     console.log(tierTable(model, defaultConfig))
     console.log('\n— Machine bills for terminal goods —')

@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@factory/engine": "workspace:*"
+    "@factory/engine": "workspace:*",
+    "@factory/shared": "workspace:*"
   }
 }

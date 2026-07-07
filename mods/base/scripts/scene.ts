@@ -27,7 +27,8 @@ import {
   terrainTypeOf,
   registerBuilding,
   registerVillage,
-  depositTreasury,
+  creditTreasury,
+  priceOf,
   MAX_SLOTS,
   TERRAIN_SPRITE,
   ROLE_DEPOSIT,
@@ -35,6 +36,7 @@ import {
   type BuildingSlot,
   type BuildingStore,
   type GameState,
+  type PriceTable,
   type TreasuryStore,
   type VillageStageConfig,
 } from './sim.ts'
@@ -293,24 +295,29 @@ function villageStagesOf(
 }
 
 /**
- * Deposit each starting-kit entry into a building's matching stockpile slot (by resource colour),
- * capped at the slot. Used to grant the village a small grace buffer at spawn. Off the hot path.
- */
-/**
- * Seed the global build-cost treasury with a scenario's starting balance (item id → colour →
- * banked amount). This is the player's opening stock — what they can build before any depot has
- * refilled the pool. Off the hot path (new-game only).
+ * Seed the credit balance with a scenario's starting `startingTreasury`: each authored
+ * `{ item, amount }` line is valued at the item's price (item id → colour → price × amount) — the
+ * same conversion a depot sale applies — so scenario data keeps its readable item terms while the
+ * treasury holds one integer. Off the hot path (new-game only).
  */
 function seedTreasury(
   getProto: (id: string) => SceneProto | undefined,
   treasury: TreasuryStore,
+  prices: PriceTable,
   balance: readonly { item: string; amount: number }[],
 ): void {
   for (const entry of balance) {
-    depositTreasury(treasury, colorOf(getProto(entry.item), 0xffffff), entry.amount)
+    creditTreasury(
+      treasury,
+      entry.amount * priceOf(prices, colorOf(getProto(entry.item), 0xffffff)),
+    )
   }
 }
 
+/**
+ * Deposit each starting-kit entry into a building's matching stockpile slot (by resource colour),
+ * capped at the slot. Used to grant the village a small grace buffer at spawn. Off the hot path.
+ */
 function grantStartingKit(
   getProto: (id: string) => SceneProto | undefined,
   store: BuildingStore,
@@ -429,7 +436,7 @@ export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = 
   if (config.refundPermille !== undefined) {
     state.config.buildRefundPermille = Math.max(0, Math.floor(config.refundPermille))
   }
-  seedTreasury(getProto, state.treasury, scenario.startingTreasury)
+  seedTreasury(getProto, state.treasury, state.prices, scenario.startingTreasury)
 
   // Spaceport: a 2x2 block centered on the origin (top-left at -1,-1). It stays near spawn and gets
   // the scenario's starting kit as a grace buffer.

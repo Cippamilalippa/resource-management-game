@@ -295,6 +295,7 @@
     "craftingCategories": ["refining"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 1,
     "buildCost": [{ "item": "item.aluminum", "amount": 5 }]
   },
   {
@@ -307,6 +308,7 @@
     "craftingCategories": ["smelting"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 1,
     "buildCost": [{ "item": "item.aluminum", "amount": 4 }]
   },
   {
@@ -319,6 +321,7 @@
     "craftingCategories": ["chemistry"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 2,
     "buildCost": [
       { "item": "item.aluminum", "amount": 5 },
       { "item": "item.glass", "amount": 2 }
@@ -334,6 +337,7 @@
     "craftingCategories": ["composites"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 2,
     "buildCost": [{ "item": "item.aluminum", "amount": 6 }]
   },
   {
@@ -346,6 +350,7 @@
     "craftingCategories": ["metalworking"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 1,
     "buildCost": [{ "item": "item.aluminum", "amount": 6 }]
   },
   {
@@ -358,6 +363,7 @@
     "craftingCategories": ["electronics"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 2,
     "buildCost": [
       { "item": "item.aluminum", "amount": 5 },
       { "item": "item.glass", "amount": 3 }
@@ -373,6 +379,7 @@
     "craftingCategories": ["machining"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 2,
     "buildCost": [{ "item": "item.aluminum", "amount": 8 }]
   },
   {
@@ -385,6 +392,7 @@
     "craftingCategories": ["fabrication"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 2,
     "buildCost": [{ "item": "item.aluminum", "amount": 8 }]
   },
   {
@@ -397,6 +405,7 @@
     "craftingCategories": ["assembly"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 3,
     "buildCost": [
       { "item": "item.aluminum", "amount": 10 },
       { "item": "item.glass", "amount": 2 }
@@ -412,6 +421,7 @@
     "craftingCategories": ["science"],
     "speed": 1,
     "storage": 100,
+    "upkeep": 1,
     "buildCost": [
       { "item": "item.aluminum", "amount": 6 },
       { "item": "item.glass", "amount": 2 }
@@ -432,6 +442,7 @@
       "item.science_aerospace"
     ],
     "storage": 200,
+    "upkeep": 2,
     "researchLab": true,
     "buildCost": [
       { "item": "item.aluminum", "amount": 10 },

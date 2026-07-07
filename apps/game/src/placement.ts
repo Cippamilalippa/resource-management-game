@@ -98,6 +98,14 @@ export function installPlacement(
     return undefined
   }
 
+  /** The per-cadence credit upkeep the palette assigns to a footprint colour (0 = free to run). */
+  const upkeepForColor = (color: number): number => {
+    for (const it of buildStore.get().items) {
+      if (it.color === color && it.upkeep && it.upkeep > 0) return it.upkeep
+    }
+    return 0
+  }
+
   /** The colour of whatever deletable object sits at (x, y), for looking up its refund. */
   const colorAt = (x: number, y: number): number | null => {
     const info = resolveInspect(
@@ -210,7 +218,8 @@ export function installPlacement(
           tiles: [{ x: p.x, y: p.y }],
           refund: cost,
         }
-      case 'building':
+      case 'building': {
+        const upkeep = upkeepForColor(p.color)
         return {
           cmd: {
             type: 'place_building',
@@ -222,11 +231,14 @@ export function installPlacement(
             accepts: p.accepts,
             ...(p.researchLab ? { researchLab: true } : {}),
             ...(cost ? { cost } : {}),
+            ...(upkeep > 0 ? { upkeep } : {}),
           },
           tiles: [{ x: p.x, y: p.y }],
           refund: cost,
         }
-      case 'crafter':
+      }
+      case 'crafter': {
+        const upkeep = upkeepForColor(p.color)
         return {
           cmd: {
             type: 'place_crafter',
@@ -239,10 +251,12 @@ export function installPlacement(
             storageCap: p.storageCap,
             ...(p.recipe ? { recipe: p.recipe, inputs: p.inputs, outputs: p.outputs } : {}),
             ...(cost ? { cost } : {}),
+            ...(upkeep > 0 ? { upkeep } : {}),
           },
           tiles: [{ x: p.x, y: p.y }],
           refund: cost,
         }
+      }
     }
   }
 
@@ -1029,6 +1043,7 @@ export function installPlacement(
         ...(item.researchLab ? { researchLab: true } : {}),
         ...(item.depot ? { depot: true } : {}),
         ...(item.cost ? { cost: item.cost } : {}),
+        ...(item.upkeep ? { upkeep: item.upkeep } : {}),
       }
       enqueuePlaceBuilding(world, params)
       registry.record(tile.x, tile.y, { name: item.name, type: 'building' })
@@ -1102,6 +1117,7 @@ export function installPlacement(
           storageCap: item.storage,
           ...(recipe ? { recipe: recipe.int, inputs: recipe.inputs, outputs: recipe.outputs } : {}),
           ...(item.cost ? { cost: item.cost } : {}),
+          ...(item.upkeep ? { upkeep: item.upkeep } : {}),
         }
         enqueuePlaceCrafter(world, params)
         registry.record(t.x, t.y, { name: item.name, type: 'producer' })

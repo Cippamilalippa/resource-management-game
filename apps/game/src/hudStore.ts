@@ -7,7 +7,7 @@
  * units into "/s" rates. Panels drive research selection through the {@link HudController} the boot
  * loop wires in (only it can enqueue a command on the live world).
  */
-import type { VillageStatus, Alert, TreasuryBalance } from './gameLogic.ts'
+import type { VillageStatus, Alert } from './gameLogic.ts'
 
 /**
  * A village status enriched host-side with its settlement name (the sim is string-agnostic — it
@@ -87,8 +87,10 @@ export interface HudState {
   readonly production: readonly HudProductionRow[]
   /** Guided first-objectives checklist; empty once every step is done (panel hides). */
   readonly objectives: readonly HudObjective[]
-  /** Banked build-cost resources (the treasury), for the always-visible balance strip. */
-  readonly treasury: readonly TreasuryBalance[]
+  /** Current credit balance (the treasury), for the always-visible strip. */
+  readonly credits: number
+  /** Credits gained/lost per minute across the last HUD refresh window (0 until two samples). */
+  readonly creditsPerMin: number
 }
 
 /** The imperative surface the panels drive (implemented by the boot loop, which owns the world). */
@@ -103,7 +105,8 @@ const initial: HudState = {
   alerts: [],
   production: [],
   objectives: [],
-  treasury: [],
+  credits: 0,
+  creditsPerMin: 0,
 }
 
 let state: HudState = initial

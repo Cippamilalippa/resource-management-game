@@ -1,44 +1,47 @@
 import { useSyncExternalStore } from 'react'
 import { hudStore } from './hudStore.ts'
-import { ResourceLabel } from './ResourceLabel.tsx'
 import { Icon } from './Icon.tsx'
-import { encyclopediaStore } from './encyclopedia.ts'
 
-/** Compact numeric formatting for the balance chips: 12 · 3.4k · 1.2M. */
+/** Compact numeric formatting for the credit readout: 12 · 3.4k · 1.2M. */
 function fmt(n: number): string {
   if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(1))}M`
   if (n >= 1_000) return `${Number((n / 1_000).toFixed(1))}k`
   return String(n)
 }
 
+/** Signed compact form for the Δ/min readout: +12/min · -3.4k/min. */
+function fmtDelta(n: number): string {
+  return `${n > 0 ? '+' : '-'}${fmt(Math.abs(n))}/min`
+}
+
 /**
- * Always-visible treasury strip (top bar): the banked build-cost resources and how much of each is
- * held, so the player can read affordability at a glance — the ghost already tints red when a
- * placement is out of reach, this shows the actual balance. Reads the HUD store only; never touches
- * the sim.
+ * Always-visible credit strip (top bar): the single treasury balance every build cost is paid
+ * from and every depot sale feeds, plus its recent per-minute drift — so the player can read
+ * affordability and cash-flow direction at a glance (the ghost already tints red when a placement
+ * is out of reach). Reads the HUD store only; never touches the sim.
  */
 export function TreasuryBar(): React.JSX.Element | null {
-  const treasury = useSyncExternalStore(
+  const hud = useSyncExternalStore(
     hudStore.subscribe,
-    () => hudStore.get().treasury,
-    () => hudStore.get().treasury,
+    () => hudStore.get(),
+    () => hudStore.get(),
   )
-  if (treasury.length === 0) return null
-
+  const delta = Math.round(hud.creditsPerMin)
   return (
-    <div className="treasury glass" role="status" aria-label="Treasury">
+    <div className="treasury glass" role="status" aria-label="Credits">
       <Icon name="Landmark" size={15} />
-      {treasury.map((b) => (
-        <span className="treasury-item" key={b.color} title={`${b.amount}`}>
-          <ResourceLabel
-            color={b.color}
-            size={15}
-            showName={false}
-            onClick={() => encyclopediaStore.openForItem(b.color)}
-          />
-          <span className="treasury-amt">{fmt(b.amount)}</span>
+      <span className="treasury-item" title={`${hud.credits} credits`}>
+        <span className="treasury-amt">{fmt(hud.credits)}¢</span>
+      </span>
+      {delta !== 0 && (
+        <span
+          className="treasury-item treasury-delta"
+          title="Credits per minute (recent)"
+          style={{ color: delta > 0 ? '#7dd87d' : '#e08080' }}
+        >
+          {fmtDelta(delta)}
         </span>
-      ))}
+      )}
     </div>
   )
 }
