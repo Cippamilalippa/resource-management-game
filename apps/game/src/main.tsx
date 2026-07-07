@@ -517,9 +517,7 @@ async function boot(): Promise<void> {
     serialize: () => WorldSnapshot
   }
   let session: Session | null = null
-  // Wall-clock ms actually spent advancing the sim this session (paused/menu time excluded), for the
-  // win-screen play-time stat. Reset per session in startSession, accumulated in the frame loop.
-  let playTimeMs = 0
+  // (Play time lives in `playTimeMs` above — Q3's save-slot stat and the win screen share it.)
   // Whether this session's goal has already flipped to reached — latched so the celebratory modal
   // fires once, and a session that loads an already-won world shows the badge without the fanfare.
   let victoryLatched = false

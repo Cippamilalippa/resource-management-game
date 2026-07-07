@@ -29,11 +29,11 @@ function setStage1Buffer(sim: Sim, n: number): void {
 }
 
 describe('goalStatus', () => {
-  it('exposes the authored goal (abundant → reach stage 3), not yet reached at spawn', async () => {
+  it('exposes the authored goal (abundant → reach stage 4), not yet reached at spawn', async () => {
     const sim = await bootstrapSim(1)
     const g = goalStatus(sim.state)
     expect(g.defined).toBe(true)
-    expect(g.requiredStage).toBe(3)
+    expect(g.requiredStage).toBe(4)
     expect(g.currentStage).toBe(0)
     expect(g.reached).toBe(false)
   })
@@ -52,22 +52,22 @@ describe('goalStatus', () => {
     sim.scheduler.runTicks(sim.world, 700)
     const g = goalStatus(sim.state)
     expect(g.currentStage).toBe(1)
-    expect(g.reached).toBe(false) // still short of the required stage 3
+    expect(g.reached).toBe(false) // still short of the required stage 4
   })
 
   it('flips reached exactly at the authored stage, and un-flips below it', async () => {
     const sim = await bootstrapSim(1)
     const v = sim.state.villages
     // One below the goal: not reached.
-    v.stage[0] = 2
+    v.stage[0] = 3
     expect(goalStatus(sim.state).reached).toBe(false)
     // At the goal: reached.
-    v.stage[0] = 3
+    v.stage[0] = 4
     const g = goalStatus(sim.state)
-    expect(g.currentStage).toBe(3)
+    expect(g.currentStage).toBe(4)
     expect(g.reached).toBe(true)
     // Past the goal (a deeper ladder would allow this): still reached.
-    v.stage[0] = 4
+    v.stage[0] = 5
     expect(goalStatus(sim.state).reached).toBe(true)
     // Back below: no longer reached (the selector is a pure read of the live stage).
     v.stage[0] = 1

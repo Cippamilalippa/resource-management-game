@@ -72,7 +72,10 @@ The plan below is ordered around fixing those five things.
       demands `rocket_fuel` (tier ~4); the first hour is belt-spaghetti toward one deep
       good with the starting kit as a timer. Let stage 1 want tier-1/2 goods and climb.
       `pnpm balance` + the KPI harness exist precisely to tune this; use them.
-- [ ] **G5. Win condition + score screen.** ★★☆ / S — There is no victory. Define one per
+- [x] **G5. Win condition + score screen.** ★★☆ / S — _Shipped: per-scenario `goal`
+      (Spaceport stage 5 abundant / 4 sparse on the 6-stage ladder), read-only `goalStatus`
+      selector, victory modal with stats + fanfare, persistent TopBar badge, goal shown as a
+      live objective row; round-trip tested._ There is no victory. Define one per
       scenario (e.g. "Spaceport reaches stage 4 / launch N rockets"), show a completion
       screen with stats (time, items produced, techs), and let the run continue after.
       Data: a `goal` field on scenarios; the objectives selector already computes similar.
