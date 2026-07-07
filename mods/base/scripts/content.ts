@@ -204,6 +204,26 @@ function validateRichness(proto: Prototype): void {
 }
 
 /**
+ * A scenario's win goal (G5) — `{ village, stage }`, meaning "raise settlement `village` to stage
+ * `stage`". Absent → `null` (a scenario may declare no goal). Shape-validated here (village id +
+ * non-negative integer stage); the referenced village and the stage's upper bound are checked in
+ * {@link validateContent} where the whole registry is available. Returns the parsed goal (for those
+ * checks). Kept a small object so a later delivered-items goal variant can extend it additively.
+ */
+function goal(proto: Prototype): { village: string; stage: number } | null {
+  const raw = proto.goal
+  if (raw === undefined) return null
+  if (typeof raw !== 'object' || raw === null)
+    fail(`${proto.id}: "goal" must be a { village, stage }`)
+  const g = raw as Record<string, unknown>
+  if (typeof g.village !== 'string') fail(`${proto.id}: goal.village must be a village id`)
+  if (typeof g.stage !== 'number' || !Number.isInteger(g.stage) || g.stage < 0) {
+    fail(`${proto.id}: goal.stage must be a non-negative integer`)
+  }
+  return { village: g.village as string, stage: g.stage as number }
+}
+
+/**
  * The `{ item, amount }[]` a building/belt/port/… costs from the treasury to place. Empty for a
  * free placement. The prototype types that may bear a `buildCost` (everything the player can build).
  */
@@ -284,6 +304,7 @@ function validateScenarioShapes(registry: PrototypeRegistry): void {
     startingKit(s)
     startingTreasury(s)
     settlements(s)
+    goal(s)
   }
 }
 
@@ -413,7 +434,31 @@ export function validateContent(registry: PrototypeRegistry): void {
       expectType: 'village',
       label: 'settlement',
     },
+    {
+      type: 'scenario',
+      select: (s) => {
+        const g = goal(s)
+        return g ? [g.village] : []
+      },
+      expectType: 'village',
+      label: 'goal',
+    },
   ])
+
+  // A scenario goal's stage must exist on its target village's ladder (the reference pass above
+  // already proved the village exists and is a `village`). An out-of-range stage could never be
+  // reached, so it is a content error — reject it loud at load rather than shipping an unwinnable goal.
+  for (const s of registry.listByType('scenario')) {
+    const g = goal(s)
+    if (g === null) continue
+    const village = registry.require(g.village)
+    const stages = Array.isArray(village.stages) ? village.stages : []
+    if (g.stage >= stages.length) {
+      fail(
+        `${s.id}: goal.stage ${g.stage} is out of range for "${g.village}" (0..${stages.length - 1})`,
+      )
+    }
+  }
 
   // Each unlock must resolve to a recipe or a building-like prototype (crafter/building/…).
   const buildableTypes = new Set([

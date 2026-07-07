@@ -66,10 +66,12 @@ import {
   treasuryCreditsOf,
   scenarioList,
   gameObjectives,
+  goalStatus,
   type ObjectiveId,
 } from './gameLogic.ts'
 import { buildIconTextures, resourceIconTextures } from './iconTextures.ts'
 import { setResources, setResourcePrices } from './resources.ts'
+import { victoryStore, type VictoryStats } from './victoryStore.ts'
 import './styles.css'
 
 /** Read a numeric prototype field, falling back when absent/ill-typed. */
@@ -348,8 +350,12 @@ function randomSeed(): number {
   return Math.floor(Math.random() * 0xffffffff) >>> 0
 }
 
-/** Display labels for the guided first-objectives checklist (the sim tracks only opaque ids). */
-const OBJECTIVE_LABELS: Record<ObjectiveId, string> = {
+/**
+ * Display labels for the static onboarding steps (the sim tracks only opaque ids). The win-goal row
+ * (`reach_goal`) is excluded here — its label is dynamic ("Reach <settlement> stage N (cur/req)")
+ * and built per-refresh from the live `goalStatus` in the boot loop.
+ */
+const OBJECTIVE_LABELS: Record<Exclude<ObjectiveId, 'reach_goal'>, string> = {
   place_crafter: 'Place a machine (mine or crafter)',
   place_belt: 'Lay a conveyor belt',
   place_lab: 'Build a research lab',
@@ -511,6 +517,12 @@ async function boot(): Promise<void> {
     serialize: () => WorldSnapshot
   }
   let session: Session | null = null
+  // Wall-clock ms actually spent advancing the sim this session (paused/menu time excluded), for the
+  // win-screen play-time stat. Reset per session in startSession, accumulated in the frame loop.
+  let playTimeMs = 0
+  // Whether this session's goal has already flipped to reached — latched so the celebratory modal
+  // fires once, and a session that loads an already-won world shows the badge without the fanfare.
+  let victoryLatched = false
 
   // Re-derive the build bar (and its glyphs) from the current session's researched set. Called when
   // a session starts and whenever research completes a tech and unlocks new buildings/recipes.
@@ -554,6 +566,12 @@ async function boot(): Promise<void> {
       researchedIds: researchedFrom(sim.state.research.completed),
       serialize: sim.serialize,
     }
+    // Seed the win-screen state from the world we're starting: a loaded, already-won save shows the
+    // persistent badge (won) but NOT the modal — you don't get a fresh fanfare for an old victory.
+    // A fresh/unwon world starts clean; the frame loop watches for the false→true flip from here.
+    victoryLatched = goalStatus(sim.state).reached
+    victoryStore.reset()
+    if (victoryLatched) victoryStore.set({ won: true })
     await refreshBuildBar()
     // A live session is on screen now — leave the menu/setup shells for the running game.
     appStore.set({ phase: 'playing' })
@@ -569,6 +587,46 @@ async function boot(): Promise<void> {
   const techNameById = new Map(techs.map((t) => [t.id, t.name] as const))
   // Each tech's unlock previews (buildings/recipes it grants), resolved once — session-invariant.
   const unlocksByTech = techUnlockIndex(techs, prototypes)
+
+  /**
+   * Freeze an end-of-run summary for the win screen from the live session: play time, sim ticks,
+   * the runtime-earned technologies (mapped from the sim's completed integer ids), every
+   * settlement's level standing, and a cheap installed-production headline. Off the hot path — only
+   * called the moment the goal is reached (or once for a loaded-won world), never per frame.
+   */
+  const captureVictoryStats = (sess: Session): VictoryStats => {
+    const goal = goalStatus(sess.state)
+    const goalName = sess.registry.get(goal.vx, goal.vy)?.name ?? 'The colony'
+    const settlements = villageStatuses(sess.state).map((v) => ({
+      name: sess.registry.get(v.x, v.y)?.name ?? 'Settlement',
+      level: v.level,
+      maxLevel: v.maxStage + 1,
+    }))
+    const techNames: string[] = []
+    for (const int of researchProgress(sess.state).completed) {
+      const id = techIdByInt.get(int)
+      const name = id !== undefined ? techNameById.get(id) : undefined
+      if (name !== undefined) techNames.push(name)
+    }
+    const totalProducedPerSec = productionFlows(sess.state).reduce(
+      (sum, f) => sum + f.produced * DEFAULT_TICK_RATE,
+      0,
+    )
+    let machineCount = 0
+    const bs = sess.state.buildings
+    for (let b = 0; b < bs.count; b++) if (bs.crafts[b]) machineCount++
+    return {
+      playTimeSec: Math.round(playTimeMs / 1000),
+      ticks: sess.world.tick,
+      techNames,
+      settlements,
+      totalProducedPerSec,
+      machineCount,
+      goalName,
+      goalStage: goal.requiredStage,
+    }
+  }
+
   const buildResearchHud = (sess: Session): HudResearch => {
     const prog = researchProgress(sess.state)
     const activeMeta = prog.idle ? undefined : techs.find((t) => t.int === prog.activeTech)
@@ -996,6 +1054,26 @@ async function boot(): Promise<void> {
       const villageLevels = villages.reduce((sum, v) => sum + v.level, 0)
       if (prevVillageLevels >= 0 && villageLevels > prevVillageLevels) sfx.play('level')
       prevVillageLevels = villageLevels
+      // Win goal (G5): watch for the first false→true flip this session. On the flip, freeze the
+      // summary, raise the win screen and sound the fanfare. If we loaded an already-won world,
+      // backfill the frozen stats once (WITHOUT opening the modal) so the persistent TopBar badge
+      // can reopen a populated screen.
+      const goal = goalStatus(sess.state)
+      if (goal.reached && !victoryLatched) {
+        victoryLatched = true
+        victoryStore.set({ won: true, modalOpen: true, stats: captureVictoryStats(sess) })
+        sfx.playVictory()
+      } else if (victoryLatched && victoryStore.get().stats === null) {
+        victoryStore.set({ stats: captureVictoryStats(sess) })
+      }
+      // The dynamic label for the win-goal objective row (the static steps use OBJECTIVE_LABELS).
+      const goalName = goal.defined
+        ? (sess.registry.get(goal.vx, goal.vy)?.name ?? 'the colony')
+        : ''
+      const objectiveLabel = (id: ObjectiveId): string =>
+        id === 'reach_goal'
+          ? `Reach ${goalName} level ${goal.requiredStage + 1} (${Math.max(0, goal.currentStage) + 1}/${goal.requiredStage + 1})`
+          : OBJECTIVE_LABELS[id]
       // Muted tiles ("don't warn for this building", U6) drop out of every alert-fed view: the
       // live stack, the status overlay, and the history log below all read this filtered list.
       const alerts = filterMuted(collectAlerts(sess.state), muteStore.get())
@@ -1034,7 +1112,7 @@ async function boot(): Promise<void> {
         // attaches each step's display label. The panel hides itself once every step is done.
         objectives: gameObjectives(sess.state).map((o) => ({
           id: o.id,
-          label: OBJECTIVE_LABELS[o.id],
+          label: objectiveLabel(o.id),
           done: o.done,
         })),
         credits,

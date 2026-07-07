@@ -102,6 +102,9 @@ interface SettlementConfig {
   readonly distance: { readonly min: number; readonly max: number }
 }
 
+/** A scenario's parsed win goal: reach `village`'s 0-based `stage`. `null` when none is authored. */
+type GoalConfig = { readonly village: string; readonly stage: number } | null
+
 /** The scenario layout params the scene consumes, after parsing (with fallbacks). */
 interface ScenarioConfig {
   readonly deposits: readonly string[]
@@ -113,6 +116,8 @@ interface ScenarioConfig {
   readonly startingTreasury: readonly { readonly item: string; readonly amount: number }[]
   /** Extra settlements (beyond the origin spaceport) scattered at increasing distance bands. */
   readonly settlements: readonly SettlementConfig[]
+  /** The win condition (G5): which settlement to raise to which stage. `null` when the scenario has none. */
+  readonly goal: GoalConfig
 }
 
 function colorOf(proto: SceneProto | undefined, fallback: number): number {
@@ -185,6 +190,7 @@ function scenarioConfigOf(
     startingKit: flowListOf(proto, 'startingKit'),
     startingTreasury: flowListOf(proto, 'startingTreasury'),
     settlements: settlementsOf(proto),
+    goal: goalOf(proto),
   }
 }
 
@@ -207,6 +213,19 @@ function settlementsOf(proto: SceneProto | undefined): SettlementConfig[] {
     out.push({ building: e.building, distance: { min, max } })
   }
   return out
+}
+
+/**
+ * Parse a scenario's `goal` (win condition): reach village `goal.village`'s stage `goal.stage`.
+ * Malformed or absent → `null` (no goal). Stays lenient — validation proper lives host-side in
+ * `content.ts`; this just clamps the stage to a non-negative integer.
+ */
+function goalOf(proto: SceneProto | undefined): GoalConfig {
+  const raw = proto?.goal
+  if (!raw || typeof raw !== 'object') return null
+  const g = raw as Record<string, unknown>
+  if (typeof g.village !== 'string' || typeof g.stage !== 'number') return null
+  return { village: g.village, stage: Math.max(0, Math.floor(g.stage)) }
 }
 
 /** Parse a `{ item, amount }[]` flow list off a scenario field, skipping malformed entries. */
@@ -467,6 +486,19 @@ export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = 
     reserved.push(
       placeVillage(api, state, getProto, record, settlement.building, cell.x, cell.y, []),
     )
+  }
+
+  // Win goal (G5): resolve the scenario's target village to the tile we just placed it at, and
+  // record it in the (serialized) config so a read-only selector can compare live vs. required
+  // stage. Only the origin `building.village` is placed here, so a goal targeting anything else
+  // simply doesn't arm (its village never spawned). Deterministic — pure config write, no RNG.
+  if (scenario.goal !== null && scenario.goal.village === 'building.village') {
+    state.config.goal = {
+      village: scenario.goal.village,
+      stage: scenario.goal.stage,
+      vx,
+      vy,
+    }
   }
 
   // Deposit patches: scatter each scenario deposit onto a distinct candidate cell (shuffled by the

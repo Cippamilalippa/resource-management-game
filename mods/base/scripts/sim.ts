@@ -1926,15 +1926,40 @@ export function spendTreasury(
  * they survive save/load and stay deterministic. Kept as a small struct so future settings (build
  * refund is the first) are added additively without threading new params through the sim.
  */
+/**
+ * The scenario win goal (G5): reach a target settlement's stage. Authored on the scenario as
+ * `{ village, stage }` (a village prototype id + a 0-based stage index); the scene resolves the
+ * village to its anchor tile ({@link GameGoal.vx}/{@link GameGoal.vy}) at new-game time and stores
+ * the whole thing in {@link GameConfig.goal}, so a read-only selector ({@link goalStatus}) can
+ * compare the target village's live stage against the requirement without the sim tracking
+ * prototype ids. Deliberately a small struct so a later "deliver N of an item" variant can slot in
+ * additively (a discriminated shape) without reworking the config plumbing.
+ */
+export interface GameGoal {
+  /** The target settlement's village prototype id (the host resolves it to a display name). */
+  readonly village: string
+  /** Required 0-based stage index the target village must reach to win. */
+  readonly stage: number
+  /** Resolved anchor tile of the target village (top-left of its footprint), set at scene time. */
+  readonly vx: number
+  readonly vy: number
+}
+
 export interface GameConfig {
   /**
    * Fraction of a building's `buildCost` returned to the treasury when it is removed, in permille
    * (1000 = full refund, 0 = none). Integer so the refund math stays exact and deterministic.
    */
   buildRefundPermille: number
+  /**
+   * The scenario win goal, resolved to its target village tile at new-game time (see {@link GameGoal}).
+   * Absent when the scenario declares no goal. Carried in the save so a load restores the objective —
+   * a session that loads an already-won world can tell, without replaying how it got there.
+   */
+  goal?: GameGoal
 }
 
-/** The default rules: full (100%) build refund. */
+/** The default rules: full (100%) build refund, and no win goal (a scenario opts in). */
 export function createGameConfig(): GameConfig {
   return { buildRefundPermille: 1000 }
 }
@@ -2272,7 +2297,12 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
     villages: { timer: v.timer, entries },
     research: serializeResearch(state.research),
     treasury: serializeTreasury(state.treasury),
-    config: { buildRefundPermille: state.config.buildRefundPermille },
+    // Emit `goal` only when the scenario set one, so a goal-less save's config stays byte-identical
+    // to before (and the key order is fixed, keeping the canonical-JSON hash stable across runs).
+    config: {
+      buildRefundPermille: state.config.buildRefundPermille,
+      ...(state.config.goal !== undefined ? { goal: state.config.goal } : {}),
+    },
   }
 }
 
@@ -2455,6 +2485,10 @@ export function loadGameState(
   loadTreasurySnapshot(state.treasury, state.prices, snap.treasury ?? {})
   state.config.buildRefundPermille =
     snap.config?.buildRefundPermille ?? createGameConfig().buildRefundPermille
+  // Restore the win goal exactly as saved (absent → cleared), so loading an already-won world knows
+  // it, and re-serializing reproduces the same config.
+  if (snap.config?.goal !== undefined) state.config.goal = snap.config.goal
+  else delete state.config.goal
 }
 
 /**

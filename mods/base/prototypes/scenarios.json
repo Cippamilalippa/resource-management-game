@@ -23,7 +23,8 @@
     "settlements": [
       { "building": "building.mining_camp", "distance": { "min": 22, "max": 30 } },
       { "building": "building.research_colony", "distance": { "min": 40, "max": 52 } }
-    ]
+    ],
+    "goal": { "village": "building.village", "stage": 4 }
   },
   {
     "id": "scenario.sparse",
@@ -49,6 +50,7 @@
     "settlements": [
       { "building": "building.mining_camp", "distance": { "min": 34, "max": 44 } },
       { "building": "building.research_colony", "distance": { "min": 52, "max": 64 } }
-    ]
+    ],
+    "goal": { "village": "building.village", "stage": 3 }
   }
 ]

@@ -22,6 +22,7 @@ import {
   depositRichnessAt,
   priceOf,
   treasuryCredits,
+  villageStageAt,
   type BuildingStore,
   type CostEntry,
   type GameState,
@@ -256,8 +257,64 @@ export function collectAlerts(state: GameState): Alert[] {
   return alerts
 }
 
-/** The ordered onboarding objectives that guide a new player through the core loop. */
-export type ObjectiveId = 'place_crafter' | 'place_belt' | 'place_lab' | 'select_research'
+/**
+ * The scenario win-goal status (G5), derived read-only from {@link GameState.config.goal}: the target
+ * settlement's live stage vs. the required one, and whether it has been reached. Like every selector
+ * here it never mutates state and never runs in a system, so it cannot affect determinism.
+ */
+export interface GoalStatus {
+  /** Whether the scenario declares a goal at all (false → no win condition; the rest are inert). */
+  readonly defined: boolean
+  /** The target settlement's village prototype id (host resolves it to a display name). */
+  readonly village: string
+  /** The target settlement's anchor tile (so the host can name it via the inspect registry). */
+  readonly vx: number
+  readonly vy: number
+  /** Required 0-based stage index to win. */
+  readonly requiredStage: number
+  /** The target village's current 0-based stage, or -1 if no such village exists yet. */
+  readonly currentStage: number
+  /** True once the target village has reached (or passed) the required stage. */
+  readonly reached: boolean
+}
+
+/**
+ * Resolve the scenario win goal against the live world: find the target village (by the anchor tile
+ * the scene stored in the goal) and compare its current stage to the requirement. Pure read — the
+ * host watches `reached` to raise the victory screen. Returns an inert, not-reached status when the
+ * scenario declares no goal.
+ */
+export function goalStatus(state: GameState): GoalStatus {
+  const goal = state.config.goal
+  if (goal === undefined) {
+    return {
+      defined: false,
+      village: '',
+      vx: 0,
+      vy: 0,
+      requiredStage: 0,
+      currentStage: -1,
+      reached: false,
+    }
+  }
+  const currentStage = villageStageAt(state.villages, goal.vx, goal.vy)
+  return {
+    defined: true,
+    village: goal.village,
+    vx: goal.vx,
+    vy: goal.vy,
+    requiredStage: goal.stage,
+    currentStage,
+    reached: currentStage >= goal.stage,
+  }
+}
+
+/**
+ * The ordered onboarding objectives that guide a new player through the core loop, plus the final
+ * `reach_goal` row — the scenario win condition, shown from minute one so the target is always visible.
+ */
+export type ObjectiveId =
+  'place_crafter' | 'place_belt' | 'place_lab' | 'select_research' | 'reach_goal'
 
 /** One onboarding objective and whether the current world already satisfies it. */
 export interface ObjectiveStatus {
@@ -286,12 +343,17 @@ export function gameObjectives(state: GameState): ObjectiveStatus[] {
   // finish before the panel next refreshes, so completion counts too).
   const choseResearch =
     state.research.activeTech !== RESEARCH_NONE || state.research.completed.length > 0
-  return [
+  const rows: ObjectiveStatus[] = [
     { id: 'place_crafter', done: hasCrafter },
     { id: 'place_belt', done: hasBelt },
     { id: 'place_lab', done: hasLab },
     { id: 'select_research', done: choseResearch },
   ]
+  // The scenario win goal (G5) is the last row, so the endgame target is visible from the very first
+  // frame. Only shown when the scenario declares one (host builds its dynamic "(cur/req)" label).
+  const goal = goalStatus(state)
+  if (goal.defined) rows.push({ id: 'reach_goal', done: goal.reached })
+  return rows
 }
 
 /** Installed production/consumption capacity for one resource colour, in units per tick. */
