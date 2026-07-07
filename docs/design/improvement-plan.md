@@ -76,7 +76,10 @@ The plan below is ordered around fixing those five things.
       scenario (e.g. "Spaceport reaches stage 4 / launch N rockets"), show a completion
       screen with stats (time, items produced, techs), and let the run continue after.
       Data: a `goal` field on scenarios; the objectives selector already computes similar.
-- [ ] **G6. Treasury economy with real prices.** ★★☆ / M — Today any item banked in a depot
+- [x] **G6. Treasury economy with real prices.** ★★☆ / M — _Shipped: single-currency credits
+      with DAG-derived integer prices (`packages/shared/pricing.ts`, shared with the balance
+      analyzer), depot sales at price, per-building upkeep on a 30s cadence (floors at 0),
+      legacy per-colour saves convert at load; credits bar with Δ/min._ Today any item banked in a depot
       credits 1 unit of its own colour, and build costs are only aluminum/glass. Price
       items by their **raw-cost composite** (the `apps/balance` model, computed at load
       into a colour→value table) into a single currency ("credits"), diversify build costs,
