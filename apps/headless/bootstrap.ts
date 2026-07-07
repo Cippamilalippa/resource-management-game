@@ -20,7 +20,12 @@ import {
 import { discoverModSources, NodeFileSource } from '@factory/engine/modloader/node'
 import { serialize, type WorldSnapshot } from '@factory/engine/persistence'
 import type { BaseReady } from '../../mods/base/scripts/main.ts'
-import { validateContent, serializeGameState, type GameState } from './gameLogic.ts'
+import {
+  validateContent,
+  itemColorPrices,
+  serializeGameState,
+  type GameState,
+} from './gameLogic.ts'
 
 /**
  * Resolve a mod script to a module by dynamically importing it. Runs under tsx, so
@@ -112,6 +117,9 @@ export async function bootstrapSim(
     importScript,
   )
   if (!ready) throw new Error('base mod did not publish game state (base:ready)')
+  // Hand the sim the colour→credit price table computed from the recipe DAG BEFORE any origin is
+  // applied: the scene seeds its starting balance through it, and a legacy save converts through it.
+  ready.setPrices(itemColorPrices(registry))
   if (startScene) ready.newGame(scenario === undefined ? undefined : { scenario })
 
   const state = ready.state

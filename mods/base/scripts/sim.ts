@@ -713,9 +713,10 @@ export interface BuildingStore {
   /** 1 if this building runs a recipe (a crafter), 0 for a pure store. */
   crafts: Int8Array
   /**
-   * 1 if this building is a *depot* (a treasury sink): items arriving on its input ports are
-   * credited straight into the global {@link TreasuryStore} by colour instead of being stocked in
-   * a slot, so a depot needs no accept slots and is not bound by {@link MAX_SLOTS}. 0 otherwise.
+   * 1 if this building is a *depot* (a sales sink): items arriving on its input ports are SOLD —
+   * their {@link PriceTable} price credited straight into the global {@link TreasuryStore} —
+   * instead of being stocked in a slot, so a depot needs no accept slots and is not bound by
+   * {@link MAX_SLOTS}. 0 otherwise.
    */
   depot: Int8Array
   /**
@@ -754,6 +755,12 @@ export interface BuildingStore {
    * packed {@link tileKey} can exceed the Int32 range (it would truncate to a bogus key otherwise).
    */
   anchorKey: Float64Array
+  /**
+   * Per-building upkeep in credits, drained from the treasury once per {@link UPKEEP_CADENCE} (G6).
+   * Authored per building *type* (`buildings.json`'s optional `upkeep`, default 0 — belts/ports/
+   * depots stay free), passed in at placement. 0 for anything with no upkeep, so the drain skips it.
+   */
+  upkeep: Int32Array
 }
 
 export function createBuildingStore(): BuildingStore {
@@ -779,6 +786,7 @@ export function createBuildingStore(): BuildingStore {
     slotRole: new Int8Array(cap * MAX_SLOTS),
     slotAmt: new Int32Array(cap * MAX_SLOTS),
     anchorKey: new Float64Array(cap).fill(NONE),
+    upkeep: new Int32Array(cap),
   }
 }
 
@@ -806,6 +814,7 @@ function ensureBuildingCapacity(s: BuildingStore, need: number): void {
   s.slotRole = grow8(s.slotRole, next * MAX_SLOTS, 0)
   s.slotAmt = grow(s.slotAmt, next * MAX_SLOTS, 0)
   s.anchorKey = growF64(s.anchorKey, next, NONE)
+  s.upkeep = grow(s.upkeep, next, 0)
 }
 
 /**
@@ -859,6 +868,7 @@ export function registerBuilding(
   slots: readonly BuildingSlot[],
   depot = 0,
   silo = 0,
+  upkeep = 0,
 ): number {
   ensureBuildingCapacity(store, store.count + 1)
   const b = store.count++
@@ -874,6 +884,7 @@ export function registerBuilding(
   store.craftEvery[b] = Math.max(1, craftEvery)
   store.craftTimer[b] = 0
   store.anchorKey[b] = NONE // set by place_crafter only for a finite-deposit extractor
+  store.upkeep[b] = Math.max(0, upkeep)
   let n = 0
   for (let j = 0; j < slots.length && n < MAX_SLOTS; j++) {
     const i = b * MAX_SLOTS + n
@@ -1449,6 +1460,7 @@ function stepBelts(
   g: BeltGrid,
   store: BuildingStore,
   treasury: TreasuryStore,
+  prices: PriceTable,
 ): void {
   const { order, slot, kind, nbr, face, inDir, rr, tx, ty, dueEvery, portBuilding } = g
   const { Position, Renderable } = gw.components
@@ -1489,10 +1501,10 @@ function stepBelts(
     // A filtered input only ingests colours its whitelist/blacklist admits; a rejected item stays
     // put and backs the belt up (same as an unaccepted resource) so the player can sort a mixed line.
     if (!portFilterPasses(g, t, color)) continue
-    // A depot is a wildcard treasury sink: any arriving item is banked by its colour (no slot,
-    // no capacity), refilling the build-cost pool. Depots hold no stock, so this never blocks.
+    // A depot is a wildcard sales sink: any arriving item is sold, crediting its market price (no
+    // slot, no capacity), refilling the credit balance. Depots hold no stock, so this never blocks.
     if (store.depot[b]) {
-      depositTreasury(treasury, color, 1)
+      creditTreasury(treasury, priceOf(prices, color))
       api.despawn(eid)
       slot[t] = NONE
       continue
@@ -1699,11 +1711,12 @@ function updateBelts(
   g: BeltGrid,
   store: BuildingStore,
   treasury: TreasuryStore,
+  prices: PriceTable,
   deposits: DepositStore,
 ): void {
   if (++g.moveTimer >= g.moveEvery) {
     g.moveTimer = 0
-    stepBelts(gw, api, g, store, treasury)
+    stepBelts(gw, api, g, store, treasury, prices)
     g.moveCount++
   }
   runCrafters(gw, api, store, deposits)
@@ -1712,62 +1725,81 @@ function updateBelts(
 
 // --- Game state -------------------------------------------------------------
 
-// --- Treasury: the global build-cost bank -----------------------------------
+// --- Prices: the host-computed colour → credit table ------------------------
+
+/** Price used for a colour the host never priced (a raw with no recipe, or a synthetic test colour). */
+export const DEFAULT_PRICE = 1
 
 /**
- * The global resource bank the player spends to place buildings. Unlike Factorio (a character
- * carries items) this is a Factory-Town-style central stockpile: a placement is charged its
- * `buildCost` from here, and the pool is refilled by belting goods into a *depot* (see
- * {@link BuildingStore.depot}). Keyed by resource colour — the same identity buildings, belts and
- * ports use — so a build cost of "1 mining drill" simply reserves one unit of that item's colour.
- *
- * Owned by the base game (not the engine). Held as flat parallel arrays (colour → amount) grown at
- * deposit time; every mutation happens off the per-tick hot path (placement, removal, and the
- * handful of depot credits per belt pass), so linear scans over the few distinct resources are
- * fine. Serialized in dense index order, so a save round-trips byte-identically.
+ * The colour→price table the HOST computes from the recipe DAG at content-load time (see
+ * `content.ts`'s `itemColorPrices`) and hands the sim through `base:ready`'s `setPrices` — exactly
+ * how the other colour-keyed config reaches the sim (the sim never sees an item id). The sim looks
+ * a colour up here to value a depot sale or a build cost in credits. Derived purely from content,
+ * so it is identical on every load and NOT serialized: the host re-supplies it before applying the
+ * scene or a save. The integer *credits* it produces ARE hashed, so determinism is preserved.
+ */
+export interface PriceTable {
+  /** Resource colour → integer credit price (≥ 1). Absent colour → {@link DEFAULT_PRICE}. */
+  readonly price: Map<number, number>
+}
+
+export function createPriceTable(): PriceTable {
+  return { price: new Map() }
+}
+
+/** Integer credit price of one unit of resource `color` (≥ 1). Allocation-free Map lookup. */
+export function priceOf(prices: PriceTable, color: number): number {
+  const p = prices.price.get(color)
+  return p !== undefined && p > 0 ? p : DEFAULT_PRICE
+}
+
+/** Replace the price table's entries in place (host call, before newGame/load). Off the hot path. */
+export function loadPriceTable(
+  prices: PriceTable,
+  entries: readonly { readonly color: number; readonly price: number }[],
+): void {
+  prices.price.clear()
+  for (const e of entries) prices.price.set(e.color, Math.max(1, Math.floor(e.price)))
+}
+
+// --- Treasury: the single-currency credit balance (G6) ----------------------
+
+/**
+ * The global CREDIT balance the player spends to place buildings and earns by selling goods into a
+ * *depot* (see {@link BuildingStore.depot}). This replaced the old per-colour bank: one integer
+ * currency instead of a stockpile keyed by resource colour. A placement is charged the credit value
+ * of its `buildCost` (Σ amount × the item's {@link PriceTable} price); a depot deposit credits the
+ * sold item's price; and a slow upkeep sink ({@link UPKEEP_CADENCE}) drains a little each cadence,
+ * floored at zero. Owned by the base game (not the engine); every mutation is off the per-tick hot
+ * path, and the two integers serialize byte-identically.
  */
 export interface TreasuryStore {
-  /** Number of distinct resource colours currently banked. */
-  n: number
-  /** Per-entry resource colour. */
-  color: Int32Array
-  /** Per-entry banked amount (parallel to {@link color}). */
-  amount: Int32Array
+  /** Current credit balance (never negative). */
+  credits: number
+  /** Ticks accumulated toward the next upkeep drain (see {@link UPKEEP_CADENCE}). */
+  upkeepTimer: number
 }
 
 export function createTreasuryStore(): TreasuryStore {
-  const cap = 8
-  return { n: 0, color: new Int32Array(cap), amount: new Int32Array(cap) }
+  return { credits: 0, upkeepTimer: 0 }
 }
 
-/** Index of resource `color` in the treasury, or -1 if none is banked. */
-function treasuryIndexOf(t: TreasuryStore, color: number): number {
-  for (let i = 0; i < t.n; i++) if (t.color[i] === color) return i
-  return -1
+/**
+ * How often the upkeep sink runs (ticks): every 30 s of sim time at 60 tps. Buildings that carry a
+ * per-type `upkeep` (the big machines — see {@link BuildingStore.upkeep}) drain their cost from the
+ * credit balance once per cadence. At zero credits nothing stalls — the balance just floors at 0 —
+ * so upkeep is economic pressure, never a hard failure. Slow cadence keeps the per-tick cost nil.
+ */
+export const UPKEEP_CADENCE = 1800
+
+/** Current credit balance. */
+export function treasuryCredits(t: TreasuryStore): number {
+  return t.credits
 }
 
-/** Units of resource `color` currently banked in the treasury. */
-export function treasuryAmount(t: TreasuryStore, color: number): number {
-  const i = treasuryIndexOf(t, color)
-  return i < 0 ? 0 : t.amount[i]!
-}
-
-/** Bank `amount` (>= 0) units of resource `color`, appending a new entry if needed. Off the hot path. */
-export function depositTreasury(t: TreasuryStore, color: number, amount: number): void {
-  if (amount <= 0) return
-  const i = treasuryIndexOf(t, color)
-  if (i >= 0) {
-    t.amount[i] = t.amount[i]! + amount
-    return
-  }
-  if (t.n >= t.color.length) {
-    const next = t.color.length * 2
-    t.color = grow(t.color, next, 0)
-    t.amount = grow(t.amount, next, 0)
-  }
-  const j = t.n++
-  t.color[j] = color
-  t.amount[j] = amount
+/** Add `amount` (≥ 0) credits to the balance. Off the hot path (a depot sale, a refund, a seed). */
+export function creditTreasury(t: TreasuryStore, amount: number): void {
+  if (amount > 0) t.credits += amount
 }
 
 /** One line of a build cost / refund: a resource colour and how many units. */
@@ -1776,31 +1808,47 @@ export interface CostEntry {
   readonly amount: number
 }
 
-/**
- * True if the treasury can cover every line of `cost`. Summed per colour first so a cost that
- * lists the same colour twice is checked against the combined requirement. Off the hot path.
- */
-export function canAffordTreasury(t: TreasuryStore, cost: readonly CostEntry[]): boolean {
-  for (let a = 0; a < cost.length; a++) {
-    const color = cost[a]!.color
-    // Only test each colour on its first occurrence, against the sum of all its lines.
-    let firstOccurrence = true
-    for (let b = 0; b < a; b++) if (cost[b]!.color === color) firstOccurrence = false
-    if (!firstOccurrence) continue
-    let total = 0
-    for (let b = 0; b < cost.length; b++) if (cost[b]!.color === color) total += cost[b]!.amount
-    if (total > 0 && treasuryAmount(t, color) < total) return false
-  }
-  return true
+/** The credit value of `cost`: Σ amount × unit price. Integer (prices and amounts are integers). */
+export function costCredits(prices: PriceTable, cost: readonly CostEntry[]): number {
+  let total = 0
+  for (let a = 0; a < cost.length; a++) total += cost[a]!.amount * priceOf(prices, cost[a]!.color)
+  return total
 }
 
-/** Deduct every line of `cost` from the treasury (clamped at 0). Call only after {@link canAffordTreasury}. */
-export function spendTreasury(t: TreasuryStore, cost: readonly CostEntry[]): void {
-  for (let a = 0; a < cost.length; a++) {
-    const i = treasuryIndexOf(t, cost[a]!.color)
-    if (i < 0) continue
-    t.amount[i] = Math.max(0, t.amount[i]! - cost[a]!.amount)
-  }
+/**
+ * The upkeep sink (G6): once per {@link UPKEEP_CADENCE} ticks, drain every building's per-type
+ * `upkeep` from the credit balance, floored at zero. Nothing stalls at zero credits — upkeep is
+ * pressure, not a hard failure — and the drain is a single integer subtraction per cadence.
+ * Between cadences the per-tick cost is one integer increment and compare. No alert is raised when
+ * upkeep outruns income (deliberately skipped this pass — the balance visibly sagging in the HUD
+ * is the signal; a rate-aware alert can come later if that proves too quiet).
+ */
+function updateUpkeep(state: GameState): void {
+  const t = state.treasury
+  if (++t.upkeepTimer < UPKEEP_CADENCE) return
+  t.upkeepTimer = 0
+  const store = state.buildings
+  let due = 0
+  for (let b = 0; b < store.count; b++) due += store.upkeep[b]!
+  if (due > 0) t.credits = t.credits > due ? t.credits - due : 0
+}
+
+/** True if the balance can cover the credit value of `cost`. Off the hot path. */
+export function canAffordTreasury(
+  t: TreasuryStore,
+  prices: PriceTable,
+  cost: readonly CostEntry[],
+): boolean {
+  return t.credits >= costCredits(prices, cost)
+}
+
+/** Deduct the credit value of `cost` (clamped at 0). Call only after {@link canAffordTreasury}. */
+export function spendTreasury(
+  t: TreasuryStore,
+  prices: PriceTable,
+  cost: readonly CostEntry[],
+): void {
+  t.credits = Math.max(0, t.credits - costCredits(prices, cost))
 }
 
 // --- Game config: new-game settings that tune the rules ---------------------
@@ -1823,17 +1871,18 @@ export function createGameConfig(): GameConfig {
   return { buildRefundPermille: 1000 }
 }
 
-/** Refund `refund` scaled by the config's permille into the treasury (used on removal). */
+/**
+ * Refund the credit value of `refund` scaled by the config's permille into the treasury (used on
+ * removal). The whole credit total is scaled then floored, so the refund stays an exact integer.
+ */
 export function refundTreasury(
   t: TreasuryStore,
   config: GameConfig,
+  prices: PriceTable,
   refund: readonly CostEntry[],
 ): void {
   const per = Math.max(0, config.buildRefundPermille)
-  for (let a = 0; a < refund.length; a++) {
-    const back = Math.floor((refund[a]!.amount * per) / 1000)
-    depositTreasury(t, refund[a]!.color, back)
-  }
+  creditTreasury(t, Math.floor((costCredits(prices, refund) * per) / 1000))
 }
 
 export interface GameState {
@@ -1849,8 +1898,13 @@ export interface GameState {
   readonly villages: VillageStore
   /** The live research progression — labs consume packs to complete the active technology. */
   readonly research: ResearchStore
-  /** The global build-cost bank spent on placement and refilled by depots. */
+  /** The single-currency credit balance spent on placement and earned at depots. */
   readonly treasury: TreasuryStore
+  /**
+   * Colour → credit price table (host-computed from the recipe DAG, re-supplied each load; not
+   * serialized). The sim reads it to value build costs and depot sales in credits.
+   */
+  readonly prices: PriceTable
   /** Cargo cannons — long-haul artillery firing resource payloads to their linked silos. */
   readonly cannons: CannonStore
   /** Shells in flight from cannons to silos (transient projectiles). */
@@ -1868,6 +1922,7 @@ export function createGameState(moveEvery = 60): GameState {
     villages: createVillageStore(),
     research: createResearchStore(),
     treasury: createTreasuryStore(),
+    prices: createPriceTable(),
     cannons: createCannonStore(),
     shells: createShellStore(),
     config: createGameConfig(),
@@ -1946,6 +2001,8 @@ export interface BuildingSnapshot {
    * (and in pre-richness saves → treated as {@link NONE}, so a legacy extractor simply never depletes).
    */
   readonly anchorKey?: number
+  /** Per-building upkeep in credits (G6). Absent in pre-upkeep saves → treated as 0 (free). */
+  readonly upkeep?: number
   readonly craftEvery: number
   readonly craftTimer: number
   readonly slots: readonly SlotSnapshot[]
@@ -1969,22 +2026,48 @@ export interface VillageSnapshot {
   readonly entries: readonly VillageEntrySnapshot[]
 }
 
-/** The treasury bank: its distinct resource colours and banked amounts, in dense index order. */
+/**
+ * The treasury: the single credit balance plus the upkeep cadence timer (G6). Byte-identical
+ * round-trip. The optional `entries` field is the LEGACY per-colour bank (pre-G6) — present only in
+ * old saves; see {@link loadTreasurySnapshot} for how it is converted to credits.
+ */
 export interface TreasurySnapshot {
-  readonly entries: readonly { readonly color: number; readonly amount: number }[]
+  /** Credit balance. Absent only in a legacy per-colour save (then derived from `entries`). */
+  readonly credits?: number
+  /** Ticks accumulated toward the next upkeep drain. Absent in pre-upkeep saves → 0. */
+  readonly upkeepTimer?: number
+  /**
+   * LEGACY per-colour bank (pre-G6): distinct colours + banked amounts. Present only in an old save
+   * that predates the credit economy; ignored once `credits` is present.
+   */
+  readonly entries?: readonly { readonly color: number; readonly amount: number }[]
 }
 
-/** Capture the treasury as a plain snapshot (dense index order → byte-identical round-trip). */
+/** Capture the treasury as a plain snapshot (credit balance + upkeep timer → byte-identical round-trip). */
 export function serializeTreasury(t: TreasuryStore): TreasurySnapshot {
-  const entries: { color: number; amount: number }[] = []
-  for (let i = 0; i < t.n; i++) entries.push({ color: t.color[i]!, amount: t.amount[i]! })
-  return { entries }
+  return { credits: t.credits, upkeepTimer: t.upkeepTimer }
 }
 
-/** Load a treasury snapshot into an existing store in place (systems close over the store). */
-export function loadTreasurySnapshot(t: TreasuryStore, snap: TreasurySnapshot): void {
-  t.n = 0
-  for (const e of snap.entries) depositTreasury(t, e.color, e.amount)
+/**
+ * Load a treasury snapshot into an existing store in place (systems close over the store). A current
+ * save carries `credits` directly. A LEGACY per-colour save (pre-G6, only `entries`) is migrated by
+ * SELLING every banked unit at its current price — `credits = Σ amount × price(colour)` — the same
+ * rule a depot deposit uses, so an old bank converts to exactly what those goods are now worth. The
+ * price table must already be loaded (the host supplies it before restoring a save).
+ */
+export function loadTreasurySnapshot(
+  t: TreasuryStore,
+  prices: PriceTable,
+  snap: TreasurySnapshot,
+): void {
+  t.upkeepTimer = Math.max(0, Math.floor(snap.upkeepTimer ?? 0))
+  if (snap.credits !== undefined) {
+    t.credits = Math.max(0, Math.floor(snap.credits))
+    return
+  }
+  let credits = 0
+  for (const e of snap.entries ?? []) credits += Math.max(0, e.amount) * priceOf(prices, e.color)
+  t.credits = credits
 }
 
 /**
@@ -2008,7 +2091,7 @@ export interface GameStateSnapshot {
   readonly deposits?: readonly (readonly [number, number])[]
   readonly villages: VillageSnapshot
   readonly research: ResearchSnapshot
-  /** The build-cost bank. Absent in pre-treasury saves → loads as empty. */
+  /** The credit balance + upkeep timer. Absent in pre-treasury saves → loads as empty (0 credits). */
   readonly treasury?: TreasurySnapshot
   /** New-game rule settings. Absent in pre-treasury saves → loads as defaults. */
   readonly config?: GameConfig
@@ -2062,6 +2145,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       silo: store.silo[b]!,
       recipe: store.recipe[b]!,
       anchorKey: store.anchorKey[b]!,
+      upkeep: store.upkeep[b]!,
       craftEvery: store.craftEvery[b]!,
       craftTimer: store.craftTimer[b]!,
       slots,
@@ -2192,6 +2276,7 @@ export function loadGameState(
     store.silo[b] = bldg.silo ?? 0
     store.recipe[b] = bldg.recipe ?? 0
     store.anchorKey[b] = bldg.anchorKey ?? NONE
+    store.upkeep[b] = bldg.upkeep ?? 0
     store.craftEvery[b] = bldg.craftEvery
     store.craftTimer[b] = bldg.craftTimer
     store.slotN[b] = bldg.slots.length
@@ -2265,8 +2350,9 @@ export function loadGameState(
   loadResearchSnapshot(state.research, snap.research)
 
   // Treasury + config: mutate in place too. Both are optional so a pre-treasury save loads as an
-  // empty bank with default rules.
-  loadTreasurySnapshot(state.treasury, snap.treasury ?? { entries: [] })
+  // empty balance with default rules. A legacy per-colour bank is converted to credits via the
+  // price table (already supplied by the host before the load — see loadTreasurySnapshot).
+  loadTreasurySnapshot(state.treasury, state.prices, snap.treasury ?? {})
   state.config.buildRefundPermille =
     snap.config?.buildRefundPermille ?? createGameConfig().buildRefundPermille
 }
@@ -2316,6 +2402,8 @@ export interface PlaceBuildingCommand {
   readonly silo?: boolean
   /** Build cost charged from the treasury; the placement is dropped if unaffordable. Omitted = free. */
   readonly cost?: readonly CostEntry[]
+  /** Per-cadence upkeep in credits (see {@link UPKEEP_CADENCE}). Omitted = 0 (free to run). */
+  readonly upkeep?: number
 }
 
 /** Place a conveyor running from tile A to tile B. */
@@ -2425,6 +2513,8 @@ export interface PlaceCrafterCommand {
    * the terrain gate, so a placement blocked by terrain is never charged. Omitted = free.
    */
   readonly cost?: readonly CostEntry[]
+  /** Per-cadence upkeep in credits (see {@link UPKEEP_CADENCE}). Omitted = 0 (free to run). */
+  readonly upkeep?: number
 }
 
 /**
@@ -2610,6 +2700,7 @@ function copyBuilding(s: BuildingStore, src: number, dst: number): void {
   s.craftEvery[dst] = s.craftEvery[src]!
   s.craftTimer[dst] = s.craftTimer[src]!
   s.anchorKey[dst] = s.anchorKey[src]!
+  s.upkeep[dst] = s.upkeep[src]!
   s.slotN[dst] = s.slotN[src]!
   for (let k = 0; k < MAX_SLOTS; k++) {
     s.slotColor[dst * MAX_SLOTS + k] = s.slotColor[src * MAX_SLOTS + k]!
@@ -2665,8 +2756,8 @@ function removeBuilding(api: ModApi, store: BuildingStore, g: BeltGrid, b: numbe
  */
 function charge(state: GameState, cost: readonly CostEntry[] | undefined): boolean {
   if (cost === undefined || cost.length === 0) return true
-  if (!canAffordTreasury(state.treasury, cost)) return false
-  spendTreasury(state.treasury, cost)
+  if (!canAffordTreasury(state.treasury, state.prices, cost)) return false
+  spendTreasury(state.treasury, state.prices, cost)
   return true
 }
 
@@ -2726,6 +2817,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
           storeSlots(accepts),
           cmd.depot ? 1 : 0,
           cmd.silo ? 1 : 0,
+          cmd.upkeep ?? 0,
         )
         relinkUnlinkedPorts(g, state.buildings)
         // A lab is a store the research system drains its packs from; anchor it by tile.
@@ -2847,6 +2939,9 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         1,
         cmd.craftEvery,
         slots,
+        0,
+        0,
+        cmd.upkeep ?? 0,
       )
       state.buildings.recipe[b] = cmd.recipe ?? 0
       // A terrain-gated crafter is an extractor: cache its anchor tile so the depletion hot path can
@@ -2950,7 +3045,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       const t = tileAt(g, cmd.x, cmd.y)
       if (t !== NONE) {
         removeBeltTile(api, g, t)
-        if (cmd.refund) refundTreasury(state.treasury, state.config, cmd.refund)
+        if (cmd.refund) refundTreasury(state.treasury, state.config, state.prices, cmd.refund)
         return
       }
       const b = buildingAt(state.buildings, cmd.x, cmd.y)
@@ -2960,7 +3055,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         const c = cannonAt(state.cannons, cmd.x, cmd.y)
         if (c !== NONE) removeCannon(state.cannons, c)
         removeBuilding(api, state.buildings, g, b)
-        if (cmd.refund) refundTreasury(state.treasury, state.config, cmd.refund)
+        if (cmd.refund) refundTreasury(state.treasury, state.config, state.prices, cmd.refund)
       }
       return
     }
@@ -3339,11 +3434,15 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
   }
 
   const beltSystem: System = (gw) => {
-    updateBelts(gw, api, state.grid, state.buildings, state.treasury, state.deposits)
+    updateBelts(gw, api, state.grid, state.buildings, state.treasury, state.prices, state.deposits)
   }
 
   const villageSystem: System = () => {
     updateVillages(state)
+  }
+
+  const upkeepSystem: System = () => {
+    updateUpkeep(state)
   }
 
   const researchSystem: System = () => {
@@ -3354,5 +3453,5 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
     updateCannons(gw, api, state)
   }
 
-  return [commandSystem, beltSystem, cannonSystem, villageSystem, researchSystem]
+  return [commandSystem, beltSystem, cannonSystem, villageSystem, researchSystem, upkeepSystem]
 }

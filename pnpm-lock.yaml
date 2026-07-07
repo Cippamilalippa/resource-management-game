@@ -60,7 +60,11 @@ importers:
         specifier: 9.0.10
         version: 9.0.10
 
-  apps/balance: {}
+  apps/balance:
+    dependencies:
+      '@factory/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
 
   apps/game:
     dependencies:
@@ -104,6 +108,9 @@ importers:
       '@factory/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@factory/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
 
   packages/engine:
     dependencies:

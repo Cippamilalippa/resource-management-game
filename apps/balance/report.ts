@@ -2,6 +2,7 @@
  * Turn a {@link Model} into human-readable tables. Pure string builders — the CLI decides what to
  * print. Kept dumb on purpose: all the judgement lives in `model.ts`.
  */
+import { computeItemPrices } from '@factory/shared'
 import type { BalanceConfig } from './config.ts'
 import { machineBill, tierCurve, tierFootprint, type Model } from './model.ts'
 import type { Dataset } from './types.ts'
@@ -23,14 +24,19 @@ function rawSummary(raw: ReadonlyMap<string, number>): string {
 
 const short = (id: string): string => id.replace(/^(item|recipe|building)\./, '')
 
-/** Per-item cost table, ordered by tier then composite so the curve reads top-to-bottom. */
-export function itemTable(model: Model): string {
+/**
+ * Per-item cost table, ordered by tier then composite so the curve reads top-to-bottom. The PRICE
+ * column is the in-game integer credit price (G6), computed by the SAME shared pricing formula the
+ * game host loads into the sim — so what this report shows is exactly what a depot pays.
+ */
+export function itemTable(model: Model, data: Dataset): string {
+  const prices = computeItemPrices(data.recipes, { categorySpeed: data.categorySpeed })
   const rows = [...model.costs.values()].sort(
     (a, b) => a.tier - b.tier || a.composite - b.composite || a.item.localeCompare(b.item),
   )
   const lines = [
-    `${pad('ITEM', 22)}${pad('TIER', 6)}${pad('LABOR(s)', 11)}${pad('COMPOSITE', 11)}RAW COST`,
-    '-'.repeat(90),
+    `${pad('ITEM', 22)}${pad('TIER', 6)}${pad('LABOR(s)', 11)}${pad('COMPOSITE', 11)}${pad('PRICE', 8)}RAW COST`,
+    '-'.repeat(98),
   ]
   for (const c of rows) {
     lines.push(
@@ -38,6 +44,7 @@ export function itemTable(model: Model): string {
         pad(String(c.tier), 6) +
         pad(c.laborSeconds.toFixed(2), 11) +
         pad(c.composite.toFixed(2), 11) +
+        pad(`${prices.get(c.item)?.price ?? 1}¢`, 8) +
         rawSummary(c.raw),
     )
   }

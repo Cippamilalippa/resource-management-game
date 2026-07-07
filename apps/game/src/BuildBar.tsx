@@ -4,6 +4,7 @@ import { blueprintStore } from './blueprintStore.ts'
 import { Icon } from './Icon.tsx'
 import { GROUP_ICON, iconForItem } from './buildIcons.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
+import { creditValueOf } from './resources.ts'
 
 /** Display labels for each tool kind; unknown kinds fall back to the raw kind string. */
 const GROUP_LABEL: Record<string, string> = {
@@ -87,10 +88,23 @@ interface DetailRow {
   readonly costs?: readonly { readonly color: number; readonly amount: number }[]
 }
 
-/** The build-cost row for an item, or nothing when it is free. Belt cost is per tile. */
+/**
+ * The build-cost row for an item (its credit value, with the authored item lines as swatches),
+ * plus an upkeep row when it drains credits while standing. Empty when free. Belt cost is per tile.
+ */
 function costRow(item: BuildItem): DetailRow[] {
-  if (!item.cost || item.cost.length === 0) return []
-  return [{ label: item.kind === 'belt' ? 'Cost / tile' : 'Cost', value: '', costs: item.cost }]
+  const rows: DetailRow[] = []
+  if (item.cost && item.cost.length > 0) {
+    rows.push({
+      label: item.kind === 'belt' ? 'Cost / tile' : 'Cost',
+      value: `${creditValueOf(item.cost)}¢`,
+      costs: item.cost,
+    })
+  }
+  if (item.upkeep && item.upkeep > 0) {
+    rows.push({ label: 'Upkeep', value: `${item.upkeep}¢ / 30s` })
+  }
+  return rows
 }
 
 /** The stat rows shown in the hover panel for a single placeable item. */
@@ -177,6 +191,7 @@ function DetailPanel({ hover }: { hover: Hover }): React.JSX.Element {
                     <span className="buildbar-detail-cost-amt">{c.amount}</span>
                   </span>
                 ))}
+                {row.value && <span className="buildbar-detail-cost-amt">= {row.value}</span>}
               </span>
             ) : row.swatches ? (
               <span className="buildbar-detail-swatches">

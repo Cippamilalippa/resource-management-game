@@ -18,7 +18,10 @@ import {
   CANNON_RANGE,
   buildingAt,
   canAffordTreasury,
+  costCredits,
   depositRichnessAt,
+  priceOf,
+  treasuryCredits,
   type BuildingStore,
   type CostEntry,
   type GameState,
@@ -140,26 +143,24 @@ export function researchProgress(state: GameState): ResearchProgress {
   }
 }
 
-/** One banked resource in the build-cost treasury: its colour and how many units are held. */
-export interface TreasuryBalance {
-  readonly color: number
-  readonly amount: number
+/** The current credit balance, for the always-visible treasury readout. Read-only. */
+export function treasuryCreditsOf(state: GameState): number {
+  return treasuryCredits(state.treasury)
 }
 
-/**
- * The current treasury balances, in the bank's dense index order, for the build-cost readout. The
- * host maps each colour back to its item name/icon (the sim stays string-agnostic). Read-only.
- */
-export function treasuryBalances(state: GameState): TreasuryBalance[] {
-  const t = state.treasury
-  const out: TreasuryBalance[] = []
-  for (let i = 0; i < t.n; i++) out.push({ color: t.color[i]!, amount: t.amount[i]! })
-  return out
+/** The credit value of `cost` (Σ amount × price) — what a placement would actually charge. */
+export function costInCredits(state: GameState, cost: readonly CostEntry[]): number {
+  return costCredits(state.prices, cost)
+}
+
+/** The credit price one unit of resource `color` sells for at a depot (≥ 1). */
+export function sellPriceOf(state: GameState, color: number): number {
+  return priceOf(state.prices, color)
 }
 
 /** Whether the treasury can currently afford `cost` — for greying out an unaffordable buildable. */
 export function canAfford(state: GameState, cost: readonly CostEntry[]): boolean {
-  return canAffordTreasury(state.treasury, cost)
+  return canAffordTreasury(state.treasury, state.prices, cost)
 }
 
 /** Why a crafter is stalled, or a village is losing population. */

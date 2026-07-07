@@ -2374,14 +2374,8 @@ input:focus-visible,
   color: var(--good-text);
 }
 
-<<<<<<< HEAD
 /* ── Settings (gear button bottom-right + modal) ─────────────────────────────── */
 .settings-btn {
-=======
-/* ── Production statistics ("P-screen") ──────────────────────────────────── */
-/* Floating toggle button, left of the status-overlay button in the bottom-right row. */
-.stats-btn {
->>>>>>> worktree-agent-ab1c1f42b672f30bc
   position: absolute;
   right: 328px;
   bottom: 16px;
@@ -2397,29 +2391,16 @@ input:focus-visible,
     color var(--transition),
     border-color var(--transition);
 }
-<<<<<<< HEAD
 .settings-btn:hover {
   color: var(--text);
   border-color: var(--border-strong);
 }
 .settings-btn[aria-pressed='true'] {
-=======
-.stats-btn:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
-}
-.stats-btn[aria-pressed='true'] {
->>>>>>> worktree-agent-ab1c1f42b672f30bc
   color: var(--text);
   border-color: var(--accent);
 }
 
-<<<<<<< HEAD
 .settings-backdrop {
-=======
-/* Full-screen dimmer + centred modal, matching the save menu's "screen" treatment. */
-.stats-modal-backdrop {
->>>>>>> worktree-agent-ab1c1f42b672f30bc
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -2430,19 +2411,13 @@ input:focus-visible,
   background: rgba(8, 10, 16, 0.55);
   backdrop-filter: blur(2px);
 }
-<<<<<<< HEAD
 
 .settings-modal {
   width: 460px;
-=======
-.stats-modal {
-  width: 900px;
->>>>>>> worktree-agent-ab1c1f42b672f30bc
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 64px);
   display: flex;
   flex-direction: column;
-<<<<<<< HEAD
   background: var(--surface-grad), rgba(var(--surface-rgb), 0.97);
   border: 1px solid var(--border-strong);
   border-radius: 12px;
@@ -2589,7 +2564,53 @@ input:focus-visible,
 }
 .settings-toggle.on .settings-toggle-text {
   color: var(--text);
-=======
+}
+
+/* ── Production statistics ("P-screen") ──────────────────────────────────── */
+/* Floating toggle button, left of the status-overlay button in the bottom-right row. */
+.stats-btn {
+  position: absolute;
+  right: 328px;
+  bottom: 16px;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    color var(--transition),
+    border-color var(--transition);
+}
+.stats-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.stats-btn[aria-pressed='true'] {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Full-screen dimmer + centred modal, matching the save menu's "screen" treatment. */
+.stats-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 16, 0.55);
+  backdrop-filter: blur(2px);
+}
+.stats-modal {
+  width: 900px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
   padding: 16px 20px;
   box-shadow: var(--elev-2);
 }
@@ -2738,5 +2759,4 @@ input:focus-visible,
 }
 .stats-swatch-bad {
   background: var(--bad);
->>>>>>> worktree-agent-ab1c1f42b672f30bc
 }

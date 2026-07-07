@@ -57,3 +57,34 @@ export function resourceByColor(color: number): Resource | undefined {
 export function allResources(): readonly Resource[] {
   return all
 }
+
+// --- credit prices (G6) ------------------------------------------------------
+
+let priceByColor: ReadonlyMap<number, number> = new Map()
+
+/**
+ * Install the colour→credit price table the host computed from the recipe DAG (the same table the
+ * sim charges/credits with — see `ClientSim.prices`). Called once per session at boot, right after
+ * {@link setResources}. Read-only UI reference for cost rows and "sells for" readouts.
+ */
+export function setResourcePrices(
+  entries: readonly { readonly color: number; readonly price: number }[],
+): void {
+  const map = new Map<number, number>()
+  for (const e of entries) map.set(e.color >>> 0, e.price)
+  priceByColor = map
+}
+
+/** The credit price one unit of this colour sells for / costs, or `undefined` if unpriced. */
+export function priceForColor(color: number): number | undefined {
+  return priceByColor.get(color >>> 0)
+}
+
+/** The credit value of a `{ color, amount }` cost list (unpriced colours count 1, like the sim). */
+export function creditValueOf(
+  cost: readonly { readonly color: number; readonly amount: number }[],
+): number {
+  let total = 0
+  for (const c of cost) total += c.amount * (priceForColor(c.color) ?? 1)
+  return total
+}

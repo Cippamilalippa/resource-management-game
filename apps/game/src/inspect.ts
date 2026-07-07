@@ -288,6 +288,16 @@ function describeBuilding(
     // makes (recipe outputs) and what it holds/consumes (recipe inputs and plain stores).
     const b = buildingAt(buildings, px, py)
     if (b >= 0) {
+      // A depot is the sales sink: every belted-in item is sold, crediting its market price. Show
+      // the going rate for whatever the hovered depot's feed lines carry (the items currently
+      // waiting on its input ports) — the "sells for N¢" readout without listing the whole catalog.
+      if (buildings.depot[b]) {
+        stats.push({ kind: 'text', label: 'Sells', value: 'any belted item, at market price' })
+      }
+      // The per-cadence credit upkeep this building drains while standing (0 = free to run).
+      if (buildings.upkeep[b]! > 0) {
+        stats.push({ kind: 'text', label: 'Upkeep', value: `${buildings.upkeep[b]!}¢ / 30s` })
+      }
       if (buildings.crafts[b]) {
         stats.push({ kind: 'text', label: 'Craft rate', value: perSec(buildings.craftEvery[b]!) })
         // Recipe progress: ticks accrued this cadence out of the ticks needed to fire again (holds

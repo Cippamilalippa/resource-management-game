@@ -56,13 +56,13 @@ import {
   researchProgress,
   collectAlerts,
   productionFlows,
-  treasuryBalances,
+  treasuryCreditsOf,
   scenarioList,
   gameObjectives,
   type ObjectiveId,
 } from './gameLogic.ts'
 import { buildIconTextures, resourceIconTextures } from './iconTextures.ts'
-import { setResources } from './resources.ts'
+import { setResources, setResourcePrices } from './resources.ts'
 import './styles.css'
 
 /** Read a numeric prototype field, falling back when absent/ill-typed. */
@@ -106,10 +106,12 @@ interface RecipeFlow {
 function machineItems(
   machines: MachineIndex,
   costOf: (protoId: string) => { color: number; amount: number }[],
+  upkeepOf: (protoId: string) => number,
 ): BuildItem[] {
   const items: BuildItem[] = []
   for (const def of machines.defs) {
     const cost = costOf(def.id)
+    const upkeep = upkeepOf(def.id)
     items.push({
       id: def.id,
       name: def.name,
@@ -122,6 +124,7 @@ function machineItems(
       accepts: [],
       ...(def.extraction ? { extraction: true } : {}),
       ...(cost.length > 0 ? { cost } : {}),
+      ...(upkeep > 0 ? { upkeep } : {}),
       spawnEvery: 20,
       moveEvery: 1,
       produceEvery: def.recipes[0]?.craftEvery ?? 30,
@@ -223,6 +226,7 @@ function toBuildItems(prototypes: readonly ClientPrototype[], machines: MachineI
       ...(p.researchLab === true ? { researchLab: true } : {}),
       ...(p.depot === true ? { depot: true } : {}),
       ...(cost.length > 0 ? { cost } : {}),
+      ...(num(p, 'upkeep', 0) > 0 ? { upkeep: num(p, 'upkeep', 0) } : {}),
       spawnEvery: num(p, 'spawnEvery', 20),
       moveEvery: num(p, 'moveEvery', 1),
       produceEvery: num(p, 'produceEvery', 30),
@@ -232,7 +236,16 @@ function toBuildItems(prototypes: readonly ClientPrototype[], machines: MachineI
   }
   // One 'producer' tool per crafter building (its recipe is chosen after placement); its cost is
   // authored on the crafter prototype, resolved here by the same item→colour map.
-  items.push(...machineItems(machines, (id) => costOfProto(protoById.get(id))))
+  items.push(
+    ...machineItems(
+      machines,
+      (id) => costOfProto(protoById.get(id)),
+      (id) => {
+        const proto = protoById.get(id)
+        return proto ? num(proto, 'upkeep', 0) : 0
+      },
+    ),
+  )
   return items
 }
 
@@ -441,6 +454,9 @@ async function boot(): Promise<void> {
    */
   const startSession = async (origin: SimOrigin, initialPlayTimeSec = 0): Promise<void> => {
     const sim = await createSim(prototypes, discovered, origin)
+    // Install the colour→credit price table for UI readouts (cost rows, "sells for", encyclopedia).
+    setResourcePrices(sim.prices)
+    prevCreditsTick = -1 // fresh session: no bogus Δ/min swing on the first HUD sample
     productionHistory.reset() // a new world starts its production trend fresh
     utilizationStore.reset() // per-tile crafter windows don't carry over to a new world
     muteStore.reset() // muted tile keys belong to the previous world's tiles
@@ -792,6 +808,10 @@ async function boot(): Promise<void> {
   // Sum of village levels last refresh, to chime when any village grows a stage. -1 until first read
   // so loading into an already-grown town doesn't fire on the first sample.
   let prevVillageLevels = -1
+  // Credit balance + sim tick at the last HUD refresh, for the treasury strip's Δ/min readout.
+  // Tick -1 until the first sample so a fresh/loaded session shows no bogus initial swing.
+  let prevCredits = 0
+  let prevCreditsTick = -1
   let lastAlpha = 0
   let frames = 0
   let fps = 0
@@ -899,6 +919,16 @@ async function boot(): Promise<void> {
       // Diff this refresh's alert sources against the last one and fold any that appeared/
       // disappeared into the capped history log (app-side only; see `alertHistoryStore.ts`).
       alertHistoryStore.record(alerts)
+      // Credit balance + its recent rate: Δcredits over the sim ticks elapsed since the last HUD
+      // refresh, scaled to per-minute (3600 ticks at 60 tps). Read-only; a paused sim shows 0.
+      const credits = treasuryCreditsOf(sess.state)
+      const tickNow = sess.world.tick
+      const creditsPerMin =
+        prevCreditsTick >= 0 && tickNow > prevCreditsTick
+          ? ((credits - prevCredits) * (DEFAULT_TICK_RATE * 60)) / (tickNow - prevCreditsTick)
+          : 0
+      prevCredits = credits
+      prevCreditsTick = tickNow
       hudStore.set({
         research: buildResearchHud(sess),
         villages,
@@ -911,7 +941,8 @@ async function boot(): Promise<void> {
           label: OBJECTIVE_LABELS[o.id],
           done: o.done,
         })),
-        treasury: treasuryBalances(sess.state),
+        credits,
+        creditsPerMin,
       })
       // Refresh the inspector so a pinned/hovered object's live numbers stay current.
       sess.inspect.refresh()
