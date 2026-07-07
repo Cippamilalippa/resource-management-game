@@ -18,7 +18,8 @@
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 90 },
       { "item": "item.glass", "amount": 24 }
-    ]
+    ],
+    "goal": { "village": "building.village", "stage": 3 }
   },
   {
     "id": "scenario.sparse",
@@ -39,6 +40,7 @@
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 48 },
       { "item": "item.glass", "amount": 10 }
-    ]
+    ],
+    "goal": { "village": "building.village", "stage": 2 }
   }
 ]

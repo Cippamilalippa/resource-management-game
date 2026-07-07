@@ -87,4 +87,34 @@ export const sfx = {
     osc.start(now)
     osc.stop(now + v.dur + 0.02)
   },
+
+  /**
+   * A triumphant win fanfare (G5): a rising C-major arpeggio ending on the octave, each note a
+   * short triangle blip so it reads as celebratory rather than a single alert. Same lazy-context,
+   * mute and headless-safe gating as {@link play}; purely a UI cue, no sim contact.
+   */
+  playVictory: (): void => {
+    if (muted) return
+    const ac = audio()
+    if (!ac) return
+    if (ac.state === 'suspended') void ac.resume()
+    const base = ac.currentTime
+    // C5, E5, G5, C6 — a bright major arpeggio, notes spaced a beat apart.
+    const notes = [523.25, 659.25, 783.99, 1046.5]
+    for (let i = 0; i < notes.length; i++) {
+      const t = base + i * 0.13
+      const osc = ac.createOscillator()
+      const gain = ac.createGain()
+      osc.type = 'triangle'
+      osc.frequency.setValueAtTime(notes[i]!, t)
+      // The final octave rings a touch longer for a resolved, celebratory tail.
+      const dur = i === notes.length - 1 ? 0.6 : 0.3
+      gain.gain.setValueAtTime(0.0001, t)
+      gain.gain.exponentialRampToValueAtTime(0.2, t + 0.01)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur)
+      osc.connect(gain).connect(ac.destination)
+      osc.start(t)
+      osc.stop(t + dur + 0.03)
+    }
+  },
 }
