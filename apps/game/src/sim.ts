@@ -18,6 +18,7 @@ import type { DiscoveredModInfo } from '../electron/preload.ts'
 import {
   validateContent,
   itemColorPrices,
+  blockingTerrainIds,
   serializeGameState,
   type GameState,
 } from './gameLogic.ts'
@@ -61,6 +62,7 @@ interface BaseReadyHandle {
   newGame: (config?: { scenario?: string }) => void
   load: (snapshot: WorldSnapshot) => void
   setPrices: (entries: readonly { color: number; price: number }[]) => void
+  setBlockingTerrain: (ids: readonly string[]) => void
 }
 
 /**
@@ -154,6 +156,8 @@ export async function createSim(
     // Hand the sim the colour→credit price table BEFORE any origin is applied — the scene seeds
     // its starting balance through it, a legacy save converts through it (see headless bootstrap).
     ready.setPrices(prices)
+    // Likewise the impassable-terrain rule (water): derived from content, re-supplied each origin.
+    ready.setBlockingTerrain(blocking)
     if (origin.kind === 'load') {
       // Fast-forward the engine clock/RNG (the hash covers both), then hand the mod its state —
       // the same two-step `restore` the headless bootstrap performs.
@@ -187,6 +191,9 @@ export async function createSim(
   // The colour→credit price table, computed once from the recipe DAG (handed to the sim in the
   // `base:ready` callback below, which fires synchronously inside `runModScripts`).
   const prices = itemColorPrices(hostRegistry)
+  // The impassable-terrain ids (water) the sim blocks building on — handed over in the same
+  // `base:ready` callback, right after prices, so a new game or a load both apply the rule.
+  const blocking = blockingTerrainIds(hostRegistry)
   const mods: DiscoveredMod[] = discovered.map((d) => ({
     manifest: d.manifest,
     source: new BundledModSource(d.dir),

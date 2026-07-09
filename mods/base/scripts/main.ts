@@ -19,6 +19,7 @@ import type { ModApi } from '@factory/engine/scripting'
 import {
   createGameState,
   createGameSystems,
+  loadBlockingTerrain,
   loadGameState,
   loadPriceTable,
   type EntityData,
@@ -64,6 +65,13 @@ export interface BaseReady {
   readonly setPrices: (
     entries: readonly { readonly color: number; readonly price: number }[],
   ) => void
+  /**
+   * Supply the terrain ids the player cannot build on (impassable biomes like water — every `terrain`
+   * prototype flagged `blocksBuild`; see `content.ts`'s `blockingTerrainIds`). Call BEFORE
+   * `newGame`/`load`: the rule is derived from content, not saved, so a load recomputes it from the
+   * live registry exactly like the price table. The sim never sees the id — only the hashed type set.
+   */
+  readonly setBlockingTerrain: (ids: readonly string[]) => void
 }
 
 export default function init(api: ModApi): void {
@@ -80,6 +88,7 @@ export default function init(api: ModApi): void {
       loadGameState(api, state, snapshot.entities, blob)
     },
     setPrices: (entries) => loadPriceTable(state.prices, entries),
+    setBlockingTerrain: (ids) => loadBlockingTerrain(state.blockingTerrain, ids),
   }
   api.emit('base:ready', ready)
   api.log('base game init — registered command + belt systems')

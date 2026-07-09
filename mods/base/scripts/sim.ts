@@ -166,6 +166,71 @@ export function terrainTypeAt(terrain: TerrainGrid, x: number, y: number): numbe
   return terrain.get(tileKey(x, y)) ?? TERRAIN_NONE
 }
 
+/**
+ * The set of terrain *types* nothing can be built on (impassable biomes like water — any terrain
+ * whose prototype declares `blocksBuild`). Derived from the content, so it is NOT serialized; the
+ * host recomputes it from the registry each new-game/load via {@link loadBlockingTerrain}, exactly
+ * like the price table. Parallel to {@link TerrainGrid}, keyed by the same {@link terrainTypeOf}
+ * integer the grid stores, so a placement check is a single hashed lookup.
+ */
+export type BlockingTerrain = Set<number>
+
+/** Replace the blocking-terrain set from the host-supplied terrain ids (before newGame/load). */
+export function loadBlockingTerrain(set: BlockingTerrain, ids: readonly string[]): void {
+  set.clear()
+  for (const id of ids) set.add(terrainTypeOf(id))
+}
+
+/**
+ * Whether the tile (x, y) sits on build-blocking terrain (water). Mirrored by the app-side placement
+ * ghost so its red "blocked" preview agrees with what the sim rejects. A tile with no terrain, or a
+ * cosmetic/deposit terrain, returns false. Reads the world, never mutates it (sim → render, one-way).
+ */
+export function terrainBlocksBuild(state: GameState, x: number, y: number): boolean {
+  return state.blockingTerrain.has(terrainTypeAt(state.terrain, x, y))
+}
+
+/**
+ * How far beyond its own footprint (in tiles, on every side) a mining extractor reaches. A mine
+ * works its footprint expanded by this many tiles: it may be built on OR near a matching deposit and
+ * depletes every matching deposit tile inside that area (see {@link extractorAnchorInReach} and
+ * {@link runCrafters}). The placement ghost and the hover/selection outline draw this same perimeter,
+ * so what a player sees is exactly what the mine covers.
+ */
+export const EXTRACTOR_REACH = 1
+
+/**
+ * Terrain type recorded at packed tile `key`, or {@link TERRAIN_NONE}. The by-key twin of
+ * {@link terrainTypeAt}, for a caller already holding a packed key (an extractor's cached anchor).
+ */
+export function terrainTypeAtKey(terrain: TerrainGrid, key: number): number {
+  return terrain.get(key) ?? TERRAIN_NONE
+}
+
+/**
+ * Packed tile key of the first deposit within an extractor's reach — its footprint at (x, y) sized
+ * w×h, expanded by {@link EXTRACTOR_REACH} on every side — whose terrain type satisfies `matches`,
+ * scanned row-major (top-left first), or -1 if none is in reach. Shared by the sim's placement gate
+ * and the app-side ghost/recipe resolution so both agree on which deposit a mine adopts and covers.
+ * Allocation-free bounded scan (coverage is a footprint plus a one-tile ring).
+ */
+export function extractorAnchorInReach(
+  terrain: TerrainGrid,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  matches: (terrainType: number) => boolean,
+): number {
+  for (let ty = y - EXTRACTOR_REACH; ty < y + h + EXTRACTOR_REACH; ty++) {
+    for (let tx = x - EXTRACTOR_REACH; tx < x + w + EXTRACTOR_REACH; tx++) {
+      const tt = terrain.get(tileKey(tx, ty))
+      if (tt !== undefined && matches(tt)) return tileKey(tx, ty)
+    }
+  }
+  return -1
+}
+
 // --- Deposits: finite richness (G1) -----------------------------------------
 
 /**
@@ -324,6 +389,13 @@ export interface BeltGrid {
   moveTimer: number
   /** Base-cycles elapsed; a tile is due to move when `moveCount % dueEvery === 0`. */
   moveCount: number
+  /**
+   * Transient batch flag: set when a placement command changes topology, so the O(n)
+   * {@link rebuildTopology} runs once at the end of the command batch instead of once per
+   * command (turning a bulk build — blueprint paste, map load — from O(n²) into O(n)).
+   * Never serialized: always cleared before the belt system reads `nbr`/`order`.
+   */
+  topoDirty: number
 }
 
 /**
@@ -363,6 +435,7 @@ export function createBeltGrid(moveEvery: number): BeltGrid {
     moveEvery: Math.max(1, moveEvery),
     moveTimer: 0,
     moveCount: 0,
+    topoDirty: 0,
   }
 }
 
@@ -615,9 +688,42 @@ function rebuildTopology(g: BeltGrid): void {
   }
 
   // out-degree over successor edges (PLAIN/OUTPUT -> faced neighbour; SPLITTER -> all
-  // neighbours; INPUT -> none). Kahn's algorithm peels sinks first.
+  // neighbours; INPUT -> none). Kahn's algorithm peels sinks first. To keep the whole rebuild
+  // O(n) rather than O(n²) — it runs once per placement, so an O(n²) scan turns map construction
+  // super-linear — we first bucket every successor edge into a flat predecessor adjacency (CSR).
+  // Peeling a sink then visits only its real predecessors instead of rescanning all n tiles.
   const outDeg = new Int32Array(n)
-  for (let t = 0; t < n; t++) outDeg[t] = successorCount(g, t)
+  const predCount = new Int32Array(n) // in-degree per tile, used to size the CSR below
+  for (let s = 0; s < n; s++) {
+    outDeg[s] = successorCount(g, s)
+    if (kind[s] === KIND_INPUT) continue
+    if (kind[s] === KIND_SPLITTER) {
+      for (let d = 0; d < 4; d++) {
+        const t = nbr[s * 4 + d]!
+        if (t !== NONE && !hasForwardEdge(g, t, s)) predCount[t]!++
+      }
+    } else {
+      const t = nbr[s * 4 + face[s]!]!
+      if (t !== NONE) predCount[t]!++
+    }
+  }
+  // CSR offsets: predOff[t]..predOff[t+1] is tile t's slice of predList.
+  const predOff = new Int32Array(n + 1)
+  for (let t = 0; t < n; t++) predOff[t + 1] = predOff[t]! + predCount[t]!
+  const predList = new Int32Array(predOff[n]!)
+  const cursor = predOff.slice(0, n) // per-tile write head; ascending s preserves prior tie-order
+  for (let s = 0; s < n; s++) {
+    if (kind[s] === KIND_INPUT) continue
+    if (kind[s] === KIND_SPLITTER) {
+      for (let d = 0; d < 4; d++) {
+        const t = nbr[s * 4 + d]!
+        if (t !== NONE && !hasForwardEdge(g, t, s)) predList[cursor[t]!++] = s
+      }
+    } else {
+      const t = nbr[s * 4 + face[s]!]!
+      if (t !== NONE) predList[cursor[t]!++] = s
+    }
+  }
 
   let head = 0
   let tail = 0
@@ -626,9 +732,10 @@ function rebuildTopology(g: BeltGrid): void {
   }
   while (head < tail) {
     const t = order[head++]!
-    // Decrement out-degree of every predecessor that feeds t.
-    for (let s = 0; s < n; s++) {
-      if (feeds(g, s, t) && outDeg[s]! > 0) {
+    // Decrement out-degree of every predecessor that feeds t (ascending s, matching the old scan).
+    for (let k = predOff[t]!; k < predOff[t + 1]!; k++) {
+      const s = predList[k]!
+      if (outDeg[s]! > 0) {
         outDeg[s]!--
         if (outDeg[s] === 0) order[tail++] = s
       }
@@ -687,18 +794,12 @@ function hasForwardEdge(g: BeltGrid, s: number, t: number): boolean {
 }
 
 /**
- * Whether s feeds t as a *successor* (downstream) edge, used to order tiles sinks-first.
- * A splitter never counts an edge to a neighbour that itself feeds the splitter: that
- * neighbour is the source, not a sink. Counting it would forge a 2-cycle (splitter <-> its
- * feed tile) that defeats the topological sort, leaving the feed belt to be processed
- * upstream-first — which makes an item cascade across every feed tile in a single cycle
- * (it teleports from the source straight to the splitter instead of riding the belt).
+ * The successor (downstream) edge relation, `feeds(s, t)`, is enumerated inline in
+ * {@link rebuildTopology}: a plain/output tile feeds the tile it faces; a splitter feeds every
+ * adjacent belt tile *except* one that itself feeds the splitter (that neighbour is the source,
+ * not a sink — counting it would forge a 2-cycle that defeats the topological sort); an input
+ * feeds nothing. {@link successorCount} counts those same edges.
  */
-function feeds(g: BeltGrid, s: number, t: number): boolean {
-  if (!hasForwardEdge(g, s, t)) return false
-  if (g.kind[s] === KIND_SPLITTER && hasForwardEdge(g, t, s)) return false
-  return true
-}
 
 /** Number of successor (downstream) edges out of tile t. */
 function successorCount(g: BeltGrid, t: number): number {
@@ -1672,11 +1773,85 @@ function stepBelts(
  * to zero greys the deposit's terrain entity in place. Ordinary machines (anchorKey === NONE) skip
  * all of this — the richness Map is never touched for them.
  */
+/**
+ * Pooled richness a finite extractor `b` can draw on: the sum of remaining units across every deposit
+ * tile of its resource within reach (its footprint expanded by {@link EXTRACTOR_REACH}). Returns
+ * {@link RICHNESS_INFINITE} for an ordinary machine (no anchor), an anchor that lost its terrain, or
+ * when any covered deposit is itself infinite — in every one of those cases the machine never depletes.
+ * The resource terrain type is read from the extractor's cached anchor tile. Allocation-free bounded
+ * scan (coverage is a footprint plus a one-tile ring), matching {@link extractorAnchorInReach}'s order.
+ */
+function extractorReserve(
+  store: BuildingStore,
+  b: number,
+  terrain: TerrainGrid,
+  deposits: DepositStore,
+): number {
+  const ak = store.anchorKey[b]!
+  if (ak === NONE) return RICHNESS_INFINITE
+  const resource = terrain.get(ak)
+  if (resource === undefined) return RICHNESS_INFINITE
+  const x = store.bx[b]!
+  const y = store.by[b]!
+  const w = store.bw[b]!
+  const h = store.bh[b]!
+  let pooled = 0
+  for (let ty = y - EXTRACTOR_REACH; ty < y + h + EXTRACTOR_REACH; ty++) {
+    for (let tx = x - EXTRACTOR_REACH; tx < x + w + EXTRACTOR_REACH; tx++) {
+      if (terrain.get(tileKey(tx, ty)) !== resource) continue
+      const r = deposits.remaining.get(tileKey(tx, ty))
+      if (r === undefined) return RICHNESS_INFINITE // a covered infinite deposit — never depletes
+      pooled += r
+    }
+  }
+  return pooled
+}
+
+/**
+ * Draw `amount` units from extractor `b`'s covered deposit tiles — its footprint expanded by
+ * {@link EXTRACTOR_REACH}, scanned row-major, taking as much as each non-empty tile holds before
+ * spilling to the next — and grey each deposit's terrain entity the instant it exhausts. The mirror
+ * of the pooled read in {@link extractorReserve}; called only when that read confirmed finite stock.
+ */
+function depleteExtractor(
+  gw: GameWorld,
+  store: BuildingStore,
+  b: number,
+  terrain: TerrainGrid,
+  deposits: DepositStore,
+  amount: number,
+): void {
+  const resource = terrain.get(store.anchorKey[b]!)
+  if (resource === undefined) return
+  const x = store.bx[b]!
+  const y = store.by[b]!
+  const w = store.bw[b]!
+  const h = store.bh[b]!
+  let left = amount
+  for (let ty = y - EXTRACTOR_REACH; ty < y + h + EXTRACTOR_REACH && left > 0; ty++) {
+    for (let tx = x - EXTRACTOR_REACH; tx < x + w + EXTRACTOR_REACH && left > 0; tx++) {
+      const key = tileKey(tx, ty)
+      if (terrain.get(key) !== resource) continue
+      const r = deposits.remaining.get(key)
+      if (r === undefined || r <= RICHNESS_EXHAUSTED) continue
+      const take = r < left ? r : left
+      const rest = r - take
+      deposits.remaining.set(key, rest)
+      left -= take
+      if (rest === RICHNESS_EXHAUSTED) {
+        const teid = deposits.eid.get(key)
+        if (teid !== undefined) gw.components.Renderable.color[teid] = EXHAUSTED_COLOR
+      }
+    }
+  }
+}
+
 function runCrafters(
   gw: GameWorld,
   api: ModApi,
   store: BuildingStore,
   deposits: DepositStore,
+  terrain: TerrainGrid,
 ): void {
   const n = store.count
   for (let b = 0; b < n; b++) {
@@ -1712,16 +1887,14 @@ function runCrafters(
         break
       }
     }
-    // Finite-deposit gate: read the richness under the extractor's cached anchor once. `rem` stays
-    // RICHNESS_INFINITE (-1) for ordinary machines and infinite/legacy deposits, which never deplete.
+    // Finite-deposit gate: pool the richness across every matching deposit tile in the extractor's
+    // reach (its footprint plus a one-tile ring). `rem` stays RICHNESS_INFINITE (-1) for ordinary
+    // machines and infinite/legacy deposits, which never deplete; an all-exhausted area stalls it.
     let rem = RICHNESS_INFINITE
     const ak = store.anchorKey[b]!
     if (ak !== NONE) {
-      const r = deposits.remaining.get(ak)
-      if (r !== undefined) {
-        rem = r
-        if (r <= RICHNESS_EXHAUSTED) canCraft = false // exhausted: stall like a missing input
-      }
+      rem = extractorReserve(store, b, terrain, deposits)
+      if (rem !== RICHNESS_INFINITE && rem <= RICHNESS_EXHAUSTED) canCraft = false // area spent: stall
     }
     if (!canCraft) {
       // Hold the timer at the cadence so we retry next tick without re-accumulating.
@@ -1742,15 +1915,9 @@ function runCrafters(
         extracted += amt // units pulled from the deposit this craft (recipe outputs)
       }
     }
-    // Deplete the deposit under a finite extractor by what it produced; grey the tile on exhaustion.
-    if (rem > RICHNESS_EXHAUSTED) {
-      const left = rem - extracted > RICHNESS_EXHAUSTED ? rem - extracted : RICHNESS_EXHAUSTED
-      deposits.remaining.set(ak, left)
-      if (left === RICHNESS_EXHAUSTED) {
-        const teid = deposits.eid.get(ak)
-        if (teid !== undefined) gw.components.Renderable.color[teid] = EXHAUSTED_COLOR
-      }
-    }
+    // Deplete the covered deposits of a finite extractor by what it produced (spilling tile to tile),
+    // greying each on exhaustion. `rem > 0` only when the anchored area holds finite, non-empty stock.
+    if (rem > RICHNESS_EXHAUSTED) depleteExtractor(gw, store, b, terrain, deposits, extracted)
     // Fired this cadence: mark it working. Stays set through the accumulation ticks above.
     api.setActive(store.eid[b]!, true)
   }
@@ -1807,13 +1974,14 @@ function updateBelts(
   treasury: TreasuryStore,
   prices: PriceTable,
   deposits: DepositStore,
+  terrain: TerrainGrid,
 ): void {
   if (++g.moveTimer >= g.moveEvery) {
     g.moveTimer = 0
     stepBelts(gw, api, g, store, treasury, prices)
     g.moveCount++
   }
-  runCrafters(gw, api, store, deposits)
+  runCrafters(gw, api, store, deposits, terrain)
   extractFromOutputs(api, g, store)
 }
 
@@ -2009,6 +2177,11 @@ export interface GameState {
   readonly grid: BeltGrid
   /** The passive terrain layer that gates where crafters may be built. */
   readonly terrain: TerrainGrid
+  /**
+   * Terrain types nothing can be built on (impassable biomes like water). Derived from the content
+   * and re-supplied each new-game/load (not serialized), like {@link GameState.prices}.
+   */
+  readonly blockingTerrain: BlockingTerrain
   /** Finite deposit richness: units remaining under each deposit tile (absent = infinite). */
   readonly deposits: DepositStore
   /** The resource-holding buildings (crafters and stores). */
@@ -2036,6 +2209,7 @@ export function createGameState(moveEvery = 60): GameState {
   return {
     grid: createBeltGrid(moveEvery),
     terrain: new Map(),
+    blockingTerrain: new Set(),
     deposits: createDepositStore(),
     buildings: createBuildingStore(),
     villages: createVillageStore(),
@@ -2458,6 +2632,7 @@ export function loadGameState(
   relinkUnlinkedPorts(g, store)
   rebuildTopology(g)
   recomputeCadence(g)
+  g.topoDirty = 0
   g.moveTimer = bs.moveTimer
   g.moveCount = bs.moveCount
 
@@ -2888,6 +3063,8 @@ function removeBeltTile(api: ModApi, g: BeltGrid, t: number): void {
   }
   rebuildTopology(g)
   recomputeCadence(g)
+  // This rebuild already reflects the whole grid, so no batch flush is owed.
+  g.topoDirty = 0
 }
 
 /** Copy every per-building field (including stockpile slots) from `src` to `dst`. */
@@ -2967,9 +3144,9 @@ function charge(state: GameState, cost: readonly CostEntry[] | undefined): boole
 
 /**
  * Whether the w×h footprint anchored at (x, y) is free for a building/crafter: every tile must be
- * empty of belt-grid tiles (belts/ports/splitters) and of any registered building. Mirrored by the
- * app-side placement ghost so its red "blocked" preview agrees with what the sim would reject — a
- * building never overlaps a belt or another building. Off the hot path (one player placement).
+ * empty of belt-grid tiles (belts/ports/splitters), of any registered building, and of build-blocking
+ * terrain (water). Mirrored by the app-side placement ghost so its red "blocked" preview agrees with
+ * what the sim would reject. Off the hot path (one player placement).
  */
 function footprintClear(state: GameState, x: number, y: number, w: number, h: number): boolean {
   const g = state.grid
@@ -2977,6 +3154,7 @@ function footprintClear(state: GameState, x: number, y: number, w: number, h: nu
     for (let dx = 0; dx < w; dx++) {
       if (tileAt(g, x + dx, y + dy) !== NONE) return false
       if (buildingAt(state.buildings, x + dx, y + dy) !== NONE) return false
+      if (terrainBlocksBuild(state, x + dx, y + dy)) return false
     }
   }
   return true
@@ -3005,6 +3183,7 @@ function demoteCapToBelt(api: ModApi, g: BeltGrid, p: number): void {
  */
 function undergroundEndpointClear(state: GameState, x: number, y: number): boolean {
   if (buildingAt(state.buildings, x, y) !== NONE) return false
+  if (terrainBlocksBuild(state, x, y)) return false // a cap can't surface on water (the tunnel passes under)
   const t = tileAt(state.grid, x, y)
   return t === NONE || state.grid.kind[t] === KIND_PLAIN
 }
@@ -3057,15 +3236,21 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       return
     }
     case 'place_belt': {
-      if (!charge(state, cmd.cost)) return
       const { dx, dy, length } = projectBelt(cmd.ax, cmd.ay, cmd.bx, cmd.by)
+      // Nothing builds on water: reject the whole run (before charging) if any tile of it would land
+      // on build-blocking terrain. The app previews this red; a tunnel is the way to cross — its
+      // buried mid-section never touches the water tile, only its caps must sit on clear ground.
+      for (let i = 0; i < length; i++) {
+        if (terrainBlocksBuild(state, cmd.ax + dx * i, cmd.ay + dy * i)) return
+      }
+      if (!charge(state, cmd.cost)) return
       // A forced facing (blueprint paste) wins over the direction projected from the drawn run.
       const face = cmd.face !== undefined ? cmd.face & 3 : dirOf(dx, dy)
       const period = Math.max(1, cmd.moveEvery)
       for (let i = 0; i < length; i++) {
         addOrAimTile(gw, api, g, cmd.ax + dx * i, cmd.ay + dy * i, face, cmd.color, period)
       }
-      rebuildTopology(g)
+      g.topoDirty = 1
       recomputeCadence(g)
       return
     }
@@ -3084,7 +3269,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         g.kind[t] = KIND_INPUT
       }
       linkPort(g, state.buildings, t)
-      rebuildTopology(g)
+      g.topoDirty = 1
       // Re-placing a port over an existing one replaces its overlay glyph; drop the old first.
       if (g.markEid[t] !== NONE) api.despawn(g.markEid[t]!)
       g.markEid[t] = api.spawn({
@@ -3102,7 +3287,7 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
       if (!charge(state, cmd.cost)) return
       g.kind[t] = KIND_SPLITTER
       g.rr[t] = 0
-      rebuildTopology(g)
+      g.topoDirty = 1
       if (g.markEid[t] !== NONE) api.despawn(g.markEid[t]!)
       g.markEid[t] = api.spawn({
         pos: { x: cmd.x, y: cmd.y },
@@ -3151,15 +3336,27 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         width: 1,
         height: 1,
       })
-      rebuildTopology(g)
+      g.topoDirty = 1
       recomputeCadence(g)
       return
     }
     case 'place_crafter': {
-      // Terrain gate: a crafter that needs a specific ground is dropped off the matching
-      // terrain (an unrestricted crafter carries TERRAIN_NONE and places anywhere).
+      // Terrain gate: an extraction crafter works its footprint expanded by EXTRACTOR_REACH, so it
+      // may sit on OR within a tile of a matching deposit — find the deposit it anchors to and drop
+      // the placement if none is in reach. An unrestricted crafter carries TERRAIN_NONE (no anchor).
       const need = cmd.requiresTerrainType ?? TERRAIN_NONE
-      if (need !== TERRAIN_NONE && terrainTypeAt(state.terrain, cmd.x, cmd.y) !== need) return
+      let anchorKey = NONE
+      if (need !== TERRAIN_NONE) {
+        anchorKey = extractorAnchorInReach(
+          state.terrain,
+          cmd.x,
+          cmd.y,
+          cmd.w,
+          cmd.h,
+          (tt) => tt === need,
+        )
+        if (anchorKey === -1) return
+      }
       // Same occupancy gate as a building: the crafter's footprint must be clear of belts and
       // other buildings. Checked after the terrain gate but before charging.
       if (!footprintClear(state, cmd.x, cmd.y, cmd.w, cmd.h)) return
@@ -3217,9 +3414,10 @@ function applyCommand(gw: GameWorld, api: ModApi, state: GameState, cmd: GameCom
         cmd.upkeep ?? 0,
       )
       state.buildings.recipe[b] = cmd.recipe ?? 0
-      // A terrain-gated crafter is an extractor: cache its anchor tile so the depletion hot path can
-      // find the deposit's richness by a bare key. Left as NONE for machines that sit on no deposit.
-      if (need !== TERRAIN_NONE) state.buildings.anchorKey[b] = tileKey(cmd.x, cmd.y)
+      // A terrain-gated crafter is an extractor: cache the covered deposit it anchors to (resolved
+      // above) so the depletion hot path reads its resource terrain type — and pools richness across
+      // the reach — by a bare key. Left as NONE for machines that need no terrain.
+      if (need !== TERRAIN_NONE) state.buildings.anchorKey[b] = anchorKey
       relinkUnlinkedPorts(g, state.buildings)
       return
     }
@@ -3709,12 +3907,28 @@ export function createGameSystems(state: GameState, api: ModApi): System[] {
     for (let i = 0; i < cmds.length; i++) {
       applyCommand(gw, api, state, cmds[i] as unknown as GameCommand)
     }
+    // Placements defer their O(n) topology rebuild via `topoDirty`, so a batch of N commands
+    // (blueprint paste, map build) rebuilds once here instead of N times — O(n) not O(n²). The
+    // belt system reads `nbr`/`order` only after this, so nothing observes the deferral.
+    if (state.grid.topoDirty) {
+      rebuildTopology(state.grid)
+      state.grid.topoDirty = 0
+    }
     // Reuse the array; never reallocate on the hot path.
     cmds.length = 0
   }
 
   const beltSystem: System = (gw) => {
-    updateBelts(gw, api, state.grid, state.buildings, state.treasury, state.prices, state.deposits)
+    updateBelts(
+      gw,
+      api,
+      state.grid,
+      state.buildings,
+      state.treasury,
+      state.prices,
+      state.deposits,
+      state.terrain,
+    )
   }
 
   const villageSystem: System = () => {

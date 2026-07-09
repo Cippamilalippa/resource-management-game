@@ -43,6 +43,7 @@ import type { Sim } from './bootstrap.ts'
 import {
   terrainTypeOf,
   terrainTypeAt,
+  terrainBlocksBuild,
   recipeTypeOf,
   techTypeOf,
   enqueuePlaceBelt,
@@ -260,6 +261,17 @@ class Router {
       for (let dy = 0; dy < h; dy++) this.occ.add(this.key(x + dx, y + dy))
   }
 
+  /**
+   * Mark every build-blocking terrain tile (water) within bounds occupied, so routes weave around it.
+   * The sim rejects belts on water, so the router must treat it as solid — exactly as a player routes
+   * around a lake. A one-time bounds scan (off any hot path), keeping routing deterministic.
+   */
+  markBlockingTerrain(state: GameState): void {
+    for (let x = this.bounds.minX; x <= this.bounds.maxX; x++)
+      for (let y = this.bounds.minY; y <= this.bounds.maxY; y++)
+        if (terrainBlocksBuild(state, x, y)) this.occ.add(this.key(x, y))
+  }
+
   private mark(t: Tile): void {
     this.occ.add(this.key(t.x, t.y))
   }
@@ -391,6 +403,7 @@ export function playFirstResearch(sim: Sim): PlaybookResult {
   const SG = { x: BX + 24, y: R0 + 8 } // smelter: 2 silica → 1 glass (rises into SP from the south)
 
   const router = new Router({ minX: -70, maxX: 280, minY: -90, maxY: 90 })
+  router.markBlockingTerrain(state) // water is solid to the router — the sim won't lay belts on it
   router.markRect(-1, -1, 2, 2) // the origin village
   router.markRect(49, 49, 8, 8) // the apple orchard (kept clear so belts route around it)
   for (const b of [RA, SA, RM, SP, RC, SG]) router.markRect(b.x, b.y, 1, 1)

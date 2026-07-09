@@ -110,6 +110,12 @@ export type Ghost =
        * meaning (e.g. a belt's start-tile cursor).
        */
       readonly valid?: boolean
+      /**
+       * Optional reach ring, in tiles: when set, draw a second outline this many tiles outside the
+       * footprint (a mine's mining perimeter — its footprint plus the ring it covers). Purely a
+       * read-only hint; the app supplies it, the renderer just draws whatever radius it is handed.
+       */
+      readonly reach?: number
     }
   | {
       readonly kind: 'line'
@@ -154,6 +160,11 @@ export interface Highlight {
   readonly h: number
   readonly color: number
   readonly selected: boolean
+  /**
+   * Optional reach ring, in tiles: when set, draw a faint outline this many tiles outside the
+   * footprint (an extraction machine's mining perimeter). The app decides when to show it.
+   */
+  readonly reach?: number
 }
 
 /** One status-overlay marker: a tinted footprint at a flagged tile (default 1×1). */
@@ -877,6 +888,17 @@ export class Renderer {
       g.rect(ghost.x * TILE_SIZE, ghost.y * TILE_SIZE, ghost.w * TILE_SIZE, ghost.h * TILE_SIZE)
       g.fill({ color: fillColor, alpha: invalid ? 0.22 : 0.28 })
       g.stroke({ width: ghost.valid === undefined ? 2 : 2.5, color: ringColor, alpha: 0.75 })
+      // A mine's reach ring: a second outline `reach` tiles outside the footprint marking the area it
+      // covers, so a player can position it over deposits before dropping it.
+      if (ghost.reach) {
+        g.rect(
+          (ghost.x - ghost.reach) * TILE_SIZE,
+          (ghost.y - ghost.reach) * TILE_SIZE,
+          (ghost.w + ghost.reach * 2) * TILE_SIZE,
+          (ghost.h + ghost.reach * 2) * TILE_SIZE,
+        )
+        g.stroke({ width: 1.5, color: ringColor, alpha: 0.55 })
+      }
       // A facing arrow for a directional placement (e.g. a port), so rotation reads on-screen.
       if (ghost.dir !== undefined) {
         const cx = (ghost.x + ghost.w / 2) * TILE_SIZE
@@ -1043,6 +1065,16 @@ export class Renderer {
     g.rect(px, py, pw, ph)
     g.fill({ color: h.color, alpha: h.selected ? 0.14 : 0.07 })
     g.stroke({ width, color: h.color, alpha: h.selected ? 1 : 0.75 })
+    // Reach ring: an extraction machine draws its mining perimeter `reach` tiles outside the footprint.
+    if (h.reach) {
+      g.rect(
+        (h.x - h.reach) * TILE_SIZE,
+        (h.y - h.reach) * TILE_SIZE,
+        (h.w + h.reach * 2) * TILE_SIZE,
+        (h.h + h.reach * 2) * TILE_SIZE,
+      )
+      g.stroke({ width: 1.5, color: h.color, alpha: h.selected ? 0.7 : 0.4 })
+    }
     if (!h.selected) return
     // Selected: short corner ticks to read as a "locked" selection rather than a hover.
     const len = Math.min(TILE_SIZE * 0.5, pw / 2, ph / 2)

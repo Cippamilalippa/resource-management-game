@@ -46,5 +46,38 @@
     "size": { "w": 1, "h": 1 },
     "color": 2763320,
     "info": "Crude oil reservoir — build an Oil Derrick on top."
+  },
+  {
+    "id": "terrain.water",
+    "type": "terrain",
+    "name": "Water",
+    "size": { "w": 1, "h": 1 },
+    "color": 3108784,
+    "blocksBuild": true,
+    "info": "Open water — nothing can be built on it. Route around it."
+  },
+  {
+    "id": "terrain.rock",
+    "type": "terrain",
+    "name": "Rocky Ground",
+    "size": { "w": 1, "h": 1 },
+    "color": 8025192,
+    "info": "Barren rock — buildable ground with no resources."
+  },
+  {
+    "id": "terrain.grass",
+    "type": "terrain",
+    "name": "Grassland",
+    "size": { "w": 1, "h": 1 },
+    "color": 7317583,
+    "info": "Fertile grassland — buildable ground with no resources."
+  },
+  {
+    "id": "terrain.sand",
+    "type": "terrain",
+    "name": "Sand",
+    "size": { "w": 1, "h": 1 },
+    "color": 14074244,
+    "info": "Sandy flats — buildable ground with no resources."
   }
 ]

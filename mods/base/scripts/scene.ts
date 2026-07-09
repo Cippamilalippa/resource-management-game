@@ -105,13 +105,43 @@ interface SettlementConfig {
 /** A scenario's parsed win goal: reach `village`'s 0-based `stage`. `null` when none is authored. */
 type GoalConfig = { readonly village: string; readonly stage: number } | null
 
+/** An inclusive integer `{ min, max }` band drawn from the seeded RNG. */
+interface Band {
+  readonly min: number
+  readonly max: number
+}
+
+/**
+ * A generated base-terrain biome: which terrain prototype to paint as organic blobs, how much of the
+ * world it covers (`coverage` in permille of the world's tile area), and each blob's target tile-count
+ * `size` band. Water-type biomes (with `blocksBuild`) become impassable; the rest are cosmetic ground.
+ */
+interface BiomeConfig {
+  readonly terrain: string
+  readonly coverage: number
+  readonly size: Band
+}
+
+/** The bounded region (centred on the origin) that base terrain + deposits generate within. */
+interface WorldSize {
+  readonly w: number
+  readonly h: number
+}
+
 /** The scenario layout params the scene consumes, after parsing (with fallbacks). */
 interface ScenarioConfig {
   readonly deposits: readonly string[]
-  readonly patch: { readonly min: number; readonly max: number }
-  readonly spread: { readonly min: number; readonly max: number }
+  /** Bounded generation rect, centred on the origin — the finite world the map is laid out in. */
+  readonly worldSize: WorldSize
+  /** How many separate patches each deposit type scatters (organic blobs). */
+  readonly frequency: Band
+  /** Each deposit blob's target tile count (an organic blob, not a square side). */
+  readonly patch: Band
+  readonly spread: Band
   /** Per-deposit-tile richness band, or `null` for an infinite (never-depleting) scenario. */
   readonly richness: RichnessBand
+  /** Base-terrain biomes painted across the world before deposits (water + cosmetic ground). */
+  readonly biomes: readonly BiomeConfig[]
   readonly startingKit: readonly { readonly item: string; readonly amount: number }[]
   readonly startingTreasury: readonly { readonly item: string; readonly amount: number }[]
   /** Extra settlements (beyond the origin spaceport) scattered at increasing distance bands. */
@@ -184,14 +214,54 @@ function scenarioConfigOf(
     : FALLBACK_DEPOSITS.map((d) => d.id)
   return {
     deposits: deposits.length > 0 ? deposits : FALLBACK_DEPOSITS.map((d) => d.id),
-    patch: rangeOf(proto, 'patchSize', 4, 5),
+    worldSize: worldSizeOf(proto),
+    frequency: rangeOf(proto, 'frequency', 1, 1),
+    patch: rangeOf(proto, 'patchSize', 12, 20),
     spread: rangeOf(proto, 'spread', 6, 18),
     richness: richnessBandOf(proto),
+    biomes: biomesOf(proto),
     startingKit: flowListOf(proto, 'startingKit'),
     startingTreasury: flowListOf(proto, 'startingTreasury'),
     settlements: settlementsOf(proto),
     goal: goalOf(proto),
   }
+}
+
+/** Default world extent when a scenario omits `worldSize`. */
+const DEFAULT_WORLD: WorldSize = { w: 120, h: 120 }
+
+/**
+ * Read a scenario's `worldSize` — the bounded generation rect centred on the origin — clamped to a
+ * sane positive even-ish size, falling back to {@link DEFAULT_WORLD}. Stays lenient (a malformed
+ * field just falls back); authoritative validation lives host-side in `content.ts`.
+ */
+function worldSizeOf(proto: SceneProto | undefined): WorldSize {
+  const raw = proto?.worldSize
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>
+    const w = typeof r.w === 'number' ? Math.max(8, Math.floor(r.w)) : DEFAULT_WORLD.w
+    const h = typeof r.h === 'number' ? Math.max(8, Math.floor(r.h)) : DEFAULT_WORLD.h
+    return { w, h }
+  }
+  return DEFAULT_WORLD
+}
+
+/**
+ * Parse a scenario's `biomes` list: each `{ terrain, coverage, size: { min, max } }`. Malformed
+ * entries are skipped, so a bad field just yields no base terrain. `coverage` is clamped to a
+ * non-negative integer (permille of world area); `size` to a positive-integer band.
+ */
+function biomesOf(proto: SceneProto | undefined): BiomeConfig[] {
+  const raw = Array.isArray(proto?.biomes) ? (proto.biomes as unknown[]) : []
+  const out: BiomeConfig[] = []
+  for (const b of raw) {
+    const e = (b ?? {}) as Record<string, unknown>
+    if (typeof e.terrain !== 'string') continue
+    const coverage = typeof e.coverage === 'number' ? Math.max(0, Math.floor(e.coverage)) : 0
+    if (coverage === 0) continue
+    out.push({ terrain: e.terrain, coverage, size: rangeOf(e, 'size', 12, 24) })
+  }
+  return out
 }
 
 /**
@@ -257,6 +327,13 @@ function overlaps(a: Rect, b: Rect, margin: number): boolean {
     a.y - margin < b.y + b.h &&
     a.y + a.h + margin > b.y
   )
+}
+
+/** Whether tile (x, y) falls inside any reserved rect once grown by {@link MARGIN} (keep-clear zone). */
+function tileReserved(x: number, y: number, reserved: readonly Rect[]): boolean {
+  const cell: Rect = { x, y, w: 1, h: 1 }
+  for (let i = 0; i < reserved.length; i++) if (overlaps(cell, reserved[i]!, MARGIN)) return true
+  return false
 }
 
 /**
@@ -393,6 +470,81 @@ function shuffle<T>(api: ModApi, arr: T[]): void {
   }
 }
 
+/** A tile coordinate the blob grower works in. */
+interface Tile {
+  readonly x: number
+  readonly y: number
+}
+
+/** How many random seeds to try before giving up on placing a blob (deterministic bound). */
+const SEED_TRIES = 40
+
+/**
+ * Grow an organic blob of up to `target` tiles by frontier random-walk from (sx, sy), drawing each
+ * expansion step from the world's seeded RNG so the shape is varied yet reproducible. A tile joins
+ * only if `canUse(x, y)` holds, and the result is a single 4-connected region — never a filled
+ * rectangle. Runs once at new-game (off the hot path), so its working sets may allocate freely.
+ * Returns the blob's tiles (empty if the seed itself is unusable).
+ */
+function growBlob(
+  api: ModApi,
+  sx: number,
+  sy: number,
+  target: number,
+  canUse: (x: number, y: number) => boolean,
+): Tile[] {
+  const tiles: Tile[] = []
+  if (target <= 0 || !canUse(sx, sy)) return tiles
+  const seen = new Set<number>()
+  const frontier: Tile[] = []
+  const consider = (x: number, y: number): void => {
+    const k = tileKey(x, y)
+    if (seen.has(k)) return
+    seen.add(k)
+    frontier.push({ x, y })
+  }
+  consider(sx, sy)
+  while (tiles.length < target && frontier.length > 0) {
+    // Pop a random frontier tile (swap-with-last) so growth wanders rather than filling in order.
+    const i = api.randomInt(0, frontier.length - 1)
+    const cell = frontier[i]!
+    frontier[i] = frontier[frontier.length - 1]!
+    frontier.pop()
+    if (!canUse(cell.x, cell.y)) continue
+    tiles.push(cell)
+    consider(cell.x + 1, cell.y)
+    consider(cell.x - 1, cell.y)
+    consider(cell.x, cell.y + 1)
+    consider(cell.x, cell.y - 1)
+  }
+  return tiles
+}
+
+/**
+ * Roll a usable blob seed within the world bounds via the seeded RNG: a tile passing `canUse`, and —
+ * when a Chebyshev `band` is given (deposits keep to their spread ring) — within that distance of the
+ * origin. Returns `null` after {@link SEED_TRIES} misses, so a crowded world just yields fewer patches.
+ */
+function findBlobSeed(
+  api: ModApi,
+  hx: number,
+  hy: number,
+  worldSize: WorldSize,
+  band: Band | null,
+  canUse: (x: number, y: number) => boolean,
+): Tile | null {
+  for (let t = 0; t < SEED_TRIES; t++) {
+    const x = api.randomInt(-hx, worldSize.w - hx - 1)
+    const y = api.randomInt(-hy, worldSize.h - hy - 1)
+    if (band !== null) {
+      const cheby = Math.max(Math.abs(x), Math.abs(y))
+      if (cheby < band.min || cheby > band.max) continue
+    }
+    if (canUse(x, y)) return { x, y }
+  }
+  return null
+}
+
 /**
  * Spawn one settlement (a `village` prototype) anchored at (vx, vy): paint its footprint, register it
  * as a resource store so input ports can feed it, wire up its OWN stage ladder so it grows/declines
@@ -437,12 +589,13 @@ function placeVillage(
 /**
  * Spawn the starting world for `config.scenario`: the origin spaceport (with the scenario's starting
  * kit), any extra settlements the scenario lists at increasing distance bands (each a distinct
- * `village` prototype with its own demand ladder — G3), an apple orchard, and the scenario's resource
- * deposits scattered as terrain patches whose positions/sizes are drawn from the world's seeded RNG
- * within the scenario's bands. Terrain tiles fill `state.terrain` (so the sim gates producer
- * placement) and each village is registered in `state.buildings` as a resource store (so input ports
- * can feed it). Each spawn emits `base:spawn` for the host inspector. Deterministic for a given
- * seed + scenario.
+ * `village` prototype with its own demand ladder — G3), an apple orchard, a procedural base-terrain
+ * layer of organic biome blobs (water + cosmetic ground), and the scenario's resource deposits
+ * scattered as organic patches — all sized/placed from the world's seeded RNG within the scenario's
+ * bounded `worldSize`. Terrain tiles fill `state.terrain` (so the sim gates producer placement and
+ * blocks building on water) and each village is registered in `state.buildings` as a resource store
+ * (so input ports can feed it). Each spawn emits `base:spawn` for the host inspector. Deterministic
+ * for a given seed + scenario.
  */
 export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = {}): void {
   const getProto = (id: string): SceneProto | undefined => api.getPrototype(id)
@@ -501,41 +654,76 @@ export function spawnScene(api: ModApi, state: GameState, config: SceneConfig = 
     }
   }
 
-  // Deposit patches: scatter each scenario deposit onto a distinct candidate cell (shuffled by the
-  // seeded RNG), sizing and jittering the patch inside its cell. Cells are disjoint, so patches
-  // never overlap; the spaceport/orchard/settlement rects are excluded up-front.
-  const cellSize = scenario.patch.max + MARGIN
-  const cells = candidateCells(cellSize, scenario.spread, reserved)
-  shuffle(api, cells)
+  // --- Procedural terrain: base biomes, then deposits on top ---------------------------------------
+  //
+  // Everything below is laid out as organic random-walk blobs within the scenario's bounded world,
+  // drawn from the seeded RNG (so it varies per seed but is fully reproducible). A shared `occupied`
+  // set of already-painted tiles keeps blobs from overlapping, and `canPaint` also excludes the
+  // reserved spaceport/orchard/settlement rects. Painting a tile spawns its terrain entity, records
+  // its type into `state.terrain`, and marks it occupied.
+  const hx = Math.floor(scenario.worldSize.w / 2)
+  const hy = Math.floor(scenario.worldSize.h / 2)
+  const inBounds = (x: number, y: number): boolean =>
+    x >= -hx && x < scenario.worldSize.w - hx && y >= -hy && y < scenario.worldSize.h - hy
+  const occupied = new Set<number>()
+  const canPaint = (x: number, y: number): boolean =>
+    inBounds(x, y) && !occupied.has(tileKey(x, y)) && !tileReserved(x, y, reserved)
+  const paint = (id: string, type: number, color: number, x: number, y: number): number => {
+    const key = tileKey(x, y)
+    const eid = api.spawn({ pos: { x, y }, sprite: TERRAIN_SPRITE, color, width: 1, height: 1 })
+    state.terrain.set(key, type)
+    occupied.add(key)
+    record(id, x, y)
+    return eid
+  }
 
-  for (let d = 0; d < scenario.deposits.length && d < cells.length; d++) {
+  // Base biomes (water + cosmetic ground): grow blobs of each biome until it covers roughly its
+  // `coverage` permille of the world's tile area. Painted before deposits, so deposits never land on
+  // water (or any biome) — they only claim the open default ground the biomes left behind.
+  const worldArea = scenario.worldSize.w * scenario.worldSize.h
+  for (let bi = 0; bi < scenario.biomes.length; bi++) {
+    const biome = scenario.biomes[bi]!
+    const proto = getProto(biome.terrain)
+    const color = colorOf(proto, 0x808080)
+    const type = terrainTypeOf(biome.terrain)
+    const targetTiles = Math.floor((worldArea * biome.coverage) / 1000)
+    let painted = 0
+    // Cap the blob count so a pathological (tiny-blob, huge-coverage) config can't spin forever.
+    const maxBlobs = Math.max(1, Math.ceil(targetTiles / Math.max(1, biome.size.min)) + 4)
+    for (let n = 0; n < maxBlobs && painted < targetTiles; n++) {
+      const seed = findBlobSeed(api, hx, hy, scenario.worldSize, null, canPaint)
+      if (seed === null) break // world too crowded for another blob of this biome.
+      const size = api.randomInt(biome.size.min, biome.size.max)
+      const blob = growBlob(api, seed.x, seed.y, size, canPaint)
+      for (let t = 0; t < blob.length; t++) {
+        paint(biome.terrain, type, color, blob[t]!.x, blob[t]!.y)
+        painted++
+      }
+    }
+  }
+
+  // Deposit patches: each deposit type scatters `frequency` organic blobs within its spread ring,
+  // each of `patchSize` tiles. Finite scenarios roll a per-tile richness (and link the terrain entity
+  // so exhaustion can grey it); an infinite scenario leaves the deposit maps empty (never depletes).
+  const richness = scenario.richness
+  for (let d = 0; d < scenario.deposits.length; d++) {
     const id = scenario.deposits[d]!
     const proto = getProto(id)
     const color = colorOf(proto, depositFallbackColor(id))
     const type = terrainTypeOf(id)
-    const cellRect = cells[d]!
-    const size = api.randomInt(scenario.patch.min, scenario.patch.max)
-    // Jitter within the cell's free space so the patch still fits entirely inside its own cell.
-    const ox = api.randomInt(0, cellSize - size)
-    const oy = api.randomInt(0, cellSize - size)
-    const px = cellRect.x + ox
-    const py = cellRect.y + oy
-    const richness = scenario.richness
-    for (let dy = 0; dy < size; dy++) {
-      for (let dx = 0; dx < size; dx++) {
-        const x = px + dx
-        const y = py + dy
-        const key = tileKey(x, y)
-        const eid = api.spawn({ pos: { x, y }, sprite: TERRAIN_SPRITE, color, width: 1, height: 1 })
-        state.terrain.set(key, type)
-        // Finite scenario: roll this tile's richness from the band via the seeded RNG and record it
-        // (plus its terrain entity, so exhaustion can grey it). An infinite scenario rolls nothing,
-        // leaving the deposit maps empty — extraction on it never depletes (the pre-G1 behaviour).
+    const patches = api.randomInt(scenario.frequency.min, scenario.frequency.max)
+    for (let p = 0; p < patches; p++) {
+      const seed = findBlobSeed(api, hx, hy, scenario.worldSize, scenario.spread, canPaint)
+      if (seed === null) continue // no clear spot in the spread ring — skip this patch.
+      const size = api.randomInt(scenario.patch.min, scenario.patch.max)
+      const blob = growBlob(api, seed.x, seed.y, size, canPaint)
+      for (let t = 0; t < blob.length; t++) {
+        const { x, y } = blob[t]!
+        const eid = paint(id, type, color, x, y)
         if (richness !== null) {
-          state.deposits.remaining.set(key, api.randomInt(richness.min, richness.max))
-          state.deposits.eid.set(key, eid)
+          state.deposits.remaining.set(tileKey(x, y), api.randomInt(richness.min, richness.max))
+          state.deposits.eid.set(tileKey(x, y), eid)
         }
-        record(id, x, y)
       }
     }
   }

@@ -12,9 +12,17 @@
       "terrain.rare_earth_deposit",
       "terrain.oil_field"
     ],
-    "patchSize": { "min": 4, "max": 5 },
-    "spread": { "min": 6, "max": 18 },
+    "worldSize": { "w": 120, "h": 120 },
+    "frequency": { "min": 2, "max": 3 },
+    "patchSize": { "min": 14, "max": 26 },
+    "spread": { "min": 6, "max": 40 },
     "richness": { "min": 1200, "max": 2400 },
+    "biomes": [
+      { "terrain": "terrain.water", "coverage": 50, "size": { "min": 18, "max": 40 } },
+      { "terrain": "terrain.grass", "coverage": 90, "size": { "min": 24, "max": 60 } },
+      { "terrain": "terrain.rock", "coverage": 70, "size": { "min": 18, "max": 44 } },
+      { "terrain": "terrain.sand", "coverage": 50, "size": { "min": 16, "max": 36 } }
+    ],
     "startingKit": [{ "item": "item.glass", "amount": 30 }],
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 90 },
@@ -39,9 +47,17 @@
       "terrain.rare_earth_deposit",
       "terrain.oil_field"
     ],
-    "patchSize": { "min": 2, "max": 3 },
-    "spread": { "min": 14, "max": 30 },
+    "worldSize": { "w": 160, "h": 160 },
+    "frequency": { "min": 1, "max": 2 },
+    "patchSize": { "min": 5, "max": 11 },
+    "spread": { "min": 14, "max": 64 },
     "richness": { "min": 300, "max": 700 },
+    "biomes": [
+      { "terrain": "terrain.water", "coverage": 90, "size": { "min": 20, "max": 52 } },
+      { "terrain": "terrain.rock", "coverage": 130, "size": { "min": 20, "max": 60 } },
+      { "terrain": "terrain.sand", "coverage": 100, "size": { "min": 18, "max": 48 } },
+      { "terrain": "terrain.grass", "coverage": 40, "size": { "min": 16, "max": 34 } }
+    ],
     "startingKit": [],
     "startingTreasury": [
       { "item": "item.aluminum", "amount": 48 },

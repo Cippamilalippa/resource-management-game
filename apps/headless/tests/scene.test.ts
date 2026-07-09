@@ -1,20 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import { entityCount } from '@factory/engine/core'
 import { serialize, hashSnapshot } from '@factory/engine/persistence'
-import { TERRAIN_SPRITE, tileKey } from '../gameLogic.ts'
+import { TERRAIN_SPRITE, tileKey, terrainTypeOf } from '../gameLogic.ts'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
 
 /**
- * The starting scene is procedural: it scatters the chosen scenario's resource deposits using the
- * world's seeded RNG within the scenario's size/spread bands, so each new game is varied yet fully
- * reproducible for a given seed + scenario. Determinism is the single most important guarantee in
- * the codebase, so these assert byte-reproducibility (and that seed + scenario both matter), along
- * with the fixed anchors (village, orchard) the layout keeps.
+ * The starting scene is procedural: within the chosen scenario's bounded `worldSize` it grows organic
+ * biome blobs (water + cosmetic ground) and scatters each resource deposit as several organic patches,
+ * all from the world's seeded RNG — so each new game is varied yet fully reproducible for a given seed
+ * + scenario. Determinism is the single most important guarantee in the codebase, so these assert
+ * byte-reproducibility (and that seed + scenario both matter), the fixed anchors (village, orchard) the
+ * layout keeps, and the procedural invariants: organic (non-square) patches, multiple patches per
+ * deposit, and deposits never on impassable water.
  */
 
-/** Six deposits, each a 4–5-tile square in the abundant scenario. */
-const MIN_TERRAIN = 6 * 4 * 4
-const MAX_TERRAIN = 6 * 5 * 5
+const WATER = terrainTypeOf('terrain.water')
 
 /** Total stock currently held across every building stockpile slot (the starting kit lands here). */
 function totalStock(sim: Sim): number {
@@ -22,6 +22,58 @@ function totalStock(sim: Sim): number {
   let sum = 0
   for (let i = 0; i < store.slotCount.length; i++) sum += store.slotCount[i]!
   return sum
+}
+
+/** Terrain render entities (a flat fill) from a serialized world, as { x, y, color } tiles. */
+function terrainTiles(sim: Sim): { x: number; y: number; color: number }[] {
+  const { entities } = serialize(sim.world)
+  return entities
+    .filter((e) => e.sprite === TERRAIN_SPRITE)
+    .map((e) => ({ x: e.x, y: e.y, color: e.color }))
+}
+
+/**
+ * Split a set of tiles into 4-connected components (flood fill). Returns each component's tile count
+ * and bounding-box area — an organic blob has bbox area strictly greater than its tile count (it does
+ * not fill its bounding rectangle), whereas the old square patch had bbox area === tile count.
+ */
+function components(tiles: { x: number; y: number }[]): { size: number; bboxArea: number }[] {
+  const keyed = new Map<number, { x: number; y: number }>()
+  for (const t of tiles) keyed.set(tileKey(t.x, t.y), t)
+  const seen = new Set<number>()
+  const out: { size: number; bboxArea: number }[] = []
+  for (const [startKey, start] of keyed) {
+    if (seen.has(startKey)) continue
+    let size = 0
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    const stack = [start]
+    seen.add(startKey)
+    while (stack.length > 0) {
+      const { x, y } = stack.pop()!
+      size++
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ] as const) {
+        const nk = tileKey(x + dx, y + dy)
+        if (keyed.has(nk) && !seen.has(nk)) {
+          seen.add(nk)
+          stack.push(keyed.get(nk)!)
+        }
+      }
+    }
+    out.push({ size, bboxArea: (maxX - minX + 1) * (maxY - minY + 1) })
+  }
+  return out
 }
 
 describe('procedural starting scene', () => {
@@ -40,22 +92,69 @@ describe('procedural starting scene', () => {
     expect(hashSnapshot(a.serialize())).not.toBe(hashSnapshot(b.serialize()))
   })
 
-  it('differs between scenarios at the same seed (patch sizes / spread / kit)', async () => {
+  it('differs between scenarios at the same seed (world size / biomes / patches / kit)', async () => {
     const abundant = await bootstrapSim(42, { scenario: 'scenario.abundant' })
     const sparse = await bootstrapSim(42, { scenario: 'scenario.sparse' })
     expect(hashSnapshot(abundant.serialize())).not.toBe(hashSnapshot(sparse.serialize()))
   })
 
-  it('lays out every scenario deposit as a terrain patch, recorded in the terrain grid', async () => {
+  it('records every painted tile in the terrain grid, mixing biomes and deposits', async () => {
     const sim = await bootstrapSim(7, { scenario: 'scenario.abundant' })
-    const { entities } = serialize(sim.world)
-    const terrain = entities.filter((e) => e.sprite === TERRAIN_SPRITE)
-    // Every painted terrain tile is mirrored into the grid so producer placement can read it.
-    expect(sim.state.terrain.size).toBe(terrain.length)
-    expect(sim.state.terrain.size).toBeGreaterThanOrEqual(MIN_TERRAIN)
-    expect(sim.state.terrain.size).toBeLessThanOrEqual(MAX_TERRAIN)
+    const tiles = terrainTiles(sim)
+    // Every painted terrain tile is mirrored into the grid so placement can read it.
+    expect(sim.state.terrain.size).toBe(tiles.length)
+    expect(sim.state.terrain.size).toBeGreaterThan(0)
     // 3 settlements (spaceport + mining camp + research colony) + terrain tiles + a 6x6 orchard.
     expect(entityCount(sim.world)).toBe(3 + sim.state.terrain.size + 36)
+    // The grid holds both deposit tiles (finite richness recorded) and non-deposit biome tiles.
+    const depositTiles = sim.state.deposits.remaining.size
+    expect(depositTiles).toBeGreaterThan(0)
+    expect(sim.state.terrain.size).toBeGreaterThan(depositTiles) // biomes add non-deposit ground.
+  })
+
+  it('grows organic (non-square) patches, not filled rectangles', async () => {
+    const sim = await bootstrapSim(7, { scenario: 'scenario.abundant' })
+    const tiles = terrainTiles(sim)
+    // Group same-colour tiles into blobs; at least one non-trivial blob must NOT fill its bbox.
+    const byColor = new Map<number, { x: number; y: number }[]>()
+    for (const t of tiles) (byColor.get(t.color) ?? byColor.set(t.color, []).get(t.color)!).push(t)
+    let sawOrganic = false
+    for (const group of byColor.values()) {
+      for (const c of components(group)) {
+        if (c.size >= 6 && c.bboxArea > c.size) sawOrganic = true
+      }
+    }
+    expect(sawOrganic).toBe(true)
+  })
+
+  it('scatters multiple patches per deposit type (frequency)', async () => {
+    const sim = await bootstrapSim(7, { scenario: 'scenario.abundant' })
+    // Deposit terrain colours only (finite richness recorded under them).
+    const depositKeys = new Set(sim.state.deposits.remaining.keys())
+    const depositTiles = terrainTiles(sim).filter((t) => depositKeys.has(tileKey(t.x, t.y)))
+    const byColor = new Map<number, { x: number; y: number }[]>()
+    for (const t of depositTiles)
+      (byColor.get(t.color) ?? byColor.set(t.color, []).get(t.color)!).push(t)
+    // Abundant rolls 2–3 patches per type; across six types the total component count exceeds the
+    // six deposit types, proving at least some type produced more than one patch.
+    let totalComponents = 0
+    for (const group of byColor.values()) totalComponents += components(group).length
+    expect(totalComponents).toBeGreaterThan(6)
+  })
+
+  it('never lays a deposit on impassable water; water is registered as build-blocking', async () => {
+    const sim = await bootstrapSim(7, { scenario: 'scenario.abundant' })
+    expect(sim.state.blockingTerrain.has(WATER)).toBe(true)
+    let waterTiles = 0
+    for (const [key, type] of sim.state.terrain) {
+      if (type === WATER) {
+        waterTiles++
+        // No deposit richness is ever recorded under a water tile.
+        expect(sim.state.deposits.remaining.has(key)).toBe(false)
+      }
+    }
+    // The abundant scenario authors a water biome, so some water was painted.
+    expect(waterTiles).toBeGreaterThan(0)
   })
 
   it('grants the abundant scenario its starting-kit stock (sparse gets none)', async () => {
@@ -66,9 +165,9 @@ describe('procedural starting scene', () => {
   })
 
   it('rolls a finite richness for every deposit tile, within each scenario band', async () => {
-    // Abundant: generous band (1200–2400), one richness entry per painted deposit tile.
+    // Abundant: generous band (1200–2400) rolled under each deposit tile (a subset of terrain).
     const abundant = await bootstrapSim(7, { scenario: 'scenario.abundant' })
-    expect(abundant.state.deposits.remaining.size).toBe(abundant.state.terrain.size)
+    expect(abundant.state.deposits.remaining.size).toBeGreaterThan(0)
     for (const units of abundant.state.deposits.remaining.values()) {
       expect(units).toBeGreaterThanOrEqual(1200)
       expect(units).toBeLessThanOrEqual(2400)
@@ -99,14 +198,14 @@ describe('procedural starting scene', () => {
     }
   })
 
-  it('keeps the extra settlements clear of deposits, the orchard, and each other', async () => {
+  it('keeps the extra settlements clear of terrain, the orchard, and each other', async () => {
     // Several seeds, so a lucky layout can't mask an overlap bug in the reserved-rect logic.
     for (const seed of [1, 7, 42]) {
       const sim = await bootstrapSim(seed, { scenario: 'scenario.abundant' })
       const v = sim.state.villages
       expect(v.count).toBe(3)
       for (let i = 0; i < v.count; i++) {
-        // No settlement footprint tile sits on a deposit terrain tile.
+        // No settlement footprint tile sits on any painted terrain tile (biome or deposit).
         for (let dy = 0; dy < 2; dy++) {
           for (let dx = 0; dx < 2; dx++) {
             const x = v.vx[i]! + dx

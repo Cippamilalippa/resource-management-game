@@ -23,6 +23,7 @@ import type { BaseReady } from '../../mods/base/scripts/main.ts'
 import {
   validateContent,
   itemColorPrices,
+  blockingTerrainIds,
   serializeGameState,
   type GameState,
 } from './gameLogic.ts'
@@ -120,6 +121,8 @@ export async function bootstrapSim(
   // Hand the sim the colour→credit price table computed from the recipe DAG BEFORE any origin is
   // applied: the scene seeds its starting balance through it, and a legacy save converts through it.
   ready.setPrices(itemColorPrices(registry))
+  // Likewise the impassable-terrain rule (water) — derived from content, re-supplied each origin.
+  ready.setBlockingTerrain(blockingTerrainIds(registry))
   if (startScene) ready.newGame(scenario === undefined ? undefined : { scenario })
 
   const state = ready.state

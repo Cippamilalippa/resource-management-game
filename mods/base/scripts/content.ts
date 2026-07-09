@@ -289,10 +289,56 @@ function settlements(proto: Prototype): string[] {
 }
 
 /**
+ * Validate a scenario's optional `worldSize` — the bounded generation rect the procedural world is
+ * laid out in. Absent → the scene falls back to a default extent. Present must be a `{ w, h }` of
+ * positive integers.
+ */
+function validateWorldSize(proto: Prototype): void {
+  const raw = proto.worldSize
+  if (raw === undefined) return
+  if (typeof raw !== 'object' || raw === null) fail(`${proto.id}: "worldSize" must be a { w, h }`)
+  const r = raw as Record<string, unknown>
+  const ok = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
+  if (!ok(r.w) || !ok(r.h)) fail(`${proto.id}: worldSize.w/h must be positive integers`)
+}
+
+/**
+ * Parse + shape-validate a scenario's optional `biomes` (the procedural base-terrain layer): each
+ * entry a `{ terrain, coverage, size: { min, max } }`. `coverage` is a non-negative integer (permille
+ * of world area); `size` a positive-integer band. The referenced `terrain` is checked to exist and be
+ * a `terrain` prototype by the reference pass in {@link validateContent}. Returns the parsed terrain
+ * ids (for that reference check).
+ */
+function biomes(proto: Prototype): string[] {
+  const raw = proto.biomes
+  if (raw === undefined) return []
+  if (!Array.isArray(raw)) fail(`${proto.id}: "biomes" must be an array`)
+  return raw.map((entry, i) => {
+    if (typeof entry !== 'object' || entry === null)
+      fail(`${proto.id}: biomes[${i}] must be an object`)
+    const e = entry as Record<string, unknown>
+    if (typeof e.terrain !== 'string')
+      fail(`${proto.id}: biomes[${i}].terrain must be a terrain id`)
+    if (typeof e.coverage !== 'number' || !Number.isInteger(e.coverage) || e.coverage < 0)
+      fail(`${proto.id}: biomes[${i}].coverage must be a non-negative integer`)
+    const size = e.size
+    const okInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0
+    if (typeof size !== 'object' || size === null)
+      fail(`${proto.id}: biomes[${i}].size must be a { min, max }`)
+    const sz = size as Record<string, unknown>
+    if (!okInt(sz.min) || !okInt(sz.max))
+      fail(`${proto.id}: biomes[${i}].size.min/max must be positive integers`)
+    if ((sz.min as number) > (sz.max as number))
+      fail(`${proto.id}: biomes[${i}].size.min must be <= size.max`)
+    return e.terrain as string
+  })
+}
+
+/**
  * Validate every scenario prototype's shape: a non-empty terrain `deposits` list, positive-integer
- * `patchSize`/`spread` ranges, a well-formed `startingKit` flow list, and any `settlements` band.
- * The starting scene ({@link import('./scene.ts')}) reads these to lay out a seed-varied but
- * reproducible world.
+ * `patchSize`/`spread`/`frequency` ranges, an optional `worldSize`, a well-formed `biomes` list and
+ * `startingKit`, and any `settlements` band. The starting scene ({@link import('./scene.ts')}) reads
+ * these to lay out a seed-varied but reproducible world.
  */
 function validateScenarioShapes(registry: PrototypeRegistry): void {
   for (const s of registry.listByType('scenario')) {
@@ -300,7 +346,10 @@ function validateScenarioShapes(registry: PrototypeRegistry): void {
     if (deposits.length === 0) fail(`${s.id}: scenario needs at least one "deposits" terrain id`)
     intRange(s, 'patchSize')
     intRange(s, 'spread')
+    if (s.frequency !== undefined) intRange(s, 'frequency')
+    validateWorldSize(s)
     validateRichness(s)
+    biomes(s)
     startingKit(s)
     startingTreasury(s)
     settlements(s)
@@ -415,6 +464,12 @@ export function validateContent(registry: PrototypeRegistry): void {
       select: (s) => idList(s, 'deposits'),
       expectType: 'terrain',
       label: 'deposit',
+    },
+    {
+      type: 'scenario',
+      select: (s) => biomes(s),
+      expectType: 'terrain',
+      label: 'biome',
     },
     {
       type: 'scenario',
@@ -602,5 +657,19 @@ export function itemColorPrices(registry: PrototypeRegistry): ColorPrice[] {
     const color = typeof item.color === 'number' ? item.color : 0xffffff
     out.push({ color, price: prices.get(item.id)?.price ?? 1 })
   }
+  return out
+}
+
+// --- blocking terrain: the impassable-biome rule the sim gates placement on ---
+
+/**
+ * Every `terrain` prototype the player cannot build on — those flagged `blocksBuild` (water). The
+ * HOST side of the placement rule (G-world): the ids are handed to the sim via `base:ready`'s
+ * `setBlockingTerrain`, which hashes each to the terrain type the grid stores. Derived from content,
+ * so it is never serialized — a load recomputes it from the live registry, like {@link itemColorPrices}.
+ */
+export function blockingTerrainIds(registry: PrototypeRegistry): string[] {
+  const out: string[] = []
+  for (const t of registry.listByType('terrain')) if (t.blocksBuild === true) out.push(t.id)
   return out
 }

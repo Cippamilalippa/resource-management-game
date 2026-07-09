@@ -16,6 +16,10 @@ import {
   projectBeltPath,
   terrainTypeOf,
   terrainTypeAt,
+  terrainTypeAtKey,
+  terrainBlocksBuild,
+  extractorAnchorInReach,
+  EXTRACTOR_REACH,
   buildingAt,
   tileKey,
   KIND_PLAIN,
@@ -46,7 +50,7 @@ import { inspectStore } from './inspectStore.ts'
 import { recipeStore } from './recipeStore.ts'
 import { filterStore } from './filterStore.ts'
 import { utilizationStore } from './utilizationStore.ts'
-import type { MachineIndex, RecipeChoice } from './machines.ts'
+import type { MachineDef, MachineIndex, RecipeChoice } from './machines.ts'
 
 /** Whether two footprints describe the same object (same anchor and size). */
 function sameFootprint(a: InspectInfo['footprint'], b: InspectInfo['footprint']): boolean {
@@ -377,7 +381,17 @@ export function installPlacement(
       return
     }
     const options = def.extraction
-      ? def.recipes.filter((r) => r.requiresTerrainType === terrainTypeAt(state.terrain, x, y))
+      ? def.recipes.filter(
+          (r) =>
+            extractorAnchorInReach(
+              state.terrain,
+              x,
+              y,
+              info.footprint.w,
+              info.footprint.h,
+              (tt) => tt === r.requiresTerrainType,
+            ) !== -1,
+        )
       : def.recipes
     recipeStore.set({
       x,
@@ -443,8 +457,9 @@ export function installPlacement(
 
   /**
    * Whether the w×h footprint anchored at (x, y) is clear for a building/crafter: no belt-grid tile
-   * (belt/port/splitter) and no other building on any covered tile. Mirrors the sim's
-   * {@link footprintClear} gate so the ghost's red "blocked" preview matches what placement rejects.
+   * (belt/port/splitter), no other building, and no build-blocking terrain (water) on any covered
+   * tile. Mirrors the sim's {@link footprintClear} gate so the ghost's red "blocked" preview matches
+   * what placement rejects.
    */
   const footprintClear = (x: number, y: number, w: number, h: number): boolean => {
     for (let dy = 0; dy < h; dy++) {
@@ -453,6 +468,7 @@ export function installPlacement(
         const ty = y + dy
         if (grid.index.has(tileKey(tx, ty))) return false
         if (buildingAt(state.buildings, tx, ty) >= 0) return false
+        if (terrainBlocksBuild(state, tx, ty)) return false
       }
     }
     return true
@@ -463,16 +479,34 @@ export function installPlacement(
    * (no overlap with a belt or another building) and, if it declares `requiresTerrain`, its anchor
    * must sit on the matching ground. Mirrors the sim's `place_crafter` gate so the ghost agrees.
    */
+  /**
+   * The recipe an extraction machine `def` would adopt dropped at (x, y): the recipe matching the
+   * first deposit within its reach — the w×h footprint expanded by {@link EXTRACTOR_REACH} — scanned
+   * top-left first, or undefined if no matching deposit is covered. Mirrors the sim's placement gate
+   * so the ghost, the auto-adopted recipe and the info picker all agree on what a mine covers.
+   */
+  const extractionRecipeFor = (
+    def: MachineDef,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+  ): RecipeChoice | undefined => {
+    const key = extractorAnchorInReach(state.terrain, x, y, w, h, (tt) =>
+      def.recipes.some((r) => r.requiresTerrainType === tt),
+    )
+    if (key === -1) return undefined
+    const terrain = terrainTypeAtKey(state.terrain, key)
+    return def.recipes.find((r) => r.requiresTerrainType === terrain)
+  }
+
   const producerValid = (item: BuildItem, x: number, y: number): boolean => {
     if (!footprintClear(x, y, item.w, item.h)) return false
-    // An extraction machine (mine/derrick) auto-adopts the recipe of the terrain it lands on, so it
-    // is only "clear to place" over a deposit one of its recipes can mine — off a deposit it would
-    // sit idle, so the ghost reads blocked to match what actually happens on placement.
+    // An extraction machine (mine/derrick) auto-adopts the recipe of a deposit in reach (its footprint
+    // plus a one-tile ring), so it is only "clear to place" when such a deposit is covered — off any
+    // deposit it would sit idle, so the ghost reads blocked to match what happens on placement.
     const def = machines.byColor.get(item.color)
-    if (def?.extraction) {
-      const terrain = terrainTypeAt(state.terrain, x, y)
-      return def.recipes.some((r) => r.requiresTerrainType === terrain)
-    }
+    if (def?.extraction) return extractionRecipeFor(def, x, y, item.w, item.h) !== undefined
     if (!item.requiresTerrain) return true
     return terrainTypeAt(state.terrain, x, y) === terrainTypeOf(item.requiresTerrain)
   }
@@ -509,6 +543,17 @@ export function installPlacement(
     return buildingAt(state.buildings, x + PORT_DX[d]!, y + PORT_DY[d]!) >= 0
   }
 
+  /** Whether any tile of a projected belt path lands on build-blocking terrain (water) — nothing
+   * builds on water, so such a run previews red and is rejected, mirroring the sim's `place_belt`. */
+  const beltPathOnWater = (path: ReturnType<typeof projectBeltPath>): boolean => {
+    for (const leg of path.legs) {
+      for (let i = 0; i < leg.length; i++) {
+        if (terrainBlocksBuild(state, leg.ax + leg.dx * i, leg.ay + leg.dy * i)) return true
+      }
+    }
+    return false
+  }
+
   // The belt's start tile while a drag is in progress (belts only); null otherwise.
   let beltStart: GridCoord | null = null
   // The underground entrance tile while a tunnel drag is in progress; null otherwise.
@@ -535,6 +580,7 @@ export function installPlacement(
    */
   const undergroundEndpointOk = (x: number, y: number): boolean => {
     if (buildingAt(state.buildings, x, y) >= 0) return false
+    if (terrainBlocksBuild(state, x, y)) return false // a cap can't surface on water
     const t = grid.index.get(tileKey(x, y))
     return t === undefined || grid.kind[t] === KIND_PLAIN
   }
@@ -572,6 +618,10 @@ export function installPlacement(
    * is true only on the render loop's throttled refresh (never on a raw hover/click), so the
    * utilization window advances on a steady wall-clock cadence rather than per pointer event. */
   const applyView = (sample = false): void => {
+    /** The reach ring (in tiles) drawn around an inspected footprint: an extraction machine shows its
+     * mining perimeter (footprint + EXTRACTOR_REACH); anything else shows none. */
+    const reachOf = (info: InspectInfo): number =>
+      machines.byColor.get(info.color)?.extraction ? EXTRACTOR_REACH : 0
     if (pinned) {
       const info = resolveInspect(
         world,
@@ -586,7 +636,12 @@ export function installPlacement(
       )
       if (info) {
         inspectStore.set({ info, pinned: true })
-        renderer.setHighlight({ ...info.footprint, color: info.color, selected: true })
+        renderer.setHighlight({
+          ...info.footprint,
+          color: info.color,
+          selected: true,
+          reach: reachOf(info),
+        })
         publishRecipe(info) // recipe picker follows the pinned crafter
         publishFilter(info) // filter editor follows the pinned port
         if (sample) sampleUtilization(info)
@@ -608,7 +663,9 @@ export function installPlacement(
         )
       : null
     inspectStore.set({ info, pinned: false })
-    renderer.setHighlight(info ? { ...info.footprint, color: info.color, selected: false } : null)
+    renderer.setHighlight(
+      info ? { ...info.footprint, color: info.color, selected: false, reach: reachOf(info) } : null,
+    )
     publishRecipe(null) // nothing pinned → no recipe picker
     publishFilter(null) // nothing pinned → no filter editor
     if (sample) sampleUtilization(info)
@@ -673,6 +730,9 @@ export function installPlacement(
               : // port
                 !item.port || portValid(item.port, tile.x, tile.y)
       const affordable = !item.cost || item.cost.length === 0 || canAfford(state, item.cost)
+      // A mine previews its mining perimeter (footprint + reach) so a player can see the deposits it
+      // will cover before dropping it — the same ring the hover/selection outline draws.
+      const showsReach = item.kind === 'producer' && machines.byColor.get(item.color)?.extraction
       renderer.setGhost({
         kind: 'rect',
         x: tile.x,
@@ -683,6 +743,7 @@ export function installPlacement(
         valid: placeable && affordable,
         // Only a port carries a meaningful facing arrow; rotation is a no-op for the rest.
         ...(item.kind === 'port' ? { dir: placeDir } : {}),
+        ...(showsReach ? { reach: EXTRACTOR_REACH } : {}),
       })
       return
     }
@@ -960,7 +1021,7 @@ export function installPlacement(
       ay: beltStart.y,
       bx: tile.x,
       by: tile.y,
-      color: item.color,
+      color: beltPathOnWater(path) ? INVALID_COLOR : item.color,
       ...(path.legs.length > 1 ? { corner: { x: path.corner.x, y: path.corner.y } } : {}),
       ...(path.length > 1 ? { label: `×${path.length}` } : {}),
     })
@@ -1101,9 +1162,7 @@ export function installPlacement(
       const tiles = dragStart ? lineTiles(dragStart, tile, Math.max(item.w, item.h)) : [tile]
       const steps = tiles.map((t) => {
         const recipe = def?.extraction
-          ? def.recipes.find(
-              (r) => r.requiresTerrainType === terrainTypeAt(state.terrain, t.x, t.y),
-            )
+          ? extractionRecipeFor(def, t.x, t.y, item.w, item.h)
           : pendingRecipe?.color === item.color
             ? pendingRecipe.recipe
             : undefined
@@ -1168,6 +1227,7 @@ export function installPlacement(
     beltStart = null
     if (!start || (start.x === tile.x && start.y === tile.y)) return
     const path = projectBeltPath(start.x, start.y, tile.x, tile.y, shiftKey)
+    if (beltPathOnWater(path)) return // nothing builds on water — the whole run is rejected
     const steps: PlacedStep[] = []
     for (let li = 0; li < path.legs.length; li++) {
       const leg = path.legs[li]!

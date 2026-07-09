@@ -3,6 +3,7 @@ import { PrototypeRegistry } from '@factory/engine/data'
 import {
   validateContent,
   itemColorPrices,
+  blockingTerrainIds,
   buildableSet,
   allTechIds,
   scenarioList,
@@ -297,6 +298,81 @@ describe('validateContent', () => {
       richness: 'lots',
     })
     expect(() => validateContent(reg)).toThrow(/richness/)
+  })
+
+  it('accepts a scenario with worldSize, frequency, and biomes', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.world',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      worldSize: { w: 80, h: 80 },
+      frequency: { min: 1, max: 3 },
+      biomes: [{ terrain: 'terrain.rock', coverage: 100, size: { min: 8, max: 20 } }],
+    })
+    expect(() => validateContent(reg)).not.toThrow()
+  })
+
+  it('rejects a biome that references a missing terrain', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.badbiome',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      biomes: [{ terrain: 'terrain.ghost', coverage: 50, size: { min: 8, max: 20 } }],
+    })
+    expect(() => validateContent(reg)).toThrow(/terrain\.ghost/)
+  })
+
+  it('rejects a biome with a malformed size band', () => {
+    const reg = validRegistry()
+    reg.register({
+      id: 'scenario.badbiomesize',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      biomes: [{ terrain: 'terrain.rock', coverage: 50, size: { min: 20, max: 8 } }],
+    })
+    expect(() => validateContent(reg)).toThrow(/biomes\[0\]\.size/)
+  })
+
+  it('rejects a malformed worldSize and a malformed frequency', () => {
+    const badWorld = validRegistry()
+    badWorld.register({
+      id: 'scenario.badworld',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      worldSize: { w: 0, h: 80 },
+    })
+    expect(() => validateContent(badWorld)).toThrow(/worldSize/)
+
+    const badFreq = validRegistry()
+    badFreq.register({
+      id: 'scenario.badfreq',
+      type: 'scenario',
+      deposits: ['terrain.rock'],
+      patchSize: { min: 3, max: 5 },
+      spread: { min: 6, max: 16 },
+      frequency: { min: 4, max: 2 },
+    })
+    expect(() => validateContent(badFreq)).toThrow(/frequency\.min/)
+  })
+
+  it('blockingTerrainIds lists only terrains flagged blocksBuild', () => {
+    const reg = validRegistry()
+    reg.register({ id: 'terrain.lake', type: 'terrain', color: 9, blocksBuild: true })
+    reg.register({ id: 'terrain.meadow', type: 'terrain', color: 10 })
+    const ids = blockingTerrainIds(reg)
+    expect(ids).toContain('terrain.lake')
+    expect(ids).not.toContain('terrain.meadow')
+    expect(ids).not.toContain('terrain.rock') // the base valid registry's terrain isn't blocking.
   })
 
   it('rejects a scenario starting-kit item that references a missing item', () => {

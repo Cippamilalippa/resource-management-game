@@ -5,6 +5,8 @@ import {
   MAX_SLOTS,
   buildingAt,
   terrainTypeAt,
+  terrainTypeOf,
+  tileKey,
   enqueuePlaceBelt,
   enqueuePlaceBuilding,
   enqueuePlacePort,
@@ -342,29 +344,76 @@ describe('placement occupancy gate', () => {
       accepts: [{ color: SRC, cap: 100 }],
     })
 
+  // Placed far outside any scenario's generated world (worldSize ≤ ±80) so the occupancy gate is
+  // exercised on guaranteed-empty ground — never on a procedural water/biome tile.
   it('rejects a building whose footprint overlaps another building', async () => {
     const sim = await bootstrapSim(1)
-    placeSink(sim, 30, 30)
+    placeSink(sim, 300, 300)
     sim.scheduler.runTicks(sim.world, 1)
-    const first = buildingAt(sim.state.buildings, 30, 30)
+    const first = buildingAt(sim.state.buildings, 300, 300)
     expect(first).toBeGreaterThanOrEqual(0)
     const count = sim.state.buildings.count
     // A second building on the same tile is dropped: the tile still resolves to the first.
-    placeSink(sim, 30, 30)
+    placeSink(sim, 300, 300)
     sim.scheduler.runTicks(sim.world, 1)
     expect(sim.state.buildings.count).toBe(count)
-    expect(buildingAt(sim.state.buildings, 30, 30)).toBe(first)
+    expect(buildingAt(sim.state.buildings, 300, 300)).toBe(first)
+  })
+
+  it('rejects building on impassable (water) terrain, but allows cosmetic ground', async () => {
+    const sim = await bootstrapSim(1, { startScene: false })
+    // The content's water terrain is registered as build-blocking even with no scene painted.
+    expect(sim.state.blockingTerrain.has(terrainTypeOf('terrain.water'))).toBe(true)
+    // Paint one water tile and one cosmetic (non-blocking) tile by hand.
+    sim.state.terrain.set(tileKey(300, 300), terrainTypeOf('terrain.water'))
+    sim.state.terrain.set(tileKey(310, 300), terrainTypeOf('terrain.rock'))
+    // On water: dropped (no building registered on the tile).
+    placeSink(sim, 300, 300)
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(buildingAt(sim.state.buildings, 300, 300)).toBe(-1)
+    // On cosmetic ground (rock): placed like open ground.
+    placeSink(sim, 310, 300)
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(buildingAt(sim.state.buildings, 310, 300)).toBeGreaterThanOrEqual(0)
+  })
+
+  it('rejects a belt run that would cross water (nothing builds on it)', async () => {
+    const sim = await bootstrapSim(1, { startScene: false })
+    // One water tile straddling a belt's path.
+    sim.state.terrain.set(tileKey(302, 300), terrainTypeOf('terrain.water'))
+    enqueuePlaceBelt(sim.world, {
+      ax: 300,
+      ay: 300,
+      bx: 305,
+      by: 300,
+      color: 0x404040,
+      moveEvery: 1,
+    })
+    sim.scheduler.runTicks(sim.world, 1)
+    // The whole run is rejected — not one tile of it (including the dry ones) is laid.
+    for (let x = 300; x <= 305; x++) expect(sim.state.grid.index.has(tileKey(x, 300))).toBe(false)
+    // A run clear of the water lays normally.
+    enqueuePlaceBelt(sim.world, {
+      ax: 300,
+      ay: 305,
+      bx: 303,
+      by: 305,
+      color: 0x404040,
+      moveEvery: 1,
+    })
+    sim.scheduler.runTicks(sim.world, 1)
+    expect(sim.state.grid.index.has(tileKey(301, 305))).toBe(true)
   })
 
   it('rejects a 2×2 building overlapping an existing footprint by a single corner', async () => {
     const sim = await bootstrapSim(1)
-    placeSink(sim, 30, 30, 2, 2) // covers (30,30)…(31,31)
+    placeSink(sim, 300, 300, 2, 2) // covers (300,300)…(301,301)
     sim.scheduler.runTicks(sim.world, 1)
     const count = sim.state.buildings.count
-    placeSink(sim, 31, 31, 2, 2) // its top-left corner lands on the first's bottom-right — blocked
+    placeSink(sim, 301, 301, 2, 2) // its top-left corner lands on the first's bottom-right — blocked
     sim.scheduler.runTicks(sim.world, 1)
     expect(sim.state.buildings.count).toBe(count)
-    expect(buildingAt(sim.state.buildings, 32, 32)).toBe(-1) // nothing spilled onto the new tiles
+    expect(buildingAt(sim.state.buildings, 302, 302)).toBe(-1) // nothing spilled onto the new tiles
   })
 
   it('rejects a building placed on a belt tile', async () => {
