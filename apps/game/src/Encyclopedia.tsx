@@ -6,6 +6,7 @@ import {
   type EncyclopediaFlow,
 } from './encyclopedia.ts'
 import { Icon } from './Icon.tsx'
+import { useModal } from './modalStore.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
 import { formatRate } from './rates.ts'
 import { priceForColor } from './resources.ts'
@@ -89,6 +90,9 @@ export function Encyclopedia(): React.JSX.Element {
   )
   const [query, setQuery] = useState('')
 
+  // The `E` toggle stays local; Esc-to-close is owned by the central modal stack (modalStore), which
+  // runs before the search input's focus can swallow the key.
+  useModal('encyclopedia', open, () => encyclopediaStore.close())
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -96,13 +100,11 @@ export function Encyclopedia(): React.JSX.Element {
       if (e.key === 'e' || e.key === 'E') {
         e.preventDefault()
         encyclopediaStore.toggle()
-      } else if (e.key === 'Escape' && open) {
-        encyclopediaStore.close()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [])
 
   const q = query.trim().toLowerCase()
   const shown = useMemo(() => bySearch(entries, q), [q, entries])

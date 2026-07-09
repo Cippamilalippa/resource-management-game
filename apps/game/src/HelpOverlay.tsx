@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Icon } from './Icon.tsx'
+import { useModal } from './modalStore.ts'
 
 /** Shortcut groups shown in the help panel — a readable replacement for the old run-on hint line. */
 const GROUPS: readonly { readonly title: string; readonly keys: readonly [string, string][] }[] = [
@@ -60,6 +61,8 @@ const GROUPS: readonly { readonly title: string; readonly keys: readonly [string
 export function HelpOverlay(): React.JSX.Element {
   const [open, setOpen] = useState(false)
 
+  // `?` toggles; Esc-to-close is owned by the central modal stack (modalStore).
+  useModal('help', open, () => setOpen(false))
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -67,13 +70,11 @@ export function HelpOverlay(): React.JSX.Element {
       if (e.key === '?') {
         e.preventDefault()
         setOpen((v) => !v)
-      } else if (e.key === 'Escape' && open) {
-        setOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [])
 
   return (
     <>

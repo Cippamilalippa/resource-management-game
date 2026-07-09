@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { blueprintStore } from './blueprintStore.ts'
 import { Icon } from './Icon.tsx'
+import { useModal } from './modalStore.ts'
 
 /**
  * The blueprint library overlay: the persistent catalogue of saved blueprints (localStorage-backed),
@@ -22,15 +23,11 @@ export function BlueprintLibrary(): React.JSX.Element | null {
   // The naming prompt takes over whenever a save-to-library capture is awaiting a name.
   const naming = clip.naming
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      if (naming) blueprintStore.cancelNaming()
-      else if (clip.libraryOpen) blueprintStore.closeLibrary()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [naming, clip.libraryOpen])
+  // Esc-to-close for both surfaces is owned by the central modal stack (modalStore) — critical for the
+  // naming prompt, whose autofocused text field used to swallow the key. Naming registers last so it
+  // sits on top of the catalogue and Esc peels it first.
+  useModal('bp-library', clip.libraryOpen, () => blueprintStore.closeLibrary())
+  useModal('bp-naming', naming !== null, () => blueprintStore.cancelNaming())
 
   if (naming) {
     return (

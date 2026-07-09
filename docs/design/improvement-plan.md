@@ -248,28 +248,31 @@ The plan below is ordered around fixing those five things.
 > `window.factory` bridge with the real merged content) and screenshotted through the
 > main flows after the first ~20 plan items merged. Bugs first, then improvements.
 
-- [ ] **UX1. Central hotkey + modal manager (fixes a real focus trap).** ★★★ / M —
-      Opening the encyclopedia autofocuses its search box; while ANY input has focus every
-      global key handler bails — including Escape — so the modal can't be closed by
-      keyboard and every subsequent hotkey (`P`, `O`, `M`, digits…) types into the search
-      instead. The Settings modal has the same Esc gap, while F10 (save menu) ignores the
-      typing guard entirely and opens OVER other modals. Each panel adds its own window
-      keydown listener today. Fix: one hotkey registry with a modal stack — Esc always
-      closes the topmost modal (handled before the input guard), hotkeys are uniformly
-      suppressed while a modal is open or an input focused, and one listener replaces the
-      scattered ones. This is also the missing foundation for the deferred key rebinding
-      (X1 stretch).
+- [x] **UX1. Central modal stack (fixes a real focus trap).** ★★★ / M — _Shipped: a new
+      [modalStore.ts](../../apps/game/src/modalStore.ts) holds an ordered stack of open modals; each
+      registers via a `useModal(id, open, close)` hook (Encyclopedia, Stats, Settings, Help, Map,
+      SaveMenu, Blueprint library + naming prompt, Victory). One capture-phase Esc handler
+      (`installModalEscape`, installed once in the boot loop) closes the topmost modal **before** any
+      focused input can swallow the key and `stopImmediatePropagation`s the build-tool deselect — so a
+      search box no longer traps Esc, and F10/other modals now peel off the stack one Esc at a time.
+      The per-panel window Esc listeners are gone (toggle keys stay). Covered by
+      [modalStore.test.ts](../../apps/game/tests/modalStore.test.ts)._ The remaining stretch —
+      uniformly suppressing feature hotkeys while a modal is open, and the shared registry as the
+      foundation for key rebinding (X1) — is still open; the Esc trap (the actual bug) is fixed.
 - [ ] **UX2. Consolidate the bottom-right toolbar.** ★★☆ / S — Seven absolutely-positioned
       buttons (Stats / Settings / Map / Detail / Status / Recipes / Controls) grew one per
       feature at hand-tuned `right:` offsets; they collided three times during merges and
       at 1600px the row overlaps the build bar's search input. Replace with one flex
       toolbar component (auto layout, shared styling, tooltips, active states) that the
       build bar reserves space for.
-- [ ] **UX3. Don't open on "Village declining ×2".** ★★★ / S — The two new settlements
-      start starving at tick 0, so the first thing a new player sees is a red alert stack
-      they can't act on for an hour. Give settlements a decline grace period (no decline
-      timer/alert until the settlement has been fed at least once, or for the first N
-      minutes), and/or a small starter buffer like the Spaceport's kit.
+- [x] **UX3. Don't open on "Village declining ×2".** ★★★ / S — _Shipped: every settlement gets a
+      per-village startup grace (`VILLAGE_DECLINE_GRACE`, 5 in-game min) during which decline neither
+      accrues nor raises the "declining" alert; the window ends the first cadence the village is fully
+      supplied, or when it elapses, whichever comes first. A `graceTimer` counter carries the remaining
+      grace across saves (additive — legacy saves load as 0, i.e. no grace, correct for a running
+      world). Determinism + round-trip + behaviour covered in
+      [village.test.ts](../../apps/headless/tests/village.test.ts); `pnpm headless 99 750` → `7143cef0`
+      across runs._ The two new settlements no longer starve visibly at tick 0.
 - [ ] **UX4. Label the world.** ★★☆ / S–M — Deposits render as anonymous flat colour
       rects; nothing on screen says which is bauxite vs coal without hovering each tile.
       Extend the detail overlay (Alt) to stamp terrain patches with their resource icon +

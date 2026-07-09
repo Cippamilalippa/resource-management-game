@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { mapModeStore } from './mapModeStore.ts'
 import { appStore } from './appStore.ts'
 import { Icon } from './Icon.tsx'
+import { useModal } from './modalStore.ts'
 
 /**
  * Floating toggle for the full-screen map view (Factorio's `M`, and a button near the minimap). The
@@ -15,6 +16,8 @@ import { Icon } from './Icon.tsx'
 export function MapView(): React.JSX.Element {
   const { on } = useSyncExternalStore(mapModeStore.subscribe, mapModeStore.get, mapModeStore.get)
 
+  // `M` toggles; Esc-to-leave is owned by the central modal stack (modalStore).
+  useModal('map', on, () => mapModeStore.set(false))
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -24,10 +27,6 @@ export function MapView(): React.JSX.Element {
         if (appStore.get().phase !== 'playing') return
         e.preventDefault()
         mapModeStore.toggle()
-      } else if (e.key === 'Escape' && mapModeStore.get().on) {
-        // Esc leaves the map (and wins over the build-tool deselect, which does nothing here).
-        e.preventDefault()
-        mapModeStore.set(false)
       }
     }
     window.addEventListener('keydown', onKey)

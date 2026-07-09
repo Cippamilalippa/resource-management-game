@@ -1,7 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { hashState } from '@factory/engine/persistence'
 import { bootstrapSim, type Sim } from '../bootstrap.ts'
-import { MAX_SLOTS, buildingAt, villageStageAt } from '../gameLogic.ts'
+import {
+  MAX_SLOTS,
+  buildingAt,
+  villageStageAt,
+  collectAlerts,
+  serializeGameState,
+  VILLAGE_DECLINE_GRACE,
+  VILLAGE_CADENCE,
+} from '../gameLogic.ts'
 
 /**
  * The starting scene registers the Spaceport anchored at (-1, -1) with its footprint covering the
@@ -144,6 +152,83 @@ describe('village growth / decline', () => {
 })
 
 /**
+ * UX3 — startup grace. A freshly-founded settlement has an empty buffer, so without a grace window it
+ * would begin declining (and raise the "village declining" alert) from tick 0 — before a player could
+ * plausibly route supply to it. Grace suppresses decline until the settlement is first fully supplied
+ * or the window elapses, whichever comes first. Indices: 0 = Spaceport (origin, has a starter kit),
+ * 1 = Mining Camp, 2 = Research Colony — the latter two spawn unsupplied.
+ */
+describe('village startup grace (UX3)', () => {
+  /** Fill every current-stage demand of village `i` to `n` in its own buffer. */
+  function feedVillage(sim: Sim, i: number, n: number): void {
+    const v = sim.state.villages
+    const b = buildingAt(sim.state.buildings, v.vx[i]!, v.vy[i]!)
+    for (const dem of v.ladders[i]![v.stage[i]!]!.demands) {
+      setBufferOf(sim, b, dem.color, n)
+    }
+  }
+
+  it('an unsupplied new settlement neither declines nor alerts during grace', async () => {
+    const sim = await bootstrapSim(1)
+    const v = sim.state.villages
+    // Well past the old 600-tick decline threshold: with grace, the two new unsupplied settlements
+    // (Mining Camp, Research Colony — no starter kit, unlike the origin Spaceport) still show no
+    // decline and raise no "declining" alert the player can't act on.
+    sim.scheduler.runTicks(sim.world, 700)
+    const declining = collectAlerts(sim.state).filter((a) => a.kind === 'village_declining')
+    for (const i of [1, 2]) {
+      expect(v.declineTimer[i]).toBe(0)
+      expect(v.graceTimer[i]).toBeGreaterThan(0)
+      expect(v.graceTimer[i]).toBeLessThan(VILLAGE_DECLINE_GRACE)
+      // The settlement's anchor never appears in the alert stack while it is within grace.
+      expect(declining.some((a) => a.x === v.vx[i]! && a.y === v.vy[i]!)).toBe(false)
+    }
+  })
+
+  it('decline resumes once the grace window has elapsed', async () => {
+    const sim = await bootstrapSim(1)
+    const v = sim.state.villages
+    // Fast-forward the Mining Camp past its grace window, leaving its buffer empty.
+    v.graceTimer[1] = 0
+    v.declineTimer[1] = 0
+    sim.scheduler.runTicks(sim.world, 200)
+    expect(v.declineTimer[1]).toBeGreaterThan(0)
+    expect(collectAlerts(sim.state).some((a) => a.kind === 'village_declining')).toBe(true)
+  })
+
+  it('the first full supply ends grace immediately', async () => {
+    const sim = await bootstrapSim(1)
+    const v = sim.state.villages
+    expect(v.graceTimer[1]).toBe(VILLAGE_DECLINE_GRACE)
+    feedVillage(sim, 1, 100_000)
+    // One cadence of full supply clears the grace window (and starts the growth timer instead).
+    sim.scheduler.runTicks(sim.world, VILLAGE_CADENCE + 1)
+    expect(v.graceTimer[1]).toBe(0)
+    expect(v.declineTimer[1]).toBe(0)
+  })
+
+  it('is deterministic and carries the remaining grace into a save', async () => {
+    const run = async (): Promise<Sim> => {
+      const sim = await bootstrapSim(4)
+      sim.scheduler.runTicks(sim.world, 300)
+      return sim
+    }
+    const a = await run()
+    const b = await run()
+    expect(hashState(a.world)).toBe(hashState(b.world))
+    // Grace burned down but is still active, and it is serialized (so the window survives a save).
+    const snap = serializeGameState(a.state)
+    for (let i = 0; i < a.state.villages.count; i++) {
+      expect(a.state.villages.graceTimer[i]).toBe(b.state.villages.graceTimer[i])
+    }
+    const camp = snap.villages.entries[1]!
+    expect(camp.graceTimer).toBe(a.state.villages.graceTimer[1])
+    expect(camp.graceTimer).toBeGreaterThan(0)
+    expect(camp.graceTimer).toBeLessThan(VILLAGE_DECLINE_GRACE)
+  })
+})
+
+/**
  * G3 — multiple settlements with distinct demand ladders. The abundant scenario spawns the
  * Spaceport at the origin, a Mining Camp at mid distance (Chebyshev 22–30) and a Research Colony
  * farther out (40–52), each registered with its OWN stage ladder. Registration order follows the
@@ -188,10 +273,12 @@ describe('multiple settlements', () => {
     // Feed the camp; leave the colony starved. (The Spaceport lives off its starting kit.)
     setBufferOf(sim, campB, campGood, 100_000)
     sim.scheduler.runTicks(sim.world, 700)
-    // The fed camp grew; the starved colony stayed floored at stage 0, accruing decline.
+    // The fed camp grew (its grace cleared on first supply); the starved colony stayed floored at
+    // stage 0. Its decline is still held off by the UX3 startup grace, so it accrues none yet.
     expect(v.stage[1]).toBe(1)
     expect(v.stage[2]).toBe(0)
-    expect(v.declineTimer[2]).toBeGreaterThan(0)
+    expect(v.declineTimer[2]).toBe(0)
+    expect(v.graceTimer[2]).toBeGreaterThan(0)
     // Now cut the camp off: its stage-1 demands go unmet, so IT declines while nothing else moves
     // up. (Zero the whole buffer, not just one good.)
     setBufferOf(sim, campB, campGood, 0)

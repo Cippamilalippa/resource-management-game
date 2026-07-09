@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { victoryStore } from './victoryStore.ts'
 import { appStore } from './appStore.ts'
+import { useModal } from './modalStore.ts'
 
 /** Format seconds as `h:mm:ss` (or `m:ss` under an hour) for the win-screen play-time stat. */
 function formatDuration(seconds: number): string {
@@ -32,6 +33,9 @@ function Stat({ value, label }: { value: string; label: string }): React.JSX.Ele
  */
 export function VictoryScreen(): React.JSX.Element | null {
   const victory = useSyncExternalStore(victoryStore.subscribe, victoryStore.get, victoryStore.get)
+  // Esc dismisses the win screen (keep playing) via the central modal stack (modalStore). Registered
+  // before the early return so the hook order stays stable.
+  useModal('victory', victory.modalOpen, () => victoryStore.set({ modalOpen: false }))
   if (!victory.modalOpen || victory.stats === null) return null
   const s = victory.stats
 

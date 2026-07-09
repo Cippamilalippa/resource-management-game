@@ -4,6 +4,7 @@ import { saveStore } from './saveStore.ts'
 import { appStore } from './appStore.ts'
 import { formatPlayTime } from './saveFormat.ts'
 import { Icon } from './Icon.tsx'
+import { useModal } from './modalStore.ts'
 import type { SaveMeta } from '../electron/preload.ts'
 
 /** Human label for a slot's origin, shown as a small badge. */
@@ -94,6 +95,9 @@ export function SaveMenu(): React.JSX.Element | null {
   // Opened from the main menu (no live session) the save-only actions are meaningless — show just
   // the slot list to load from. In-game, the full save/quicksave/named-save surface is available.
   const playing = app.phase === 'playing'
+
+  // Esc-to-close is owned by the central modal stack (modalStore); F10 still toggles from the boot loop.
+  useModal('save-menu', state.open, () => controller?.close())
 
   const toast = state.toast ? <div className="save-toast">{state.toast}</div> : null
   if (!state.open) return toast

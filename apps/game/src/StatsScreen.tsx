@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { statsHistory, mean, trendDirection, type StatsWindow, type Trend } from './statsHistory.ts'
 import { resourceByColor } from './resources.ts'
 import { Icon, type IconName } from './Icon.tsx'
+import { useModal } from './modalStore.ts'
 import { ResourceLabel } from './ResourceLabel.tsx'
 
 /** A packed 0xRRGGBB colour as a CSS hex string. */
@@ -225,6 +226,8 @@ export function StatsScreen(): React.JSX.Element {
     statsHistory.getVersion,
   )
 
+  // `P` toggles; Esc-to-close is owned by the central modal stack (modalStore).
+  useModal('stats', open, () => setOpen(false))
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -232,13 +235,11 @@ export function StatsScreen(): React.JSX.Element {
       if (e.key === 'p' || e.key === 'P') {
         e.preventDefault()
         setOpen((v) => !v)
-      } else if (e.key === 'Escape' && open) {
-        setOpen(false)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [])
 
   const onSort = (col: SortKey): void => {
     if (sortKey === col) {

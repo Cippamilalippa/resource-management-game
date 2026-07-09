@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useSyncExternalStore } from 'react'
+import { useModal } from './modalStore.ts'
 import {
   settingsStore,
   AUTOSAVE_OPTIONS,
@@ -97,6 +98,8 @@ function Toggle({
 export function SettingsMenu(): React.JSX.Element | null {
   const s = useSyncExternalStore(settingsStore.subscribe, settingsStore.get, settingsStore.get)
 
+  // `O` toggles; Esc-to-close is owned by the central modal stack (modalStore).
+  useModal('settings', s.open, () => settingsStore.close())
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const t = e.target as HTMLElement | null
@@ -104,9 +107,6 @@ export function SettingsMenu(): React.JSX.Element | null {
       if ((e.key === 'o' || e.key === 'O') && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault()
         settingsStore.toggle()
-      } else if (e.key === 'Escape' && settingsStore.get().open) {
-        e.preventDefault()
-        settingsStore.close()
       }
     }
     window.addEventListener('keydown', onKey)

@@ -26,6 +26,7 @@ import { overlayStore } from './overlayStore.ts'
 import { detailOverlayStore } from './detailOverlayStore.ts'
 import { collectDetailMarks } from './detailOverlay.ts'
 import { mapModeStore } from './mapModeStore.ts'
+import { installModalEscape } from './modalStore.ts'
 import type { AlertKind } from './gameLogic.ts'
 
 /** Status-overlay marker colour per alert kind (starved = orange, backed up = amber, etc.). */
@@ -886,10 +887,15 @@ async function boot(): Promise<void> {
     }
   })
 
+  // One capture-phase Esc handler closes the topmost open modal before any focused input (e.g. a
+  // modal's search box) can swallow the key — the fix for the old per-modal listeners that each
+  // bailed on input focus. When no modal is open, Esc falls through to BuildBar (tool deselect).
+  installModalEscape()
+
   // Global hotkeys: F5 quicksave, F9 quickload, F10 toggles the save overlay. Esc is reserved for
-  // deselecting a build tool (owned by BuildBar) — here it only *closes* the overlay if it is open,
-  // never opens it, so it stays free to deselect. Ignored while typing in a field (e.g. the
-  // save-name input) so the keys reach the input instead.
+  // deselecting a build tool (owned by BuildBar); the save overlay is closed by the central modal
+  // handler above. Ignored while typing in a field (e.g. the save-name input) so the keys reach the
+  // input instead.
   globalThis.addEventListener('keydown', (e) => {
     const target = e.target as HTMLElement | null
     const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
@@ -933,13 +939,10 @@ async function boot(): Promise<void> {
       if (appStore.get().phase !== 'playing') return
       if (saveStore.get().open) controller.close()
       else controller.open()
-    } else if (e.key === 'Escape' && !typing) {
-      // Close the overlay if it's open; otherwise leave Esc to BuildBar (deselect the build tool).
-      if (appStore.get().phase === 'playing' && saveStore.get().open) {
-        e.preventDefault()
-        controller.close()
-      }
     }
+    // Esc is handled centrally by installModalEscape() (capture phase): it closes the topmost open
+    // modal — including the save overlay — before any focused input can swallow it. When no modal is
+    // open, Esc falls through to BuildBar (deselect the build tool).
   })
 
   // Fixed-tick sim driven by real frame time; render interpolates with `alpha`.

@@ -1105,6 +1105,15 @@ export const VILLAGE_TICKS_PER_MIN = 3600
 export const VILLAGE_GROWTH_AFTER = 600
 /** Sustained cadences of unmet demand before a village drops a stage (10s at 60 tps). */
 export const VILLAGE_DECLINE_AFTER = 600
+/**
+ * Startup grace, in ticks, granted to every newly-founded village: a fresh settlement's buffer is
+ * empty, so without this it would "decline" (and raise the declining alert) from tick 0 — long before
+ * a player could plausibly route supply to it. During the grace window decline neither accrues nor
+ * alerts; the window ends on the first cadence the village is fully supplied, or when it elapses,
+ * whichever comes first. Five in-game minutes at 60 tps. Not serialized as a knob — a per-village
+ * countdown carries the remaining grace across saves.
+ */
+export const VILLAGE_DECLINE_GRACE = 5 * VILLAGE_TICKS_PER_MIN
 /** Max demands a single stage may carry — sizes the per-village fractional-demand accumulators. */
 export const MAX_VILLAGE_DEMANDS = 8
 
@@ -1147,6 +1156,12 @@ export interface VillageStore {
   /** Cadences of sustained unmet demand (toward decline). */
   declineTimer: Int32Array
   /**
+   * Remaining startup-grace ticks per village (see {@link VILLAGE_DECLINE_GRACE}). While positive,
+   * decline is suppressed and the declining alert stays silent; it counts down each cadence and is
+   * cleared the first time the village is fully supplied. Serialized so the window survives a save.
+   */
+  graceTimer: Int32Array
+  /**
    * Per-village fractional-demand accumulators, flat `[village * MAX_VILLAGE_DEMANDS + demand]`, in
    * units of "unit·ticks": each cadence a demand accrues `ratePerMin * VILLAGE_CADENCE`, and every
    * whole {@link VILLAGE_TICKS_PER_MIN} accrued is one integer unit due. This is what lets a demand
@@ -1173,6 +1188,7 @@ export function createVillageStore(): VillageStore {
     stage: new Int32Array(cap),
     growthTimer: new Int32Array(cap),
     declineTimer: new Int32Array(cap),
+    graceTimer: new Int32Array(cap),
     demandAcc: new Int32Array(cap * MAX_VILLAGE_DEMANDS),
     timer: 0,
     ladders: [],
@@ -1195,6 +1211,7 @@ export function registerVillage(
     v.stage = grow(v.stage, next, 0)
     v.growthTimer = grow(v.growthTimer, next, 0)
     v.declineTimer = grow(v.declineTimer, next, 0)
+    v.graceTimer = grow(v.graceTimer, next, 0)
     v.demandAcc = grow(v.demandAcc, next * MAX_VILLAGE_DEMANDS, 0)
   }
   const i = v.count++
@@ -1203,6 +1220,7 @@ export function registerVillage(
   v.stage[i] = 0
   v.growthTimer[i] = 0
   v.declineTimer[i] = 0
+  v.graceTimer[i] = VILLAGE_DECLINE_GRACE
   v.ladders[i] = stages
   for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++) v.demandAcc[i * MAX_VILLAGE_DEMANDS + d] = 0
   return i
@@ -1300,8 +1318,16 @@ function updateVillages(state: GameState): void {
       }
     }
     if (allMet) {
+      // First full supply ends the startup grace: from here the village declines normally if starved.
+      v.graceTimer[i] = 0
       v.declineTimer[i] = 0
       v.growthTimer[i] = v.growthTimer[i]! + VILLAGE_CADENCE
+    } else if (v.graceTimer[i]! > 0) {
+      // Still within startup grace: burn it down but neither accrue decline nor raise the alert, so a
+      // just-founded settlement doesn't nag before the player can plausibly route supply to it.
+      v.graceTimer[i] = Math.max(0, v.graceTimer[i]! - VILLAGE_CADENCE)
+      v.growthTimer[i] = 0
+      v.declineTimer[i] = 0
     } else {
       v.growthTimer[i] = 0
       v.declineTimer[i] = v.declineTimer[i]! + VILLAGE_CADENCE
@@ -2114,6 +2140,11 @@ export interface VillageEntrySnapshot {
   readonly stage: number
   readonly growthTimer: number
   readonly declineTimer: number
+  /**
+   * Remaining startup-grace ticks (see {@link VILLAGE_DECLINE_GRACE}). Absent in pre-grace saves →
+   * loads as 0, i.e. no grace, which is correct for an already-running world.
+   */
+  readonly graceTimer?: number
   /** Per-demand accumulators (length {@link MAX_VILLAGE_DEMANDS}) so consumption resumes exactly. */
   readonly demandAcc: readonly number[]
   /**
@@ -2282,6 +2313,7 @@ export function serializeGameState(state: GameState): GameStateSnapshot {
       stage: v.stage[i]!,
       growthTimer: v.growthTimer[i]!,
       declineTimer: v.declineTimer[i]!,
+      graceTimer: v.graceTimer[i]!,
       demandAcc,
       // Each village carries its own ladder, so the snapshot stores it per entry (distinct
       // settlements have distinct ladders — no single shared one to reference).
@@ -2469,6 +2501,8 @@ export function loadGameState(
     v.stage[idx] = entry.stage
     v.growthTimer[idx] = entry.growthTimer
     v.declineTimer[idx] = entry.declineTimer
+    // Pre-grace saves omit graceTimer → 0 (no grace), correct for an already-running world.
+    v.graceTimer[idx] = entry.graceTimer ?? 0
     const acc = entry.demandAcc ?? []
     for (let d = 0; d < MAX_VILLAGE_DEMANDS; d++) {
       v.demandAcc[idx * MAX_VILLAGE_DEMANDS + d] = acc[d] ?? 0
